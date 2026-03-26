@@ -152,8 +152,8 @@ graph TD
 ### 1. Clone the repository
 
 ```bash
-git clone https://github.com/abiosoft/colima.git
-cd colima/colima-ui
+git clone https://github.com/vnknowledge2014/colima-ui.git
+cd colima-ui
 ```
 
 ### 2. Install dependencies
@@ -318,7 +318,7 @@ Please follow [Conventional Commits](https://www.conventionalcommits.org/) for c
 
 ## 📄 License
 
-This project is part of the [Colima](https://github.com/abiosoft/colima) ecosystem.
+MIT License. This project is part of the [Colima](https://github.com/abiosoft/colima) ecosystem.
 
 ---
 
