@@ -34,7 +34,11 @@ pub struct VolumeInspect {
 }
 
 fn docker_cmd() -> Command {
-    Command::new("docker")
+    let mut cmd = Command::new("docker");
+    if let Some(host) = crate::path_util::detect_docker_host() {
+        cmd.env("DOCKER_HOST", host);
+    }
+    cmd
 }
 
 /// List all Docker volumes

@@ -7,6 +7,22 @@ use std::sync::Arc;
 use tauri::{AppHandle, Emitter};
 use tokio::sync::RwLock;
 
+/// Connect to Docker via the Colima socket.
+/// This is essential because macOS .app bundles don't inherit DOCKER_HOST,
+/// and Colima doesn't create /var/run/docker.sock (which Bollard defaults to).
+fn connect_bollard() -> Option<Docker> {
+    // Try Colima socket detection first
+    if let Some(host) = crate::path_util::detect_docker_host() {
+        // host is like "unix:///Users/mike/.colima/default/docker.sock"
+        let socket_path = host.trim_start_matches("unix://");
+        if let Ok(d) = Docker::connect_with_unix(socket_path, 5, bollard::API_DEFAULT_VERSION) {
+            return Some(d);
+        }
+    }
+    // Fallback to defaults (works if /var/run/docker.sock exists or DOCKER_HOST is set)
+    Docker::connect_with_defaults().ok()
+}
+
 pub struct DockerState {
     pub docker: Option<Docker>,
     pub containers_cache: Vec<serde_json::Value>,
@@ -17,7 +33,7 @@ impl DockerState {
     /// Creates a new DockerState. Never panics — if Docker is unavailable,
     /// `docker` is `None` and caches start empty.
     pub fn new() -> Self {
-        let docker = Docker::connect_with_defaults().ok();
+        let docker = connect_bollard();
         if docker.is_none() {
             eprintln!("[DockerState] Docker daemon not reachable — starting with empty state");
         }
@@ -39,9 +55,9 @@ impl DockerState {
 /// Push-based (no polling) — same approach as OrbStack.
 pub async fn start_docker_watcher(app: AppHandle, state: Arc<RwLock<DockerState>>) {
     loop {
-        // Try to connect (or reconnect) to Docker daemon
-        let docker = match Docker::connect_with_defaults() {
-            Ok(d) => {
+        // Try to connect (or reconnect) to Docker daemon via Colima socket
+        let docker = match connect_bollard() {
+            Some(d) => {
                 // Verify connection is actually alive with a ping
                 if d.ping().await.is_err() {
                     tokio::time::sleep(std::time::Duration::from_secs(2)).await;
@@ -50,7 +66,7 @@ pub async fn start_docker_watcher(app: AppHandle, state: Arc<RwLock<DockerState>
                 eprintln!("[DockerWatcher] Connected to Docker daemon");
                 d
             }
-            Err(_) => {
+            None => {
                 tokio::time::sleep(std::time::Duration::from_secs(2)).await;
                 continue;
             }
