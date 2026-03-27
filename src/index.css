@@ -547,6 +547,7 @@ body {
 
 .vtable-row.selected {
   background: rgba(88, 166, 255, 0.06);
+  border-left: 2px solid var(--accent-blue);
 }
 
 .vtable-cell {
@@ -558,6 +559,13 @@ body {
   text-overflow: ellipsis;
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
+}
+
+/* Checkbox cells: prevent ellipsis, reduce padding */
+.vtable-cell:first-child {
+  overflow: visible;
+  text-overflow: clip;
+  padding: 12px 8px;
 }
 
 /* ===== Context Menu ===== */
