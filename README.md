@@ -13,7 +13,7 @@
   <img src="https://img.shields.io/badge/Tauri-v2-orange" alt="Tauri v2" />
   <img src="https://img.shields.io/badge/React-19-61dafb" alt="React 19" />
   <img src="https://img.shields.io/badge/Rust-Edition%202021-dea584" alt="Rust" />
-  <img src="https://img.shields.io/badge/platform-macOS-lightgrey" alt="macOS" />
+  <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey" alt="Cross-platform" />
 </p>
 
 ---
@@ -170,8 +170,7 @@ ColimaUI uses a **push-first architecture** for real-time state synchronization:
 
 ## 📦 Prerequisites
 
-- **macOS** (primary platform)
-- **[Colima](https://github.com/abiosoft/colima)** — Container runtime manager
+- **[Colima](https://github.com/abiosoft/colima)** — Container runtime manager (macOS / Linux)
 - **[Docker CLI](https://docs.docker.com/engine/install/)** — Container engine client
 - **[Lima](https://lima-vm.io/)** — Linux VM manager (installed with Colima)
 - **[Node.js](https://nodejs.org/) ≥ 18** — For frontend development
@@ -179,6 +178,8 @@ ColimaUI uses a **push-first architecture** for real-time state synchronization:
 - **[kubectl](https://kubernetes.io/docs/tasks/tools/)** *(optional)* — For Kubernetes features
 - **[Kind](https://kind.sigs.k8s.io/)** *(optional)* — For Kind cluster management
 - **[Ollama](https://ollama.ai/)** *(optional)* — For local AI model management
+
+> **Note:** The desktop app (Tauri) runs on **macOS, Linux, and Windows**. The web mode runs on any platform with a modern browser.
 
 ---
 
