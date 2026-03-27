@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useDeferredValue } from "react";
 import { volumesApi } from "../lib/api";
 import { ConfirmDialog, useConfirm } from "../components/ConfirmDialog";
 import { BroomIcon, WarningIcon } from "../components/Icons";
+import { formatVolumeName } from "../lib/formatters";
 import { useAtom } from "jotai";
 import { volumesAtom, volumesLoadingAtom } from "../store/resourceAtom";
 
@@ -228,8 +229,18 @@ export default function Volumes(_props: VolumesProps) {
                   <input type="checkbox" checked={selected.has(vol.Name)} onChange={() => toggleSelect(vol.Name)}
                     style={{ accentColor: "var(--accent-blue)", cursor: "pointer" }} />
                   <div>
-                    <div style={{ fontWeight: 600, fontSize: "var(--text-base)" }}>{vol.Name}</div>
-                  <div style={{ color: "var(--text-muted)", fontSize: "var(--text-sm)", marginTop: "4px" }}>
+                    {(() => {
+                      const { display, isHash } = formatVolumeName(vol.Name);
+                      return (
+                        <div style={{ fontWeight: 600, fontSize: "var(--text-base)", maxWidth: '500px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={vol.Name}>
+                          {isHash ? (
+                            <span style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-sm)', color: 'var(--text-secondary)' }}>{display}</span>
+                          ) : display}
+                        </div>
+                      );
+                    })()}
+                  <div style={{ color: "var(--text-muted)", fontSize: "var(--text-sm)", marginTop: "4px", maxWidth: '600px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                    title={`Driver: ${vol.Driver}${vol.Scope ? ` · Scope: ${vol.Scope}` : ''}${vol.Mountpoint ? ` · ${vol.Mountpoint}` : ''}`}>
                     Driver: <span style={{ color: "var(--accent-blue)" }}>{vol.Driver}</span>
                     {vol.Scope && <> · Scope: {vol.Scope}</>}
                     {vol.Mountpoint && <> · {vol.Mountpoint}</>}

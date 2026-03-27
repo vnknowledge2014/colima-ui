@@ -516,7 +516,8 @@ function VirtualContainerRows({
                     boxShadow: isRunning && !isPaused ? '0 0 6px var(--status-running)' : 'none',
                     flexShrink: 0,
                   }} />
-                  <span style={{ fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  <span style={{ fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                    title={c.Names}>
                     {c.Names}
                   </span>
                 </div>
@@ -525,12 +526,14 @@ function VirtualContainerRows({
                 {c.Image}
               </div>
               <div className="vtable-cell">
-                <span className={`badge badge-${isPaused ? 'stopped' : isRunning ? 'running' : 'stopped'}`}>
+                <span className={`badge badge-${isPaused ? 'stopped' : isRunning ? 'running' : 'stopped'}`}
+                  title={c.Status}>
                   <span className="badge-dot" />
                   {c.Status}
                 </span>
               </div>
-              <div className="vtable-cell" style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)', color: 'var(--text-muted)' }}>
+              <div className="vtable-cell" style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)', color: 'var(--text-muted)' }}
+                title={c.Ports || ''}>
                 {c.Ports || '—'}
               </div>
               <div className="vtable-cell" onClick={(e) => e.stopPropagation()}>

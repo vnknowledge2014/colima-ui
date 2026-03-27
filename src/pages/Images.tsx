@@ -8,6 +8,7 @@ import { TrashIcon, DownloadIcon, InspectIcon, BroomIcon, TagIcon } from "../com
 import { useVirtualizer } from "@tanstack/react-virtual";
 import ContextMenu, { ContextMenuItem } from "../components/ContextMenu";
 import { useHotkeys } from "../hooks/useHotkeys";
+import { formatTimestamp, formatSize, truncateId } from "../lib/formatters";
 
 /* ===== Virtualized Image Rows ===== */
 function VirtualImageRows({
@@ -65,11 +66,14 @@ function VirtualImageRows({
                     fontSize: 'var(--text-xs)', fontWeight: 500,
                   }}>{img.Tag}</span>
                 </div>
-                <div className="vtable-cell" style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)', color: 'var(--text-muted)' }}>
-                  {img.Id.replace('sha256:', '').substring(0, 12)}
+                <div className="vtable-cell" style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)', color: 'var(--text-muted)' }}
+                  title={img.Id}>
+                  {truncateId(img.Id)}
                 </div>
-                <div className="vtable-cell" style={{ color: 'var(--text-secondary)', fontSize: 'var(--text-sm)' }}>{img.CreatedAt}</div>
-                <div className="vtable-cell" style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-sm)' }}>{img.Size}</div>
+                <div className="vtable-cell" style={{ color: 'var(--text-secondary)', fontSize: 'var(--text-sm)' }}
+                  title={img.CreatedAt}>{formatTimestamp(img.CreatedAt)}</div>
+                <div className="vtable-cell" style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-sm)', fontVariantNumeric: 'tabular-nums' }}
+                  title={img.Size}>{formatSize(img.Size)}</div>
                 <div className="vtable-cell">
                   <div style={{ display: 'flex', gap: 4 }}>
                     <button className="btn btn-ghost" style={{ fontSize: 'var(--text-xs)', padding: '2px 8px' }}
