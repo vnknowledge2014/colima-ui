@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-0.2.0-blue" alt="version" />
+  <img src="https://img.shields.io/badge/version-0.3.0-blue" alt="version" />
   <img src="https://img.shields.io/badge/Tauri-v2-orange" alt="Tauri v2" />
   <img src="https://img.shields.io/badge/React-19-61dafb" alt="React 19" />
   <img src="https://img.shields.io/badge/Rust-Edition%202021-dea584" alt="Rust" />
@@ -150,7 +150,7 @@ ColimaUI uses a **push-first architecture** for real-time state synchronization:
 | `components/` | Shared components (ConfirmDialog, ContextMenu, SetupWizard, GettingStartedTour, Icons) |
 | `store/` | Jotai atomic state — `dockerAtom.ts`, `resourceAtom.ts`, `dashboardAtom.ts`, `k8sAtom.ts` |
 | `hooks/` | Custom hooks — `useHotkeys.ts` |
-| `lib/` | API layer (`api.ts`) with dual-mode Tauri/HTTP support, global toast system (`globalToast.ts`) |
+| `lib/` | API layer (`api.ts`) with dual-mode Tauri/HTTP support, global toast (`globalToast.ts`), display formatters (`formatters.ts`) |
 | `assets/` | Static assets |
 
 ### Backend (`src-tauri/`)
@@ -159,8 +159,8 @@ ColimaUI uses a **push-first architecture** for real-time state synchronization:
 |------|---------|
 | `lib.rs` | Tauri app setup, plugin registration, IPC command handlers |
 | `api_server.rs` | Axum HTTP API server (port 11420) with SSE `/api/events` endpoint and Docker event watcher |
-| `docker_state.rs` | Bollard Docker event stream and container/image state aggregation |
-| `commands/` | Modular command handlers: `colima`, `docker`, `volumes`, `networks`, `compose`, `kubernetes`, `lima`, `models`, `ai_chat`, `system` |
+| `docker_state.rs` | Bollard Docker event stream for real-time push updates (container/image state changes) |
+| `commands/` | Modular CLI-based command handlers: `colima`, `docker` (all operations via Docker CLI), `volumes`, `networks`, `compose`, `kubernetes`, `lima`, `models`, `ai_chat`, `system` |
 | `instance_reader.rs` | Colima instance YAML config parser |
 | `terminal_session.rs` | PTY-based terminal session management for xterm.js |
 | `poller.rs` | Background instance status poller |
