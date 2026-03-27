@@ -132,64 +132,79 @@ pub async fn list_containers(
 
 /// Start a Docker container
 #[tauri::command]
-pub async fn start_container(
-    state: tauri::State<'_, std::sync::Arc<tokio::sync::RwLock<crate::docker_state::DockerState>>>,
-    container_id: String,
-) -> Result<String, String> {
-    let lock = state.read().await;
-    let docker = lock.docker()?;
-    docker
-        .start_container::<String>(&container_id, None)
-        .await
-        .map_err(|e| e.to_string())?;
+pub async fn start_container(container_id: String) -> Result<String, String> {
+    let output = docker_cmd()
+        .args(["start", &container_id])
+        .output()
+        .map_err(|e| format!("Failed to start container: {}", e))?;
+
+    if !output.status.success() {
+        return Err(format!(
+            "docker start failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        ));
+    }
+
     Ok(format!("Container {} started", container_id))
 }
 
 /// Stop a Docker container
 #[tauri::command]
-pub async fn stop_container(
-    state: tauri::State<'_, std::sync::Arc<tokio::sync::RwLock<crate::docker_state::DockerState>>>,
-    container_id: String,
-) -> Result<String, String> {
-    let lock = state.read().await;
-    let docker = lock.docker()?;
-    docker
-        .stop_container(&container_id, None)
-        .await
-        .map_err(|e| e.to_string())?;
+pub async fn stop_container(container_id: String) -> Result<String, String> {
+    let output = docker_cmd()
+        .args(["stop", &container_id])
+        .output()
+        .map_err(|e| format!("Failed to stop container: {}", e))?;
+
+    if !output.status.success() {
+        return Err(format!(
+            "docker stop failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        ));
+    }
+
     Ok(format!("Container {} stopped", container_id))
 }
 
 /// Restart a Docker container
 #[tauri::command]
-pub async fn restart_container(
-    state: tauri::State<'_, std::sync::Arc<tokio::sync::RwLock<crate::docker_state::DockerState>>>,
-    container_id: String,
-) -> Result<String, String> {
-    let lock = state.read().await;
-    let docker = lock.docker()?;
-    docker
-        .restart_container(&container_id, None)
-        .await
-        .map_err(|e| e.to_string())?;
+pub async fn restart_container(container_id: String) -> Result<String, String> {
+    let output = docker_cmd()
+        .args(["restart", &container_id])
+        .output()
+        .map_err(|e| format!("Failed to restart container: {}", e))?;
+
+    if !output.status.success() {
+        return Err(format!(
+            "docker restart failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        ));
+    }
+
     Ok(format!("Container {} restarted", container_id))
 }
 
 /// Remove a Docker container
 #[tauri::command]
-pub async fn remove_container(
-    state: tauri::State<'_, std::sync::Arc<tokio::sync::RwLock<crate::docker_state::DockerState>>>,
-    container_id: String,
-    force: bool,
-) -> Result<String, String> {
-    let lock = state.read().await;
-    let docker = lock.docker()?;
-    let mut options = bollard::container::RemoveContainerOptions::default();
-    options.force = force;
-    docker
-        .remove_container(&container_id, Some(options))
-        .await
-        .map_err(|e| e.to_string())?;
+pub async fn remove_container(container_id: String, force: bool) -> Result<String, String> {
+    let mut args = vec!["rm"];
+    if force {
+        args.push("-f");
+    }
+    args.push(&container_id);
+
+    let output = docker_cmd()
+        .args(&args)
+        .output()
+        .map_err(|e| format!("Failed to remove container: {}", e))?;
+
+    if !output.status.success() {
+        return Err(format!(
+            "docker rm failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        ));
+    }
+
     Ok(format!("Container {} removed", container_id))
 }
 
