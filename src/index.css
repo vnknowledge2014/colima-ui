@@ -416,17 +416,20 @@ body {
 .badge-running {
   background: rgba(63, 185, 80, 0.15);
   color: var(--status-running);
+  border: 1px solid rgba(63, 185, 80, 0.3);
 }
 
 .badge-stopped {
   background: rgba(248, 81, 73, 0.15);
   color: var(--status-stopped);
+  border: 1px solid rgba(248, 81, 73, 0.3);
 }
 
 .badge-starting,
 .badge-stopping {
   background: rgba(210, 153, 34, 0.15);
   color: var(--status-starting);
+  border: 1px solid rgba(210, 153, 34, 0.3);
 }
 
 .badge-broken {
@@ -555,6 +558,7 @@ body {
   font-size: var(--text-sm);
   color: var(--text-primary);
   flex-shrink: 0;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

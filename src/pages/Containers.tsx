@@ -796,7 +796,7 @@ export default function Containers() {
 
         {filtered.length > 0 ? (() => {
           const ROW_H = 48;
-          const COL_W = { check: 36, name: 'minmax(160px,1.5fr)', image: 'minmax(140px,1fr)', status: '140px', ports: 'minmax(120px,1fr)', actions: '180px' };
+          const COL_W = { check: 44, name: 'minmax(160px,1.5fr)', image: 'minmax(140px,1fr)', status: '140px', ports: 'minmax(120px,1fr)', actions: '180px' };
           const gridCols = `${COL_W.check}px ${COL_W.name} ${COL_W.image} ${COL_W.status} ${COL_W.ports} ${COL_W.actions}`;
           return (
           <div className="vtable">
