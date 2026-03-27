@@ -153,6 +153,15 @@ export default function Images() {
     setCtxMenu({ x: e.clientX, y: e.clientY, image: img });
   };
 
+  // Auto-cleanup: remove stale selections when data changes
+  useEffect(() => {
+    setSelected(prev => {
+      const validIds = new Set(images.map(i => i.Id));
+      const next = new Set([...prev].filter(id => validIds.has(id)));
+      return next.size !== prev.size ? next : prev;
+    });
+  }, [images]);
+
   const getCtxItems = (img: DockerImage): ContextMenuItem[] => [
     { label: "Inspect", icon: <InspectIcon size={14} />, action: () => handleInspect(img.Id) },
     { label: "Tag", icon: <TagIcon size={14} />, action: () => { setShowTag(img.Id); setTagTarget(""); } },

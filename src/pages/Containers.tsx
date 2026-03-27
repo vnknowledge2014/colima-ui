@@ -704,6 +704,15 @@ export default function Containers() {
   // Clear selection when filter changes
   useEffect(() => { setSelected(new Set()); }, [filter, searchTerm]);
 
+  // Auto-cleanup: remove stale selections when data changes
+  useEffect(() => {
+    setSelected(prev => {
+      const validIds = new Set(containers.map(c => c.Id));
+      const next = new Set([...prev].filter(id => validIds.has(id)));
+      return next.size !== prev.size ? next : prev;
+    });
+  }, [containers]);
+
   const toggleSelect = (id: string) => setSelected(prev => {
     const next = new Set(prev);
     next.has(id) ? next.delete(id) : next.add(id);

@@ -118,6 +118,15 @@ export default function Networks(_props: NetworksProps) {
 
   useEffect(() => { setSelected(new Set()); }, [search]);
 
+  // Auto-cleanup: remove stale selections when data changes
+  useEffect(() => {
+    setSelected(prev => {
+      const validIds = new Set(networks.map(n => n.Id));
+      const next = new Set([...prev].filter(id => validIds.has(id)));
+      return next.size !== prev.size ? next : prev;
+    });
+  }, [networks]);
+
   const toggleSelect = (id: string) => setSelected(prev => {
     const next = new Set(prev);
     next.has(id) ? next.delete(id) : next.add(id);

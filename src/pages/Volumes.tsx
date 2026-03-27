@@ -101,6 +101,15 @@ export default function Volumes(_props: VolumesProps) {
 
   useEffect(() => { setSelected(new Set()); }, [search]);
 
+  // Auto-cleanup: remove stale selections when data changes
+  useEffect(() => {
+    setSelected(prev => {
+      const validNames = new Set(volumes.map(v => v.Name));
+      const next = new Set([...prev].filter(name => validNames.has(name)));
+      return next.size !== prev.size ? next : prev;
+    });
+  }, [volumes]);
+
   const toggleSelect = (name: string) => setSelected(prev => {
     const next = new Set(prev);
     next.has(name) ? next.delete(name) : next.add(name);
