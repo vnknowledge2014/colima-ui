@@ -27,7 +27,9 @@ export default function Compose() {
 
   useEffect(() => {
     fetchProjects();
-    const interval = setInterval(fetchProjects, 10000);
+    const interval = setInterval(() => {
+      if (document.visibilityState === "visible") fetchProjects();
+    }, 15000);
     return () => clearInterval(interval);
   }, [fetchProjects]);
 

@@ -1,14 +1,125 @@
-import { useState, useEffect, useCallback, Fragment } from "react";
+import { useState, useEffect, useRef, useDeferredValue } from "react";
 import { dockerApi, DockerImage } from "../lib/api";
 import { globalToast } from "../lib/globalToast";
 import { ConfirmDialog, useConfirm } from "../components/ConfirmDialog";
-import { TrashIcon, DownloadIcon, WarningIcon, InspectIcon, BroomIcon, TagIcon } from "../components/Icons";
+import { useAtomValue } from "jotai";
+import { imagesAtom, dockerLoadingAtom } from "../store/dockerAtom";
+import { TrashIcon, DownloadIcon, InspectIcon, BroomIcon, TagIcon } from "../components/Icons";
+import { useVirtualizer } from "@tanstack/react-virtual";
+import ContextMenu, { ContextMenuItem } from "../components/ContextMenu";
+import { useHotkeys } from "../hooks/useHotkeys";
+
+/* ===== Virtualized Image Rows ===== */
+function VirtualImageRows({
+  filteredImages, selected, actionLoading, gridCols, rowHeight, toggleSelect,
+  handleInspect, handleRemove, inspecting, inspectData,
+  showTag, setShowTag, tagTarget, setTagTarget, handleTag, onContextMenu,
+}: {
+  filteredImages: DockerImage[];
+  selected: Set<string>;
+  actionLoading: string | null;
+  gridCols: string;
+  rowHeight: number;
+  toggleSelect: (id: string) => void;
+  handleInspect: (id: string) => void;
+  handleRemove: (id: string, name: string) => void;
+  inspecting: string | null;
+  inspectData: string;
+  showTag: string | null;
+  setShowTag: (id: string | null) => void;
+  tagTarget: string;
+  setTagTarget: (v: string) => void;
+  handleTag: (source: string) => void;
+  onContextMenu: (e: React.MouseEvent, img: DockerImage) => void;
+}) {
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const virtualizer = useVirtualizer({
+    count: filteredImages.length,
+    getScrollElement: () => scrollRef.current,
+    estimateSize: () => rowHeight,
+    overscan: 8,
+  });
+
+  return (
+    <div ref={scrollRef} className="vtable-scroll">
+      <div style={{ height: virtualizer.getTotalSize(), position: 'relative' }}>
+        {virtualizer.getVirtualItems().map((vRow) => {
+          const img = filteredImages[vRow.index];
+          return (
+            <div key={img.Id} style={{ position: 'absolute', top: 0, left: 0, width: '100%', transform: `translateY(${vRow.start}px)` }}>
+              <div
+                className={`vtable-row${selected.has(img.Id) ? ' selected' : ''}`}
+                style={{ display: 'grid', gridTemplateColumns: gridCols, height: rowHeight }}
+                onContextMenu={(e) => onContextMenu(e, img)}
+              >
+                <div className="vtable-cell" style={{ textAlign: 'center' }}>
+                  <input type="checkbox" checked={selected.has(img.Id)} onChange={() => toggleSelect(img.Id)}
+                    style={{ accentColor: 'var(--accent-blue)', cursor: 'pointer' }} />
+                </div>
+                <div className="vtable-cell" style={{ fontWeight: 500 }}>{img.Repository}</div>
+                <div className="vtable-cell">
+                  <span style={{
+                    padding: '2px 8px', borderRadius: 'var(--radius-sm)',
+                    background: img.Tag === 'latest' ? 'rgba(63,185,80,0.1)' : 'rgba(88,166,255,0.1)',
+                    color: img.Tag === 'latest' ? 'var(--accent-green)' : 'var(--accent-blue)',
+                    fontSize: 'var(--text-xs)', fontWeight: 500,
+                  }}>{img.Tag}</span>
+                </div>
+                <div className="vtable-cell" style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)', color: 'var(--text-muted)' }}>
+                  {img.Id.replace('sha256:', '').substring(0, 12)}
+                </div>
+                <div className="vtable-cell" style={{ color: 'var(--text-secondary)', fontSize: 'var(--text-sm)' }}>{img.CreatedAt}</div>
+                <div className="vtable-cell" style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-sm)' }}>{img.Size}</div>
+                <div className="vtable-cell">
+                  <div style={{ display: 'flex', gap: 4 }}>
+                    <button className="btn btn-ghost" style={{ fontSize: 'var(--text-xs)', padding: '2px 8px' }}
+                      onClick={() => handleInspect(img.Id)}>
+                      {inspecting === img.Id ? 'Hide' : <InspectIcon size={12} />}
+                    </button>
+                    <button className="btn btn-ghost" style={{ fontSize: 'var(--text-xs)', padding: '2px 8px' }}
+                      onClick={() => { setShowTag(showTag === img.Id ? null : img.Id); setTagTarget(''); }}>
+                      <TagIcon size={12} />
+                    </button>
+                    <button className="btn btn-ghost" style={{ fontSize: 'var(--text-xs)', padding: '2px 8px', color: 'var(--accent-red)' }}
+                      onClick={() => handleRemove(img.Id, `${img.Repository}:${img.Tag}`)} disabled={actionLoading === img.Id}>
+                      {actionLoading === img.Id ? '...' : <TrashIcon size={12} />}
+                    </button>
+                  </div>
+                </div>
+              </div>
+              {/* Expandable panels */}
+              {showTag === img.Id && (
+                <div style={{ padding: '8px 16px', background: 'var(--bg-secondary)', borderBottom: '1px solid var(--border-subtle)' }}>
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                    <span style={{ fontSize: 'var(--text-sm)', color: 'var(--text-secondary)' }}>Tag {img.Repository}:{img.Tag} as:</span>
+                    <input className="input" value={tagTarget} onChange={e => setTagTarget(e.target.value)}
+                      placeholder="myrepo/myimage:v1.0" style={{ flex: 1 }}
+                      onKeyDown={e => e.key === 'Enter' && handleTag(`${img.Repository}:${img.Tag}`)} autoFocus />
+                    <button className="btn btn-primary" onClick={() => handleTag(`${img.Repository}:${img.Tag}`)} disabled={actionLoading === 'tag' || !tagTarget.trim()} style={{ fontSize: 'var(--text-sm)' }}>
+                      {actionLoading === 'tag' ? '...' : 'Tag'}
+                    </button>
+                    <button className="btn btn-ghost" onClick={() => setShowTag(null)} style={{ fontSize: 'var(--text-sm)' }}>Cancel</button>
+                  </div>
+                </div>
+              )}
+              {inspecting === img.Id && (
+                <pre style={{ margin: 0, padding: '12px 16px', background: 'var(--bg-secondary)', fontSize: 'var(--text-xs)', overflow: 'auto', maxHeight: 300, color: 'var(--text-secondary)', borderBottom: '1px solid var(--border-subtle)' }}>
+                  {inspectData}
+                </pre>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
 
 export default function Images() {
-  const [images, setImages] = useState<DockerImage[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const images = useAtomValue(imagesAtom);
+  const loading = useAtomValue(dockerLoadingAtom);
   const [searchTerm, setSearchTerm] = useState("");
+  const deferredSearch = useDeferredValue(searchTerm);
 
   const [showPull, setShowPull] = useState(false);
   const [pullName, setPullName] = useState("");
@@ -20,26 +131,29 @@ export default function Images() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [batchLoading, setBatchLoading] = useState(false);
   const { confirm, ConfirmDialogProps } = useConfirm();
+  const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; image: DockerImage } | null>(null);
+  const searchRef = useRef<HTMLInputElement>(null);
 
+  useHotkeys({
+    "mod+k": () => searchRef.current?.focus(),
+    "escape": () => { setInspecting(null); setShowTag(null); setCtxMenu(null); },
+    "delete": () => { if (selected.size > 0) handleBatchRemove(); },
+    "backspace": () => { if (selected.size > 0) handleBatchRemove(); },
+  });
 
+  const openCtxMenu = (e: React.MouseEvent, img: DockerImage) => {
+    e.preventDefault();
+    setCtxMenu({ x: e.clientX, y: e.clientY, image: img });
+  };
 
-  const fetchImages = useCallback(async () => {
-    try {
-      setError(null);
-      const list = await dockerApi.listImages();
-      setImages(list);
-    } catch (e) {
-      setError(String(e));
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    fetchImages();
-    const interval = setInterval(fetchImages, 15000);
-    return () => clearInterval(interval);
-  }, [fetchImages]);
+  const getCtxItems = (img: DockerImage): ContextMenuItem[] => [
+    { label: "Inspect", icon: <InspectIcon size={14} />, action: () => handleInspect(img.Id) },
+    { label: "Tag", icon: <TagIcon size={14} />, action: () => { setShowTag(img.Id); setTagTarget(""); } },
+    { divider: true, label: "", action: () => {} },
+    { label: "Copy ID", action: () => { navigator.clipboard.writeText(img.Id); globalToast("success", "Image ID copied"); } },
+    { divider: true, label: "", action: () => {} },
+    { label: "Remove", danger: true, action: () => handleRemove(img.Id, `${img.Repository}:${img.Tag}`) },
+  ];
 
   const handlePull = async () => {
     if (!pullName.trim()) return;
@@ -49,7 +163,7 @@ export default function Images() {
     setPullName("");
     setShowPull(false);
     dockerApi.pullImage(name)
-      .then(() => { globalToast("success", `Image "${name}" pulled successfully`); fetchImages(); })
+      .then(() => { globalToast("success", `Image "${name}" pulled successfully`); })
       .catch((e) => globalToast("error", `Pull failed: ${e}`));
   };
 
@@ -59,8 +173,11 @@ export default function Images() {
     setActionLoading(imageId);
     try {
       await dockerApi.removeImage(imageId, true);
+      // Clear from selection if it was selected
+      if (selected.has(imageId)) {
+        setSelected(prev => { const next = new Set(prev); next.delete(imageId); return next; });
+      }
       globalToast("success", `Image "${name}" removed`);
-      await fetchImages();
     } catch (e) {
       const msg = String(e);
       if (msg.includes("being used by running container")) {
@@ -81,8 +198,8 @@ export default function Images() {
     setActionLoading("prune");
     try {
       await dockerApi.pruneImages();
+      setSelected(new Set());
       globalToast("success", "Unused images pruned");
-      await fetchImages();
     } catch (e) {
       globalToast("error", String(e));
     } finally {
@@ -109,7 +226,6 @@ export default function Images() {
       globalToast("success", `Image tagged as "${tagTarget}"`);
       setShowTag(null);
       setTagTarget("");
-      await fetchImages();
     } catch (e) {
       globalToast("error", String(e));
     } finally {
@@ -119,7 +235,7 @@ export default function Images() {
 
   const filteredImages = images.filter((img) => {
     if (!searchTerm) return true;
-    const term = searchTerm.toLowerCase();
+    const term = deferredSearch.toLowerCase();
     return (
       img.Repository.toLowerCase().includes(term) ||
       img.Tag.toLowerCase().includes(term) ||
@@ -165,7 +281,6 @@ export default function Images() {
     globalToast("success", `Removed ${ok_count} image${ok_count > 1 ? "s" : ""}`);
     setSelected(new Set());
     setBatchLoading(false);
-    fetchImages();
   };
 
   if (loading) {
@@ -190,6 +305,7 @@ export default function Images() {
           <input
             className="input"
             placeholder="Search images..."
+            ref={searchRef}
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             style={{ width: 200 }}
@@ -199,11 +315,6 @@ export default function Images() {
           </button>
           <button className="btn btn-primary" onClick={() => setShowPull(!showPull)}>
             <DownloadIcon size={12} style={{ display: "inline", verticalAlign: "middle" }} /> Pull Image
-          </button>
-          <button className="btn btn-ghost" onClick={fetchImages}>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.3"/>
-            </svg>
           </button>
         </div>
       </div>
@@ -236,12 +347,6 @@ export default function Images() {
           </div>
         )}
 
-        {error && (
-          <div className="card" style={{ borderColor: "var(--accent-yellow)", marginBottom: 16 }}>
-            <p style={{ color: "var(--accent-yellow)", fontSize: "var(--text-sm)", display: "flex", alignItems: "center", gap: 6 }}><WarningIcon size={14} /> Could not connect to Docker: {error}</p>
-          </div>
-        )}
-
         {/* Batch action bar */}
         {selected.size > 0 && (
           <div style={{
@@ -264,113 +369,44 @@ export default function Images() {
           </div>
         )}
 
-        {filteredImages.length > 0 ? (
-          <table className="data-table">
-            <thead>
-              <tr>
-                <th style={{ width: 36, textAlign: "center" }}>
-                  <input type="checkbox" checked={filteredImages.length > 0 && selected.size === filteredImages.length}
-                    onChange={toggleAll} style={{ accentColor: "var(--accent-blue)", cursor: "pointer" }} />
-                </th>
-                <th>Repository</th>
-                <th>Tag</th>
-                <th>Image ID</th>
-                <th>Created</th>
-                <th>Size</th>
-                <th style={{ width: "160px" }}>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filteredImages.map((img) => (
-                <Fragment key={`${img.Repository}:${img.Tag}:${img.Id}`}>
-                <tr style={{ background: selected.has(img.Id) ? "rgba(88,166,255,0.06)" : undefined }}>
-                    <td style={{ textAlign: "center" }} onClick={e => e.stopPropagation()}>
-                      <input type="checkbox" checked={selected.has(img.Id)} onChange={() => toggleSelect(img.Id)}
-                        style={{ accentColor: "var(--accent-blue)", cursor: "pointer" }} />
-                    </td>
-                    <td style={{ fontWeight: 500 }}>{img.Repository}</td>
-                    <td>
-                      <span style={{
-                        padding: "2px 8px", borderRadius: "var(--radius-sm)",
-                        background: img.Tag === "latest" ? "rgba(63, 185, 80, 0.1)" : "rgba(88, 166, 255, 0.1)",
-                        color: img.Tag === "latest" ? "var(--accent-green)" : "var(--accent-blue)",
-                        fontSize: "var(--text-xs)", fontWeight: 500,
-                      }}>
-                        {img.Tag}
-                      </span>
-                    </td>
-                    <td style={{ fontFamily: "var(--font-mono)", fontSize: "var(--text-xs)", color: "var(--text-muted)" }}>
-                      {img.Id.replace("sha256:", "").substring(0, 12)}
-                    </td>
-                    <td style={{ color: "var(--text-secondary)", fontSize: "var(--text-sm)" }}>{img.CreatedAt}</td>
-                    <td style={{ fontFamily: "var(--font-mono)", fontSize: "var(--text-sm)" }}>{img.Size}</td>
-                    <td>
-                      <div style={{ display: "flex", gap: "4px" }}>
-                        <button
-                          className="btn btn-ghost"
-                          style={{ fontSize: "var(--text-xs)", padding: "2px 8px" }}
-                          onClick={() => handleInspect(img.Id)}
-                        >
-                          {inspecting === img.Id ? "Hide" : <InspectIcon size={12} />}
-                        </button>
-                        <button
-                          className="btn btn-ghost"
-                          style={{ fontSize: "var(--text-xs)", padding: "2px 8px" }}
-                          onClick={() => { setShowTag(showTag === img.Id ? null : img.Id); setTagTarget(""); }}
-                        >
-                          <TagIcon size={12} />
-                        </button>
-                        <button
-                          className="btn btn-ghost"
-                          style={{ fontSize: "var(--text-xs)", padding: "2px 8px", color: "var(--accent-red)" }}
-                          onClick={() => handleRemove(img.Id, `${img.Repository}:${img.Tag}`)}
-                          disabled={actionLoading === img.Id}
-                        >
-                          {actionLoading === img.Id ? "..." : <TrashIcon size={12} />}
-                        </button>
-                      </div>
-                    </td>
-                </tr>
-                {/* Tag form inline */}
-                {showTag === img.Id && (
-                  <tr>
-                    <td colSpan={6} style={{ padding: "8px 16px", background: "var(--bg-secondary)" }}>
-                      <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
-                        <span style={{ fontSize: "var(--text-sm)", color: "var(--text-secondary)" }}>
-                          Tag {img.Repository}:{img.Tag} as:
-                        </span>
-                        <input
-                          className="input"
-                          value={tagTarget}
-                          onChange={e => setTagTarget(e.target.value)}
-                          placeholder="myrepo/myimage:v1.0"
-                          style={{ flex: 1 }}
-                          onKeyDown={e => e.key === "Enter" && handleTag(`${img.Repository}:${img.Tag}`)}
-                          autoFocus
-                        />
-                        <button className="btn btn-primary" onClick={() => handleTag(`${img.Repository}:${img.Tag}`)} disabled={actionLoading === "tag" || !tagTarget.trim()} style={{ fontSize: "var(--text-sm)" }}>
-                          {actionLoading === "tag" ? "..." : "Tag"}
-                        </button>
-                        <button className="btn btn-ghost" onClick={() => setShowTag(null)} style={{ fontSize: "var(--text-sm)" }}>Cancel</button>
-                      </div>
-                    </td>
-                  </tr>
-                )}
-                {/* Inspect data */}
-                {inspecting === img.Id && (
-                  <tr>
-                    <td colSpan={6} style={{ padding: 0 }}>
-                      <pre style={{ margin: 0, padding: "12px 16px", background: "var(--bg-secondary)", fontSize: "var(--text-xs)", overflow: "auto", maxHeight: "300px", color: "var(--text-secondary)" }}>
-                        {inspectData}
-                      </pre>
-                    </td>
-                  </tr>
-                )}
-                </Fragment>
-              ))}
-            </tbody>
-          </table>
-        ) : (
+        {filteredImages.length > 0 ? (() => {
+          const ROW_H = 48;
+          const gridCols = '36px minmax(160px,1.5fr) 100px 120px minmax(100px,0.8fr) 80px 160px';
+          return (
+          <div className="vtable">
+            <div className="vtable-header" style={{ display: 'grid', gridTemplateColumns: gridCols }}>
+              <div className="vtable-header-cell" style={{ textAlign: 'center' }}>
+                <input type="checkbox" checked={filteredImages.length > 0 && selected.size === filteredImages.length}
+                  onChange={toggleAll} style={{ accentColor: 'var(--accent-blue)', cursor: 'pointer' }} />
+              </div>
+              <div className="vtable-header-cell">Repository</div>
+              <div className="vtable-header-cell">Tag</div>
+              <div className="vtable-header-cell">Image ID</div>
+              <div className="vtable-header-cell">Created</div>
+              <div className="vtable-header-cell">Size</div>
+              <div className="vtable-header-cell">Actions</div>
+            </div>
+            <VirtualImageRows
+              filteredImages={filteredImages}
+              selected={selected}
+              actionLoading={actionLoading}
+              gridCols={gridCols}
+              rowHeight={ROW_H}
+              toggleSelect={toggleSelect}
+              handleInspect={handleInspect}
+              handleRemove={handleRemove}
+              inspecting={inspecting}
+              inspectData={inspectData}
+              showTag={showTag}
+              setShowTag={setShowTag}
+              tagTarget={tagTarget}
+              setTagTarget={setTagTarget}
+              handleTag={handleTag}
+              onContextMenu={openCtxMenu}
+            />
+          </div>
+          );
+        })() : (
           <div className="empty-state">
             <div className="empty-state-icon">
               <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" style={{ color: "var(--text-muted)" }}>
@@ -385,6 +421,7 @@ export default function Images() {
         )}
       </div>
       <ConfirmDialog {...ConfirmDialogProps} />
+      {ctxMenu && <ContextMenu x={ctxMenu.x} y={ctxMenu.y} items={getCtxItems(ctxMenu.image)} onClose={() => setCtxMenu(null)} />}
     </>
   );
 }

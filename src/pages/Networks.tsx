@@ -1,13 +1,15 @@
-import { useState, useEffect, useCallback } from "react";
-import { networksApi, DockerNetwork } from "../lib/api";
+import { useState, useEffect, useCallback, useDeferredValue } from "react";
+import { networksApi } from "../lib/api";
 import { ConfirmDialog, useConfirm } from "../components/ConfirmDialog";
 import { BroomIcon, WarningIcon } from "../components/Icons";
+import { useAtom } from "jotai";
+import { networksAtom, networksLoadingAtom } from "../store/resourceAtom";
 
 interface NetworksProps {}
 
 export default function Networks(_props: NetworksProps) {
-  const [networks, setNetworks] = useState<DockerNetwork[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [networks, setNetworks] = useAtom(networksAtom);
+  const [loading, setLoading] = useAtom(networksLoadingAtom);
   const [error, setError] = useState<string | null>(null);
   const [showCreate, setShowCreate] = useState(false);
   const [newName, setNewName] = useState("");
@@ -17,6 +19,7 @@ export default function Networks(_props: NetworksProps) {
   const [inspectData, setInspectData] = useState<string>("");
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [search, setSearch] = useState("");
+  const deferredSearch = useDeferredValue(search);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [batchLoading, setBatchLoading] = useState(false);
   const { confirm, ConfirmDialogProps } = useConfirm();
@@ -57,6 +60,11 @@ export default function Networks(_props: NetworksProps) {
     setActionLoading(name);
     try {
       await networksApi.removeNetwork(name);
+      // Clear from selection if it was selected
+      const net = networks.find(n => n.Name === name);
+      if (net && selected.has(net.Id)) {
+        setSelected(prev => { const next = new Set(prev); next.delete(net.Id); return next; });
+      }
       await refresh();
     } catch (e) {
       setError(String(e));
@@ -71,6 +79,7 @@ export default function Networks(_props: NetworksProps) {
     setActionLoading("prune");
     try {
       await networksApi.pruneNetworks();
+      setSelected(new Set());
       await refresh();
     } catch (e) {
       setError(String(e));
@@ -93,8 +102,8 @@ export default function Networks(_props: NetworksProps) {
   const isSystemNetwork = (name: string) => ["bridge", "host", "none"].includes(name);
 
   const filtered = networks.filter(n =>
-    n.Name.toLowerCase().includes(search.toLowerCase()) ||
-    n.Driver.toLowerCase().includes(search.toLowerCase())
+    n.Name.toLowerCase().includes(deferredSearch.toLowerCase()) ||
+    n.Driver.toLowerCase().includes(deferredSearch.toLowerCase())
   );
 
   const driverColor = (driver: string) => {

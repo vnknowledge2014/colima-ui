@@ -7,6 +7,7 @@ export default function Models() {
   const [models, setModels] = useState<AiModel[]>([]);
   const [instances, setInstances] = useState<ColimaInstance[]>([]);
   const [selectedProfile, setSelectedProfile] = useState("default");
+  const [selectedRunner, setSelectedRunner] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
@@ -17,7 +18,7 @@ export default function Models() {
   const fetchModels = useCallback(async () => {
     try {
       setError(null);
-      const list = await modelsApi.listModels(selectedProfile);
+      const list = await modelsApi.listModels(selectedProfile, selectedRunner);
       setModels(list);
     } catch (e) {
       setError(String(e));
@@ -25,7 +26,7 @@ export default function Models() {
     } finally {
       setLoading(false);
     }
-  }, [selectedProfile]);
+  }, [selectedProfile, selectedRunner]);
 
   const fetchInstances = useCallback(async () => {
     try {
@@ -56,7 +57,7 @@ export default function Models() {
     globalToast("success", `Pulling model '${name}'... This may take a while.`);
     setPullName("");
     setShowPull(false);
-    modelsApi.pullModel(selectedProfile, name)
+    modelsApi.pullModel(selectedProfile, name, selectedRunner)
       .then(() => { globalToast("success", `Model '${name}' pulled successfully`); fetchModels(); })
       .catch((e) => globalToast("error", `Pull failed: ${e}`));
   };
@@ -64,7 +65,7 @@ export default function Models() {
   const handleDelete = async (name: string) => {
     setActionLoading(`${name}-delete`);
     try {
-      await modelsApi.deleteModel(selectedProfile, name);
+      await modelsApi.deleteModel(selectedProfile, name, selectedRunner);
       globalToast("success", `Model '${name}' deleted`);
       fetchModels();
     } catch (e) {
@@ -77,7 +78,7 @@ export default function Models() {
   const handleServe = async (name: string) => {
     setActionLoading(`${name}-serve`);
     try {
-      await modelsApi.serveModel(selectedProfile, name, 11434);
+      await modelsApi.serveModel(selectedProfile, name, 11434, selectedRunner);
       globalToast("success", `Model '${name}' serving on port 11434`);
     } catch (e) {
       globalToast("error", String(e));
@@ -86,7 +87,16 @@ export default function Models() {
     }
   };
 
-  const popularModels = [
+  const dockerModels = [
+    { name: "ai/smollm2", desc: "Small Language Model 2", size: "~1.7 GB" },
+    { name: "ai/gemma3", desc: "Google Gemma 3", size: "~5.4 GB" },
+    { name: "ai/llama3.2", desc: "Meta Llama 3.2", size: "~2.0 GB" },
+    { name: "ai/phi4-mini", desc: "Microsoft Phi-4 Mini", size: "~2.4 GB" },
+    { name: "ai/deepseek-r1", desc: "DeepSeek R1 (distill)", size: "~4.7 GB" },
+    { name: "ai/mistral-small", desc: "Mistral Small 3.1", size: "~15 GB" },
+  ];
+
+  const ramalamaModels = [
     { name: "llama3.3", desc: "Meta's latest Llama 3.3", size: "~4.7 GB" },
     { name: "gemma2", desc: "Google Gemma 2", size: "~5.4 GB" },
     { name: "qwen2.5", desc: "Alibaba Qwen 2.5", size: "~4.7 GB" },
@@ -94,6 +104,8 @@ export default function Models() {
     { name: "deepseek-r1", desc: "DeepSeek R1", size: "~4.7 GB" },
     { name: "mistral", desc: "Mistral 7B", size: "~4.1 GB" },
   ];
+
+  const popularModels = selectedRunner === "ramalama" ? ramalamaModels : dockerModels;
 
   return (
     <>
@@ -118,6 +130,15 @@ export default function Models() {
               })}
             </select>
           )}
+          <select
+            className="input select"
+            style={{ width: 180 }}
+            value={selectedRunner}
+            onChange={(e) => setSelectedRunner(e.target.value)}
+          >
+            <option value="">Docker Model Runner</option>
+            <option value="ramalama">Ramalama</option>
+          </select>
           <button className="btn btn-ghost" onClick={fetchModels}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.3"/>
@@ -138,10 +159,23 @@ export default function Models() {
         {error && (
           <div className="card" style={{ borderColor: "var(--accent-yellow)", marginBottom: 16 }}>
             <p style={{ color: "var(--accent-yellow)", fontSize: "var(--text-sm)" }}>
-              <WarningIcon size={14} style={{ display: "inline", verticalAlign: "middle", marginRight: 4 }} /> AI model support not available: {error}
+              <WarningIcon size={14} style={{ display: "inline", verticalAlign: "middle", marginRight: 4 }} /> AI model support not available
             </p>
             <p style={{ color: "var(--text-muted)", fontSize: "var(--text-xs)", marginTop: 4 }}>
-              Model management is available when Colima is started with AI features enabled.
+              {error.includes("krunkit") || error.includes("vm-type") ? (
+                <>
+                  GPU support requires krunkit. Install it first:
+                  <code style={{ display: "block", margin: "8px 0", padding: "6px 10px", background: "var(--bg-primary)", borderRadius: 6, fontFamily: "var(--font-mono)" }}>
+                    brew tap slp/krunkit && brew install krunkit
+                  </code>
+                  Then restart Colima:
+                  <code style={{ display: "block", margin: "8px 0", padding: "6px 10px", background: "var(--bg-primary)", borderRadius: 6, fontFamily: "var(--font-mono)" }}>
+                    colima start --runtime docker --vm-type krunkit
+                  </code>
+                </>
+              ) : error.includes("not installed")
+                ? "Required tools are not installed. Make sure Colima is available."
+                : "Model management requires Colima started with krunkit VM type for GPU access."}
             </p>
           </div>
         )}

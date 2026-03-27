@@ -65,23 +65,27 @@
 - **Getting Started Tour** — Interactive walkthrough for new users
 - **Global Toast Notifications** — Persistent notifications across tab switches for long-running operations
 - **System Settings** — View installed dependencies, disk usage, system prune
+- **Context Menus** — Right-click context menus on containers, images, volumes, and networks
+- **Keyboard Shortcuts** — Hotkeys for common actions (search, refresh, navigation)
 
 ---
 
 ## 🏗️ Architecture
 
-ColimaUI uses a **dual-mode architecture** that works as both a native desktop app and a web application:
+ColimaUI uses a **dual-mode, event-driven architecture** that works as both a native desktop app and a web application:
 
 ```mermaid
 graph TD
     subgraph Frontend["Frontend — React 19 + TypeScript + Vite 7"]
         APP["App.tsx"]
-        PAGES["Pages (13)"]
+        PAGES["Pages (13 lazy-loaded)"]
+        STORE["Jotai Atoms (store/)"]
         LIB["Lib (api.ts)"]
-        COMP["Components (4)"]
+        COMP["Components (5)"]
     end
 
     APP & PAGES & COMP --> LIB
+    APP --> STORE
 
     subgraph API["Dual-Mode API Layer"]
         TAURI_IPC["Tauri IPC (invoke)"]
@@ -91,12 +95,27 @@ graph TD
     LIB -->|"Desktop"| TAURI_IPC
     LIB -->|"Browser"| HTTP
 
+    subgraph Events["Real-time Updates"]
+        TAURI_EVT["Tauri Events (push)"]
+        SSE["SSE /api/events (push)"]
+        POLL["HTTP Polling (fallback)"]
+    end
+
+    TAURI_EVT -->|"Desktop"| STORE
+    SSE -->|"Browser"| STORE
+    POLL -->|"SSE unavailable"| STORE
+
     subgraph Backend["Backend — Rust"]
         CMD["Command Handlers"]
+        BROADCAST["tokio::broadcast"]
+        WATCHER["Docker Event Watcher"]
     end
 
     TAURI_IPC --> CMD
     HTTP --> CMD
+    WATCHER --> BROADCAST
+    BROADCAST --> SSE
+    BROADCAST --> TAURI_EVT
 
     subgraph CLI["CLI Tools"]
         COLIMA["colima"]
@@ -110,12 +129,24 @@ graph TD
     CMD --> CLI
 ```
 
+### Event-Driven Updates
+
+ColimaUI uses a **push-first architecture** for real-time state synchronization:
+
+| Mode | Mechanism | Fallback |
+|------|-----------|----------|
+| **Desktop (Tauri)** | Tauri IPC events (`instances-update`, `docker-state-updated`) | — |
+| **Browser (SSE available)** | `EventSource` → `/api/events` | — |
+| **Browser (SSE unavailable)** | Automatic HTTP polling (3–5s intervals) | Graceful degradation |
+
 ### Frontend (`src/`)
 
 | Directory | Contents |
 |-----------|----------|
-| `pages/` | 13 page components (Dashboard, Instances, Containers, Images, Volumes, Networks, Compose, Kubernetes, LinuxVMs, Models, DockerfileGen, Terminal, Settings) |
-| `components/` | Shared components (ConfirmDialog, SetupWizard, GettingStartedTour, Icons) |
+| `pages/` | 13 lazy-loaded page components (Dashboard, Instances, Containers, Images, Volumes, Networks, Compose, Kubernetes, LinuxVMs, Models, DockerfileGen, Terminal, Settings) |
+| `components/` | Shared components (ConfirmDialog, ContextMenu, SetupWizard, GettingStartedTour, Icons) |
+| `store/` | Jotai atomic state — `dockerAtom.ts`, `resourceAtom.ts`, `dashboardAtom.ts`, `k8sAtom.ts` |
+| `hooks/` | Custom hooks — `useHotkeys.ts` |
 | `lib/` | API layer (`api.ts`) with dual-mode Tauri/HTTP support, global toast system (`globalToast.ts`) |
 | `assets/` | Static assets |
 
@@ -124,7 +155,8 @@ graph TD
 | File | Purpose |
 |------|---------|
 | `lib.rs` | Tauri app setup, plugin registration, IPC command handlers |
-| `api_server.rs` | Axum HTTP API server (port 11420) for browser-mode access |
+| `api_server.rs` | Axum HTTP API server (port 11420) with SSE `/api/events` endpoint and Docker event watcher |
+| `docker_state.rs` | Bollard Docker event stream and container/image state aggregation |
 | `commands/` | Modular command handlers: `colima`, `docker`, `volumes`, `networks`, `compose`, `kubernetes`, `lima`, `models`, `ai_chat`, `system` |
 | `instance_reader.rs` | Colima instance YAML config parser |
 | `terminal_session.rs` | PTY-based terminal session management for xterm.js |
@@ -205,25 +237,31 @@ Output goes to `dist/`.
 | Layer | Technology | Version |
 |-------|-----------|---------|
 | **Frontend** | React | 19.1 |
+| **State Management** | Jotai | 2.x |
 | **Language** | TypeScript | 5.8 |
 | **Bundler** | Vite | 7.x |
 | **Desktop** | Tauri | 2.x |
 | **Backend** | Rust (Edition 2021) | — |
 | **HTTP Server** | Axum | 0.8 |
+| **Docker Client** | Bollard | — |
 | **Terminal** | xterm.js | 6.0 |
+| **Virtualization** | @tanstack/react-virtual | 3.x |
 | **Styling** | Vanilla CSS (dark theme) | — |
 
 ### Key Dependencies
 
 **Frontend:**
+- `jotai` — Atomic state management for Docker/K8s resource caching
 - `@tauri-apps/api` — Tauri IPC bridge
 - `@tauri-apps/plugin-shell` — Shell command execution
 - `@xterm/xterm` + `@xterm/addon-fit` + `@xterm/addon-web-links` — Terminal emulation
+- `@tanstack/react-virtual` — Virtualized scrolling for large container/image lists
 
 **Backend (Rust):**
 - `tauri` (with `tray-icon` feature) — Desktop framework
-- `axum` + `tower-http` (CORS) — HTTP API server
-- `tokio` — Async runtime
+- `axum` + `tower-http` (CORS) — HTTP API server with SSE support
+- `bollard` — Native Docker API client for event streaming
+- `tokio` (broadcast channels) — Async runtime with pub/sub for SSE
 - `serde` + `serde_json` + `serde_yaml` — Serialization
 - `tauri-plugin-shell` — Shell command execution from Tauri
 
@@ -234,13 +272,13 @@ Output goes to `dist/`.
 ```
 colima-ui/
 ├── src/                        # Frontend source
-│   ├── App.tsx                 # Main app shell, sidebar navigation, global toast
+│   ├── App.tsx                 # Main app shell, SSE/event listeners, sidebar
 │   ├── main.tsx                # React entry point
 │   ├── index.css               # Global styles (dark theme, animations)
-│   ├── pages/                  # Page components
+│   ├── pages/                  # Page components (lazy-loaded)
 │   │   ├── Dashboard.tsx       # System overview & resource counts
 │   │   ├── Instances.tsx       # Colima instance & Kind cluster management
-│   │   ├── Containers.tsx      # Docker container management
+│   │   ├── Containers.tsx      # Docker container management (virtual scroll)
 │   │   ├── Images.tsx          # Docker image management
 │   │   ├── Volumes.tsx         # Docker volume management
 │   │   ├── Networks.tsx        # Docker network management
@@ -251,8 +289,16 @@ colima-ui/
 │   │   ├── DockerfileGen.tsx   # AI-powered Dockerfile generator
 │   │   ├── Terminal.tsx        # Integrated terminal (xterm.js)
 │   │   └── Settings.tsx        # System info, disk usage, prune
+│   ├── store/                  # Jotai atomic state management
+│   │   ├── dockerAtom.ts       # Container & image state atoms
+│   │   ├── resourceAtom.ts     # Volume & network state atoms
+│   │   ├── dashboardAtom.ts    # Dashboard cached state
+│   │   └── k8sAtom.ts          # Kubernetes resource state
+│   ├── hooks/                  # Custom React hooks
+│   │   └── useHotkeys.ts       # Keyboard shortcut manager
 │   ├── components/             # Shared components
 │   │   ├── ConfirmDialog.tsx   # Reusable confirmation dialog
+│   │   ├── ContextMenu.tsx     # Right-click context menus
 │   │   ├── SetupWizard.tsx     # First-run setup wizard
 │   │   ├── GettingStartedTour.tsx  # Interactive tour
 │   │   └── Icons.tsx           # SVG icon components
@@ -289,6 +335,15 @@ ColimaUI features a premium **dark theme** with:
 - Responsive layout with collapsible sidebar
 - macOS-native title bar integration (overlay style)
 - Global toast notifications with slide-in animation
+
+## ⚡ Performance
+
+- **Code Splitting** — All 13 pages lazy-loaded via `React.lazy` + `Suspense`
+- **Vendor Chunk Splitting** — Separate bundles for React, xterm, Tauri, and Jotai
+- **Virtual Scrolling** — `@tanstack/react-virtual` for large container/image lists
+- **Deferred Search** — `useDeferredValue` for non-blocking search filtering
+- **Event-Driven Updates** — SSE push replaces polling; zero overhead when idle
+- **Graceful Degradation** — Automatic HTTP polling fallback when SSE unavailable
 
 ---
 

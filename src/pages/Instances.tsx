@@ -2,6 +2,8 @@ import { useState, useCallback, useEffect } from "react";
 import { colimaApi, ColimaInstance, StartConfig, kindApi } from "../lib/api";
 import { globalToast } from "../lib/globalToast";
 import { CloseIcon, CheckIcon, StatusDot } from "../components/Icons";
+import ContextMenu, { ContextMenuItem } from "../components/ContextMenu";
+import { useHotkeys } from "../hooks/useHotkeys";
 
 interface InstancesProps {
   instances: ColimaInstance[];
@@ -216,6 +218,39 @@ export default function Instances({ instances, onRefresh }: InstancesProps) {
   const [selected, setSelected] = useState<SelectedItem | null>(null);
   const [kindClusters, setKindClusters] = useState<string[]>([]);
   const [kindLoading, setKindLoading] = useState(true);
+  const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; items: ContextMenuItem[] } | null>(null);
+
+  // Hotkeys
+  useHotkeys({
+    "escape": () => { setShowCreate(false); setShowCreateKind(false); setConfirm(null); setCtxMenu(null); },
+  });
+
+  const openColimaCtx = (e: React.MouseEvent, inst: ColimaInstance) => {
+    e.preventDefault();
+    const profileId = inst.name === "colima" ? "default" : inst.name.replace("colima-", "");
+    const isRunning = inst.status === "Running";
+    const items: ContextMenuItem[] = [];
+    if (isRunning) {
+      items.push({ label: "Stop", action: () => handleAction(profileId, "stop") });
+      items.push({ label: "Restart", action: () => handleAction(profileId, "restart") });
+    } else {
+      items.push({ label: "Start", action: () => handleAction(profileId, "start") });
+    }
+    items.push({ divider: true, label: "", action: () => {} });
+    items.push({ label: "Copy Name", action: () => { navigator.clipboard.writeText(inst.name); globalToast("success", "Name copied"); } });
+    items.push({ divider: true, label: "", action: () => {} });
+    items.push({ label: "Delete", danger: true, action: () => handleAction(profileId, "delete") });
+    setCtxMenu({ x: e.clientX, y: e.clientY, items });
+  };
+
+  const openKindCtx = (e: React.MouseEvent, name: string) => {
+    e.preventDefault();
+    setCtxMenu({ x: e.clientX, y: e.clientY, items: [
+      { label: "Copy Context", action: () => { navigator.clipboard.writeText(`kind-${name}`); globalToast("success", "Context copied"); } },
+      { divider: true, label: "", action: () => {} },
+      { label: "Delete", danger: true, action: () => handleDeleteKind(name) },
+    ]});
+  };
 
   const fetchKind = useCallback(async () => {
     try {
@@ -349,7 +384,7 @@ export default function Instances({ instances, onRefresh }: InstancesProps) {
                 const isRunning = inst.status === "Running";
                 const isSelected = selected?.type === "colima" && selected.data.name === inst.name;
                 return (
-                  <div key={inst.name} onClick={() => setSelected({ type: "colima", data: inst })} style={{
+                  <div key={inst.name} onClick={() => setSelected({ type: "colima", data: inst })} onContextMenu={(e) => openColimaCtx(e, inst)} style={{
                     padding: "10px 14px", cursor: "pointer", display: "flex", alignItems: "center", gap: 10,
                     background: isSelected ? "var(--bg-card-hover)" : "transparent",
                     borderLeft: isSelected ? "3px solid var(--accent-blue)" : "3px solid transparent",
@@ -390,7 +425,7 @@ export default function Instances({ instances, onRefresh }: InstancesProps) {
                 kindClusters.map(name => {
                   const isSelected = selected?.type === "kind" && selected.name === name;
                   return (
-                    <div key={name} onClick={() => setSelected({ type: "kind", name })} style={{
+                    <div key={name} onClick={() => setSelected({ type: "kind", name })} onContextMenu={(e) => openKindCtx(e, name)} style={{
                       padding: "10px 14px", cursor: "pointer", display: "flex", alignItems: "center", gap: 10,
                       background: isSelected ? "rgba(167,139,250,0.08)" : "transparent",
                       borderLeft: isSelected ? "3px solid var(--accent-purple)" : "3px solid transparent",
@@ -431,6 +466,7 @@ export default function Instances({ instances, onRefresh }: InstancesProps) {
       {showCreate && <CreateInstanceDialog onClose={() => setShowCreate(false)} onCreated={onRefresh} />}
       {showCreateKind && <CreateKindDialog onClose={() => setShowCreateKind(false)} onCreated={() => { fetchKind(); }} />}
       {confirm && <ConfirmDialog title={confirm.title} message={confirm.message} confirmLabel={confirm.confirmLabel} danger={confirm.danger} onConfirm={confirm.onConfirm} onCancel={() => setConfirm(null)} />}
+      {ctxMenu && <ContextMenu x={ctxMenu.x} y={ctxMenu.y} items={ctxMenu.items} onClose={() => setCtxMenu(null)} />}
     </>
   );
 }

@@ -1,13 +1,15 @@
-import { useState, useEffect, useCallback } from "react";
-import { volumesApi, DockerVolume } from "../lib/api";
+import { useState, useEffect, useCallback, useDeferredValue } from "react";
+import { volumesApi } from "../lib/api";
 import { ConfirmDialog, useConfirm } from "../components/ConfirmDialog";
 import { BroomIcon, WarningIcon } from "../components/Icons";
+import { useAtom } from "jotai";
+import { volumesAtom, volumesLoadingAtom } from "../store/resourceAtom";
 
 interface VolumesProps {}
 
 export default function Volumes(_props: VolumesProps) {
-  const [volumes, setVolumes] = useState<DockerVolume[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [volumes, setVolumes] = useAtom(volumesAtom);
+  const [loading, setLoading] = useAtom(volumesLoadingAtom);
   const [error, setError] = useState<string | null>(null);
   const [showCreate, setShowCreate] = useState(false);
   const [newName, setNewName] = useState("");
@@ -16,6 +18,7 @@ export default function Volumes(_props: VolumesProps) {
   const [inspectData, setInspectData] = useState<string>("");
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [search, setSearch] = useState("");
+  const deferredSearch = useDeferredValue(search);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [batchLoading, setBatchLoading] = useState(false);
   const { confirm, ConfirmDialogProps } = useConfirm();
@@ -55,6 +58,10 @@ export default function Volumes(_props: VolumesProps) {
     setActionLoading(name);
     try {
       await volumesApi.removeVolume(name, true);
+      // Clear from selection if it was selected
+      if (selected.has(name)) {
+        setSelected(prev => { const next = new Set(prev); next.delete(name); return next; });
+      }
       await refresh();
     } catch (e) {
       setError(String(e));
@@ -69,6 +76,7 @@ export default function Volumes(_props: VolumesProps) {
     setActionLoading("prune");
     try {
       await volumesApi.pruneVolumes();
+      setSelected(new Set());
       await refresh();
     } catch (e) {
       setError(String(e));
@@ -89,8 +97,8 @@ export default function Volumes(_props: VolumesProps) {
   };
 
   const filtered = volumes.filter(v =>
-    v.Name.toLowerCase().includes(search.toLowerCase()) ||
-    v.Driver.toLowerCase().includes(search.toLowerCase())
+    v.Name.toLowerCase().includes(deferredSearch.toLowerCase()) ||
+    v.Driver.toLowerCase().includes(deferredSearch.toLowerCase())
   );
 
   useEffect(() => { setSelected(new Set()); }, [search]);

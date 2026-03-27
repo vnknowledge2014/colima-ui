@@ -13,7 +13,7 @@ export default function LinuxVMs() {
   const [selectedVM, setSelectedVM] = useState<LimaInstance | null>(null);
   const [shellCmd, setShellCmd] = useState("");
   const [shellOutput, setShellOutput] = useState("");
-  const [shellCwd, setShellCwd] = useState("~");
+  const [shellCwd, setShellCwd] = useState("/");
   const { confirm, ConfirmDialogProps } = useConfirm();
 
   // Create VM state
@@ -35,7 +35,10 @@ export default function LinuxVMs() {
 
   useEffect(() => {
     fetchVMs();
-    const interval = setInterval(fetchVMs, 8000);
+    // Only poll when page is visible to reduce CPU background usage
+    const interval = setInterval(() => {
+      if (document.visibilityState === "visible") fetchVMs();
+    }, 15000);
     return () => clearInterval(interval);
   }, [fetchVMs]);
 
@@ -109,8 +112,8 @@ export default function LinuxVMs() {
 
     // Handle cd commands locally by tracking CWD
     if (cmd === "cd" || cmd === "cd ~" || cmd === "cd ~/") {
-      setShellOutput(prev => prev + `${shellCwd}$ ${cmd}\n`);
-      setShellCwd("~");
+      setShellOutput(prev => prev + `${selectedVM.name}:${shellCwd}$ ${cmd}\n`);
+      setShellCwd("/");
       setShellCmd("");
       return;
     }
@@ -118,30 +121,30 @@ export default function LinuxVMs() {
       const target = cmd.slice(3).trim();
       // Resolve the new path using shell and pwd
       try {
-        const cwdCmd = shellCwd === "~" ? `cd ~ && cd ${target} && pwd` : `cd ${shellCwd} && cd ${target} && pwd`;
+        const cwdCmd = `cd ${shellCwd} && cd ${target} && pwd`;
         const newPath = await limaApi.shell(selectedVM.name, cwdCmd);
         const resolved = newPath.trim();
         if (resolved) {
-          setShellOutput(prev => prev + `${shellCwd}$ ${cmd}\n`);
+          setShellOutput(prev => prev + `${selectedVM.name}:${shellCwd}$ ${cmd}\n`);
           setShellCwd(resolved);
         } else {
-          setShellOutput(prev => prev + `${shellCwd}$ ${cmd}\ncd: no such directory: ${target}\n`);
+          setShellOutput(prev => prev + `${selectedVM.name}:${shellCwd}$ ${cmd}\ncd: no such directory: ${target}\n`);
         }
       } catch (e) {
-        setShellOutput(prev => prev + `${shellCwd}$ ${cmd}\n${e}\n`);
+        setShellOutput(prev => prev + `${selectedVM.name}:${shellCwd}$ ${cmd}\n${e}\n`);
       }
       setShellCmd("");
       return;
     }
 
     // For all other commands, prepend cd to tracked CWD
-    const fullCmd = shellCwd === "~" ? `cd ~ && ${cmd}` : `cd ${shellCwd} && ${cmd}`;
+    const fullCmd = `cd ${shellCwd} && ${cmd}`;
     try {
       const output = await limaApi.shell(selectedVM.name, fullCmd);
-      setShellOutput(prev => prev + `${shellCwd}$ ${cmd}\n${output}\n`);
+      setShellOutput(prev => prev + `${selectedVM.name}:${shellCwd}$ ${cmd}\n${output}\n`);
       setShellCmd("");
     } catch (e) {
-      setShellOutput(prev => prev + `${shellCwd}$ ${cmd}\nError: ${e}\n`);
+      setShellOutput(prev => prev + `${selectedVM.name}:${shellCwd}$ ${cmd}\nError: ${e}\n`);
       setShellCmd("");
     }
   };
@@ -209,7 +212,7 @@ export default function LinuxVMs() {
               const isLoading = actionLoading?.startsWith(vm.name);
               const isRunning = vm.status === "Running";
               return (
-                <div key={vm.name} onClick={() => { setSelectedVM(vm); setShellOutput(""); setShellCwd("~"); }} style={{
+                <div key={vm.name} onClick={() => { setSelectedVM(vm); setShellOutput(""); setShellCwd("/"); }} style={{
                   padding: 16, background: "var(--bg-secondary)", borderRadius: 12,
                   border: "1px solid var(--border-primary)", cursor: "pointer",
                   opacity: isLoading ? 0.6 : 1, transition: "all 200ms",
@@ -304,12 +307,12 @@ export default function LinuxVMs() {
                   minHeight: 120, maxHeight: 300, overflow: "auto", whiteSpace: "pre-wrap",
                   color: "var(--text-secondary)",
                 }}>
-                  {shellOutput || "Run commands inside the VM..."}
+                  {shellOutput || `Run commands inside '${selectedVM.name}' VM...`}
                 </div>
                 <div style={{ display: "flex", gap: 8 }}>
                   <input type="text" value={shellCmd} onChange={e => setShellCmd(e.target.value)}
                     onKeyDown={e => e.key === "Enter" && runShell()}
-                    placeholder={`${shellCwd}$ Enter command...`}
+                    placeholder={`${selectedVM.name}:${shellCwd}$ Enter command...`}
                     style={{
                       flex: 1, padding: "8px 12px", background: "var(--bg-primary)",
                       border: "1px solid var(--border-primary)", borderRadius: 6,

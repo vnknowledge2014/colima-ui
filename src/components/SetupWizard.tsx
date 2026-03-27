@@ -9,6 +9,16 @@ interface SetupWizardProps {
 }
 
 type DepName = "homebrew" | "colima" | "docker" | "lima";
+
+interface OptionalTool {
+  name: string;
+  label: string;
+  desc: string;
+  brewPkg: string;
+  installed: boolean;
+  version: string;
+  checking: boolean;
+}
 type DepStatus = "checking" | "installed" | "missing" | "installing" | "failed";
 type InstallMethod = "brew" | "apt" | "nix" | "wsl-brew" | "manual";
 
@@ -51,6 +61,12 @@ export default function SetupWizard({ systemInfo, onComplete, onSkip }: SetupWiz
   const [createInstance, setCreateInstance] = useState(true);
   const [settingUp, setSettingUp] = useState(false);
   const [setupLog, setSetupLog] = useState("");
+  const [optionalTools, setOptionalTools] = useState<OptionalTool[]>([
+    { name: "kubectl", label: "kubectl", desc: "Kubernetes CLI — required for K8s tab", brewPkg: "kubectl", installed: false, version: "", checking: true },
+    { name: "kind", label: "kind", desc: "Kubernetes in Docker — create local clusters", brewPkg: "kind", installed: false, version: "", checking: true },
+    { name: "helm", label: "helm", desc: "Kubernetes package manager", brewPkg: "helm", installed: false, version: "", checking: true },
+    { name: "krunkit", label: "krunkit", desc: "GPU support for AI Models", brewPkg: "slp/krunkit/krunkit", installed: false, version: "", checking: true },
+  ]);
 
   // Fetch platform info on mount
   useEffect(() => {
@@ -137,9 +153,29 @@ export default function SetupWizard({ systemInfo, onComplete, onSkip }: SetupWiz
     setDeps(updated);
   }, [systemInfo, installMethod]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  const checkOptionalTools = useCallback(async () => {
+    for (let i = 0; i < optionalTools.length; i++) {
+      try {
+        const result = await systemApi.checkTool(optionalTools[i].name);
+        setOptionalTools(prev => {
+          const updated = [...prev];
+          updated[i] = { ...updated[i], installed: result.installed, version: result.version ? result.version.split("\n")[0] : "", checking: false };
+          return updated;
+        });
+      } catch {
+        setOptionalTools(prev => {
+          const updated = [...prev];
+          updated[i] = { ...updated[i], checking: false };
+          return updated;
+        });
+      }
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   useEffect(() => {
     checkDeps();
-  }, [checkDeps]);
+    checkOptionalTools();
+  }, [checkDeps, checkOptionalTools]);
 
   const missingDeps = deps.filter(d => d.status === "missing");
   const allInstalled = deps.every(d => d.status === "installed");
@@ -248,7 +284,7 @@ export default function SetupWizard({ systemInfo, onComplete, onSkip }: SetupWiz
             disk: 60,
             kubernetes: false,
             kubernetes_version: "",
-            arch: "aarch64",
+            arch: platform?.arch || "aarch64",
             mount_type: "",
             mounts: [],
             dns: [],
@@ -471,12 +507,48 @@ export default function SetupWizard({ systemInfo, onComplete, onSkip }: SetupWiz
               </button>
             )}
 
+            {/* Optional Tools */}
+            <div style={{ marginTop: 20 }}>
+              <h3 style={{ fontSize: "var(--text-sm)", color: "var(--text-muted)", fontWeight: 600, marginBottom: 10 }}>Optional Tools</h3>
+              <div className="dep-list" style={{ opacity: 0.85 }}>
+                {optionalTools.map((tool) => (
+                  <div key={tool.name} className="dep-row">
+                    <div className="dep-info">
+                      <div className={`dep-icon ${tool.installed ? "installed" : "missing"}`}>
+                        <PackageIcon size={16} />
+                      </div>
+                      <div>
+                        <div className="dep-name">{tool.label}</div>
+                        <div className="dep-desc">{tool.desc}</div>
+                      </div>
+                    </div>
+                    <div className="dep-status">
+                      {tool.version && <span className="dep-version" style={{ maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis" }}>{tool.version}</span>}
+                      {tool.checking ? (
+                        <span className="badge" style={{ background: "rgba(139,148,158,0.15)", color: "var(--text-muted)" }}>
+                          <div className="spinner" style={{ width: 10, height: 10, borderWidth: 1.5 }} />
+                          Checking
+                        </span>
+                      ) : tool.installed ? (
+                        <span className="badge badge-running">
+                          <span className="badge-dot" style={{ animation: "none" }} />
+                          Installed
+                        </span>
+                      ) : (
+                        <span className="badge" style={{ background: "rgba(139,148,158,0.15)", color: "var(--text-muted)" }}>Not installed</span>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
             {/* Manual instructions */}
             {installMethod === "manual" && getManualInstructions()}
 
             <div className="wizard-actions">
               <button className="btn btn-ghost" onClick={() => setStep(0)}>← Back</button>
-              <button className="btn btn-ghost" onClick={checkDeps} disabled={isInstalling}>↻ Re-check</button>
+              <button className="btn btn-ghost" onClick={() => { checkDeps(); checkOptionalTools(); }} disabled={isInstalling}>↻ Re-check</button>
               <button className="btn btn-primary" onClick={() => setStep(2)} disabled={isInstalling}>
                 {allInstalled ? "Next →" : "Continue Anyway →"}
               </button>

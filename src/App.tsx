@@ -1,23 +1,27 @@
-import { useState, useEffect, useCallback } from "react";
-import { colimaApi, systemApi, ColimaInstance, SystemInfo } from "./lib/api";
+import React, { useState, useEffect, useCallback, Suspense } from "react";
+import { colimaApi, dockerApi, systemApi, ColimaInstance, SystemInfo } from "./lib/api";
 import { onToast, ToastMessage } from "./lib/globalToast";
-import Dashboard from "./pages/Dashboard";
-import Instances from "./pages/Instances";
-import Containers from "./pages/Containers";
-import TerminalPage from "./pages/Terminal";
-import Models from "./pages/Models";
-import Images from "./pages/Images";
-import Volumes from "./pages/Volumes";
-import Networks from "./pages/Networks";
-import Compose from "./pages/Compose";
-import Kubernetes from "./pages/Kubernetes";
-import LinuxVMs from "./pages/LinuxVMs";
-import DockerfileGen from "./pages/DockerfileGen";
-import Settings from "./pages/Settings";
-import SetupWizard from "./components/SetupWizard";
-import GettingStartedTour from "./components/GettingStartedTour";
 import { WarningIcon } from "./components/Icons";
+import { useSetAtom } from "jotai";
+import { containersAtom, imagesAtom, dockerLoadingAtom } from "./store/dockerAtom";
 import "./index.css";
+
+// Lazy-loaded pages — each becomes a separate chunk
+const Dashboard = React.lazy(() => import("./pages/Dashboard"));
+const Instances = React.lazy(() => import("./pages/Instances"));
+const Containers = React.lazy(() => import("./pages/Containers"));
+const TerminalPage = React.lazy(() => import("./pages/Terminal"));
+const Models = React.lazy(() => import("./pages/Models"));
+const Images = React.lazy(() => import("./pages/Images"));
+const Volumes = React.lazy(() => import("./pages/Volumes"));
+const Networks = React.lazy(() => import("./pages/Networks"));
+const Compose = React.lazy(() => import("./pages/Compose"));
+const Kubernetes = React.lazy(() => import("./pages/Kubernetes"));
+const LinuxVMs = React.lazy(() => import("./pages/LinuxVMs"));
+const DockerfileGen = React.lazy(() => import("./pages/DockerfileGen"));
+const Settings = React.lazy(() => import("./pages/Settings"));
+const SetupWizard = React.lazy(() => import("./components/SetupWizard"));
+const GettingStartedTour = React.lazy(() => import("./components/GettingStartedTour"));
 
 type Page = "dashboard" | "instances" | "containers" | "images" | "volumes" | "networks" | "compose" | "kubernetes" | "linux-vms" | "dockerfile" | "terminal" | "models" | "settings";
 
@@ -145,7 +149,7 @@ function App() {
   }, [refreshManual]);
 
   // Tauri: listen to Rust poller events for real-time updates
-  // Browser: fall back to polling every 5 seconds
+  // Browser: connect to SSE stream for real-time updates (no polling!)
   useEffect(() => {
     if (isTauri) {
       let cleanup: (() => void) | undefined;
@@ -161,11 +165,122 @@ function App() {
       });
       return () => { if (cleanup) cleanup(); };
     } else {
-      // Browser mode: poll every 2 seconds (instant reads via filesystem)
-      const interval = setInterval(refreshManual, 2000);
-      return () => clearInterval(interval);
+      // Browser mode: try SSE, fall back to HTTP polling if unavailable
+      let sseWorking = false;
+      let pollInterval: ReturnType<typeof setInterval> | null = null;
+      const es = new EventSource("http://127.0.0.1:11420/api/events");
+      es.addEventListener("instances-update", (e) => {
+        try {
+          sseWorking = true;
+          const data = JSON.parse((e as MessageEvent).data);
+          setInstances(data.instances);
+          setLoading(false);
+        } catch { /* ignore parse errors */ }
+      });
+      es.onerror = () => {
+        if (!sseWorking && !pollInterval) {
+          es.close();
+          // Fall back to polling
+          pollInterval = setInterval(refreshManual, 5000);
+        }
+      };
+      // Also refresh manually on first mount
+      refreshManual();
+      return () => {
+        es.close();
+        if (pollInterval) clearInterval(pollInterval);
+      };
     }
   }, [refreshManual]);
+
+  const setContainers = useSetAtom(containersAtom);
+  const setImages = useSetAtom(imagesAtom);
+  const setDockerLoading = useSetAtom(dockerLoadingAtom);
+
+  // Global Docker State Effect
+  useEffect(() => {
+    if (isTauri) {
+      let unlisten: (() => void) | undefined;
+
+      // Immediate fetch via normalized API (handles field-name mapping)
+      Promise.all([
+        dockerApi.listContainers(true).catch(() => []),
+        dockerApi.listImages().catch(() => []),
+      ]).then(([c, i]) => {
+        setContainers(c);
+        setImages(i);
+        setDockerLoading(false);
+      });
+
+      // Also subscribe to push updates for real-time sync
+      import("@tauri-apps/api/event").then((mod) => {
+        mod.listen<{ containers: any[], images: any[] }>("docker-state-updated", (event) => {
+          // Normalize field names from bollard format
+          const containers = (event.payload.containers || []).map((v: any) => ({
+            Id: v.Id || v.id || v.ID || "",
+            Names: v.Names || v.names || "",
+            Image: v.Image || v.image || "",
+            Status: v.Status || v.status || "",
+            State: v.State || v.state || "",
+            Ports: v.Ports || v.ports || "",
+            CreatedAt: v.CreatedAt || v.created_at || v.createdAt || "",
+            Size: v.Size || v.size || "",
+            Command: v.Command || v.command || "",
+          }));
+          const images = (event.payload.images || []).map((v: any) => ({
+            Id: v.Id || v.id || v.ID || "",
+            Repository: v.Repository || v.repository || "",
+            Tag: v.Tag || v.tag || "",
+            Size: v.Size || v.size || "",
+            CreatedAt: v.CreatedAt || v.created_at || v.createdAt || "",
+          }));
+          setContainers(containers);
+          setImages(images);
+          setDockerLoading(false);
+        }).then((fn) => { unlisten = fn; });
+      });
+      return () => { if (unlisten) unlisten(); };
+    } else {
+      // Browser mode: immediate fetch + SSE for real-time updates
+      let pollInterval: ReturnType<typeof setInterval> | null = null;
+
+      // Immediate HTTP fetch — don't wait for SSE push
+      const fetchDocker = async () => {
+        try {
+          const [containers, images] = await Promise.all([
+            dockerApi.listContainers(true),
+            dockerApi.listImages(),
+          ]);
+          setContainers(containers);
+          setImages(images);
+          setDockerLoading(false);
+        } catch { /* ignore */ }
+      };
+      fetchDocker();
+
+      // SSE for real-time push updates (container start/stop/etc.)
+      const es = new EventSource("http://127.0.0.1:11420/api/events");
+      es.addEventListener("docker-state-updated", (e) => {
+        try {
+          const data = JSON.parse((e as MessageEvent).data);
+          setContainers(data.containers);
+          setImages(data.images);
+          setDockerLoading(false);
+        } catch { /* ignore parse errors */ }
+      });
+      es.onerror = () => {
+        // SSE unavailable — fall back to periodic polling
+        if (!pollInterval) {
+          es.close();
+          pollInterval = setInterval(fetchDocker, 3000);
+        }
+      };
+      return () => {
+        es.close();
+        if (pollInterval) clearInterval(pollInterval);
+      };
+    }
+  }, [setContainers, setImages, setDockerLoading]);
 
   // Smooth 1-second clock
   useEffect(() => {
@@ -345,7 +460,9 @@ function App() {
             </button>
           </div>
         )}
-        {renderPage()}
+        <Suspense fallback={<div style={{ display: "flex", justifyContent: "center", alignItems: "center", height: "50vh" }}><div className="spinner" /></div>}>
+          {renderPage()}
+        </Suspense>
       </main>
 
       {/* Global Toast Notifications */}

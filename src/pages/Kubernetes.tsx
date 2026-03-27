@@ -3,11 +3,17 @@ import { k8sApi } from "../lib/api";
 import { globalToast } from "../lib/globalToast";
 import { ConfirmDialog, useConfirm } from "../components/ConfirmDialog";
 import { StatusDot, CloseIcon, RestartIcon, TrashIcon } from "../components/Icons";
+import { useAtom } from "jotai";
+import {
+  k8sConnectedAtom, k8sLoadingAtom, k8sDataLoadingAtom,
+  k8sNamespacesAtom, k8sItemsAtom, k8sActiveResourceAtom,
+  k8sNamespaceAtom, k8sContextsAtom, k8sCurrentCtxAtom,
+  K8sResource,
+} from "../store/k8sAtom";
+import ContextMenu, { ContextMenuItem } from "../components/ContextMenu";
+import { useHotkeys } from "../hooks/useHotkeys";
 
-// ===== Types =====
-interface K8sResource {
-  name: string; namespace: string; [key: string]: any;
-}
+
 
 // ===== Resource Groups =====
 const RESOURCE_GROUPS = [
@@ -410,13 +416,15 @@ function CustomSelect({ value, options, onChange, style }: {
 
 // ===== Component =====
 export default function Kubernetes() {
-  const [connected, setConnected] = useState<boolean | null>(null);
-  const [activeResource, setActiveResource] = useState("pods");
-  const [namespace, setNamespace] = useState("all");
-  const [namespaces, setNamespaces] = useState<{ name: string }[]>([]);
-  const [items, setItems] = useState<K8sResource[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [dataLoading, setDataLoading] = useState(false);
+  const [connected, setConnected] = useAtom(k8sConnectedAtom);
+  const [activeResource, setActiveResource] = useAtom(k8sActiveResourceAtom);
+  const [namespace, setNamespace] = useAtom(k8sNamespaceAtom);
+  const [namespaces, setNamespaces] = useAtom(k8sNamespacesAtom);
+  const [items, setItems] = useAtom(k8sItemsAtom);
+  const [loading, setLoading] = useAtom(k8sLoadingAtom);
+  const [dataLoading, setDataLoading] = useAtom(k8sDataLoadingAtom);
+  const [contexts, setContexts] = useAtom(k8sContextsAtom);
+  const [currentCtx, setCurrentCtx] = useAtom(k8sCurrentCtxAtom);
   const [selectedItem, setSelectedItem] = useState<K8sResource | null>(null);
   const [detailTab, setDetailTab] = useState<"describe" | "yaml" | "logs">("describe");
   const [detailText, setDetailText] = useState("");
@@ -424,8 +432,9 @@ export default function Kubernetes() {
   const [yamlEdited, setYamlEdited] = useState("");
   const [logsText, setLogsText] = useState("");
   const [filter, setFilter] = useState("");
-  const [contexts, setContexts] = useState<string[]>([]);
-  const [currentCtx, setCurrentCtx] = useState("");
+  const [followLogs, setFollowLogs] = useState(false);
+  const eventSourceRef = useRef<EventSource | null>(null);
+  const logViewerRef = useRef<HTMLDivElement>(null);
   const [containers, setContainers] = useState<string[]>([]);
   const [selectedContainer, setSelectedContainer] = useState("");
   const [portForwardModal, setPortForwardModal] = useState<K8sResource | null>(null);
@@ -436,7 +445,56 @@ export default function Kubernetes() {
   const [scaleValue, setScaleValue] = useState<number | null>(null);
   const [healthData, setHealthData] = useState<any>(null);
   const [healthLoading, setHealthLoading] = useState(false);
+  const [kubectlMissing, setKubectlMissing] = useState(false);
+  const [crdTypes, setCrdTypes] = useState<{ id: string; label: string; resource: string; group: string }[]>([]);
+  const [benchModal, setBenchModal] = useState<K8sResource | null>(null);
+  const [benchUrl, setBenchUrl] = useState("");
+  const [benchConc, setBenchConc] = useState(5);
+  const [benchReqs, setBenchReqs] = useState(50);
+  const [benchMethod, setBenchMethod] = useState("GET");
+  const [benchRunning, setBenchRunning] = useState(false);
+  const [benchResult, setBenchResult] = useState<any>(null);
   const { confirm, ConfirmDialogProps } = useConfirm();
+  const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; item: K8sResource } | null>(null);
+  const searchRef = useRef<HTMLInputElement>(null);
+
+  // Hotkeys
+  useHotkeys({
+    "mod+k": () => searchRef.current?.focus(),
+    "escape": () => { setSelectedItem(null); setCtxMenu(null); setPortForwardModal(null); },
+  });
+
+  const openCtxMenu = (e: React.MouseEvent, item: K8sResource) => {
+    e.preventDefault();
+    setCtxMenu({ x: e.clientX, y: e.clientY, item });
+  };
+
+  const getCtxItems = (item: K8sResource): ContextMenuItem[] => {
+    const activeInfo = ALL_ITEMS.find(i => i.id === activeResource);
+    const result: ContextMenuItem[] = [
+      { label: "View Details", action: () => openDetail(item) },
+    ];
+    if (activeResource === "pods") {
+      result.push({ label: "View Logs", action: () => { openDetail(item); setDetailTab("logs"); } });
+      result.push({ label: "Exec Shell", action: () => handleExec(item) });
+    }
+    if (activeInfo?.canRestart) {
+      result.push({ label: "Restart", action: () => handleRestart(item) });
+    }
+    if (activeResource === "services") {
+      result.push({ label: "⚡ Benchmark", action: () => {
+        setBenchModal(item);
+        const port = item.port?.split("/")[0]?.split(",")[0] || "80";
+        setBenchUrl(`http://localhost:${port}`);
+        setBenchConc(5); setBenchReqs(50); setBenchMethod("GET"); setBenchResult(null);
+      }});
+    }
+    result.push({ divider: true, label: "", action: () => {} });
+    result.push({ label: "Copy Name", action: () => { navigator.clipboard.writeText(item.name); globalToast("success", "Name copied"); } });
+    result.push({ divider: true, label: "", action: () => {} });
+    result.push({ label: "Delete", danger: true, action: () => handleDelete(item) });
+    return result;
+  };
 
   // Check cluster
   const checkCluster = useCallback(async () => {
@@ -447,7 +505,16 @@ export default function Kubernetes() {
       if (ctxList.length > 0) setContexts(ctxList);
       const cur = await k8sApi.currentContext();
       setCurrentCtx(cur.trim());
-    } catch { /* kubectl not available */ }
+      setKubectlMissing(false);
+    } catch (e) {
+      const msg = String(e);
+      if (msg.includes("not installed")) {
+        setKubectlMissing(true);
+        setConnected(false);
+        setLoading(false);
+        return;
+      }
+    }
 
     try {
       await k8sApi.check();
@@ -467,6 +534,19 @@ export default function Kubernetes() {
         const fwds = await k8sApi.portForwardList();
         setActiveForwards(fwds.split("\n").filter(Boolean));
       } catch { /* not critical */ }
+      // Discover CRDs
+      try {
+        const crdRaw = await k8sApi.crds();
+        const parsed = typeof crdRaw === "string" ? JSON.parse(crdRaw) : crdRaw;
+        const items = parsed.items || [];
+        const crds = items.map((crd: any) => {
+          const name = crd.metadata?.name || "";
+          const kind = crd.spec?.names?.kind || name;
+          const group = crd.spec?.group || "";
+          return { id: `crd:${name}`, label: kind, resource: name, group };
+        }).slice(0, 30); // Limit to 30 CRDs to avoid sidebar overload
+        setCrdTypes(crds);
+      } catch { /* CRDs not available */ }
     } catch {
       setConnected(false);
     }
@@ -478,6 +558,14 @@ export default function Kubernetes() {
     if (!connected) return;
     setDataLoading(true);
     try {
+      // Handle CRD resources
+      if (activeResource.startsWith("crd:")) {
+        const crdName = activeResource.slice(4);
+        const raw = await k8sApi.crdResources(crdName, namespace);
+        setItems(parseItems(raw));
+        setDataLoading(false);
+        return;
+      }
       const info = ALL_ITEMS.find(i => i.id === activeResource);
       if (!info || activeResource === "health") { setDataLoading(false); return; }
       let raw: string;
@@ -702,7 +790,7 @@ export default function Kubernetes() {
       <>
         <div className="content-header">
           <h1>Kubernetes</h1>
-          {contexts.length > 1 && (
+          {!kubectlMissing && contexts.length > 1 && (
             <div className="content-header-actions" style={{ display: "flex", gap: 8, alignItems: "center" }}>
               <select value={currentCtx} onChange={e => handleContextSwitch(e.target.value)} style={{
                 background: "var(--bg-secondary)", border: "1px solid var(--border-primary)",
@@ -717,18 +805,33 @@ export default function Kubernetes() {
         <div className="content-body">
           <div className="empty-state">
             <div className="empty-state-icon">
-              <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="var(--accent-red)" strokeWidth="1.5">
-                <circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/>
+              <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke={kubectlMissing ? "var(--accent-yellow)" : "var(--accent-red)"} strokeWidth="1.5">
+                {kubectlMissing ? (
+                  <><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></>
+                ) : (
+                  <><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></>
+                )}
               </svg>
             </div>
-            <div className="empty-state-title">Cluster Not Connected</div>
+            <div className="empty-state-title">{kubectlMissing ? "kubectl Not Installed" : "Cluster Not Connected"}</div>
             <div className="empty-state-text">
-              {currentCtx && (
-                <span style={{ display: "block", marginBottom: 8, fontFamily: "var(--font-mono)", color: "var(--accent-purple)", fontSize: "var(--text-xs)" }}>
-                  Context: {currentCtx}
-                </span>
+              {kubectlMissing ? (
+                <>
+                  <code style={{ display: "block", marginBottom: 12, padding: "8px 12px", background: "var(--bg-primary)", borderRadius: 6, fontFamily: "var(--font-mono)", fontSize: "var(--text-sm)" }}>
+                    brew install kubectl
+                  </code>
+                  Install kubectl to manage Kubernetes clusters.
+                </>
+              ) : (
+                <>
+                  {currentCtx && (
+                    <span style={{ display: "block", marginBottom: 8, fontFamily: "var(--font-mono)", color: "var(--accent-purple)", fontSize: "var(--text-xs)" }}>
+                      Context: {currentCtx}
+                    </span>
+                  )}
+                  Enable Kubernetes in the <strong>Instances</strong> tab, or switch to a different context above.
+                </>
               )}
-              Enable Kubernetes in the <strong>Instances</strong> tab, or switch to a different context above.
             </div>
             <button className="btn btn-primary" onClick={() => { setLoading(true); checkCluster(); }}>Retry Connection</button>
           </div>
@@ -816,6 +919,30 @@ export default function Kubernetes() {
               ))}
             </div>
           ))}
+          {/* Dynamic CRD group */}
+          {crdTypes.length > 0 && (
+            <div style={{ marginBottom: 12 }}>
+              <div style={{
+                fontSize: "var(--text-xs)", color: "var(--text-muted)", fontWeight: 600,
+                textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 4, padding: "0 8px",
+              }}>Custom Resources ({crdTypes.length})</div>
+              {crdTypes.map(crd => (
+                <button key={crd.id} onClick={() => { setActiveResource(crd.id); setItems([]); setFilter(""); }}
+                  style={{
+                    display: "block", width: "100%", textAlign: "left", padding: "5px 8px",
+                    background: activeResource === crd.id ? "rgba(88,166,255,0.1)" : "transparent",
+                    border: "none", borderRadius: 6, cursor: "pointer", fontSize: "var(--text-sm)",
+                    color: activeResource === crd.id ? "var(--accent-blue)" : "var(--text-secondary)",
+                    fontWeight: activeResource === crd.id ? 600 : 400, transition: "all 150ms",
+                    overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                  }}
+                  title={`${crd.label} (${crd.group})`}
+                >
+                  {crd.label}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
 
         {/* Main content */}
@@ -919,7 +1046,7 @@ export default function Kubernetes() {
           <>
           {/* Filter bar */}
           <div style={{ display: "flex", gap: 8, marginBottom: 12, alignItems: "center" }}>
-            <input type="text" value={filter} onChange={e => setFilter(e.target.value)}
+            <input ref={searchRef} type="text" value={filter} onChange={e => setFilter(e.target.value)}
               placeholder={`Filter ${activeInfo?.label || ""}...`}
               style={{
                 flex: 1, padding: "6px 12px", background: "var(--bg-secondary)",
@@ -964,7 +1091,7 @@ export default function Kubernetes() {
                       if (col.key === "lastSchedule") val = val === "Never" ? val : timeAgo(val);
                       const color = col.color ? col.color(val, item) : undefined;
                       return (
-                        <div key={col.key} onClick={() => openDetail(item)} style={{
+                        <div key={col.key} onClick={() => openDetail(item)} onContextMenu={(e) => openCtxMenu(e, item)} style={{
                           padding: "12px 16px", cursor: "pointer",
                           fontFamily: col.mono ? "var(--font-mono)" : undefined,
                           fontSize: "var(--text-xs)",
@@ -1114,14 +1241,62 @@ export default function Kubernetes() {
             </div>
 
             {detailTab === "logs" && activeResource === "pods" && (
-              <div className="log-viewer" style={{ maxHeight: "50vh" }}>
-                {(logsText || "No logs available").split("\n").map((line, i) => {
-                  let cls = "";
-                  if (/error|fatal|panic/i.test(line)) cls = "log-error";
-                  else if (/warn/i.test(line)) cls = "log-warn";
-                  return <div key={i} className={`log-line ${cls}`}>{line}</div>;
-                })}
-              </div>
+              <>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+                  <button
+                    className={`btn btn-ghost`}
+                    style={{
+                      fontSize: "var(--text-xs)", padding: "3px 10px",
+                      background: followLogs ? "rgba(88,166,255,0.15)" : undefined,
+                      color: followLogs ? "var(--accent-blue)" : "var(--text-secondary)",
+                      border: followLogs ? "1px solid var(--accent-blue)" : undefined,
+                    }}
+                    onClick={() => {
+                      if (followLogs) {
+                        // Stop following
+                        eventSourceRef.current?.close();
+                        eventSourceRef.current = null;
+                        setFollowLogs(false);
+                      } else if (selectedItem) {
+                        // Start following
+                        setFollowLogs(true);
+                        setLogsText("");
+                        const url = k8sApi.logStreamUrl(selectedItem.namespace, selectedItem.name, selectedContainer);
+                        const es = new EventSource(url);
+                        eventSourceRef.current = es;
+                        es.onmessage = (e) => {
+                          setLogsText(prev => (prev ? prev + "\n" : "") + e.data);
+                          // Auto-scroll
+                          setTimeout(() => {
+                            if (logViewerRef.current) {
+                              logViewerRef.current.scrollTop = logViewerRef.current.scrollHeight;
+                            }
+                          }, 10);
+                        };
+                        es.onerror = () => {
+                          es.close();
+                          eventSourceRef.current = null;
+                          setFollowLogs(false);
+                        };
+                      }
+                    }}
+                  >
+                    {followLogs && <span style={{ display: "inline-block", width: 6, height: 6, borderRadius: "50%", background: "var(--accent-blue)", animation: "pulse 1.5s infinite", marginRight: 4 }} />}
+                    {followLogs ? "Following" : "Follow"}
+                  </button>
+                  <span style={{ fontSize: "var(--text-xs)", color: "var(--text-muted)" }}>
+                    {followLogs ? "Live streaming..." : "Batch mode (last 200 lines)"}
+                  </span>
+                </div>
+                <div ref={logViewerRef} className="log-viewer" style={{ maxHeight: "50vh" }}>
+                  {(logsText || "No logs available").split("\n").map((line, i) => {
+                    let cls = "";
+                    if (/error|fatal|panic/i.test(line)) cls = "log-error";
+                    else if (/warn/i.test(line)) cls = "log-warn";
+                    return <div key={i} className={`log-line ${cls}`}>{line}</div>;
+                  })}
+                </div>
+              </>
             )}
 
             {detailTab === "describe" && (
@@ -1272,6 +1447,95 @@ export default function Kubernetes() {
       )}
 
       <ConfirmDialog {...ConfirmDialogProps} />
+      {ctxMenu && <ContextMenu x={ctxMenu.x} y={ctxMenu.y} items={getCtxItems(ctxMenu.item)} onClose={() => setCtxMenu(null)} />}
+
+      {/* Benchmark Modal */}
+      {benchModal && (
+        <div className="modal-overlay" onClick={() => setBenchModal(null)}>
+          <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 520 }}>
+            <div className="modal-header">
+              <h3>⚡ HTTP Benchmark — {benchModal.name}</h3>
+              <button className="btn btn-ghost" onClick={() => setBenchModal(null)}><CloseIcon /></button>
+            </div>
+            <div className="modal-body" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+              <div>
+                <label style={{ fontSize: "var(--text-xs)", color: "var(--text-muted)" }}>Target URL</label>
+                <input type="text" value={benchUrl} onChange={e => setBenchUrl(e.target.value)}
+                  className="input" style={{ width: "100%", marginTop: 4 }} placeholder="http://localhost:8080" />
+              </div>
+              <div style={{ display: "flex", gap: 12 }}>
+                <div style={{ flex: 1 }}>
+                  <label style={{ fontSize: "var(--text-xs)", color: "var(--text-muted)" }}>Method</label>
+                  <select value={benchMethod} onChange={e => setBenchMethod(e.target.value)}
+                    className="input" style={{ width: "100%", marginTop: 4 }}>
+                    {["GET", "POST", "PUT", "DELETE"].map(m => <option key={m}>{m}</option>)}
+                  </select>
+                </div>
+                <div style={{ flex: 1 }}>
+                  <label style={{ fontSize: "var(--text-xs)", color: "var(--text-muted)" }}>Concurrency</label>
+                  <input type="number" value={benchConc} onChange={e => setBenchConc(+e.target.value)}
+                    className="input" style={{ width: "100%", marginTop: 4 }} min={1} max={100} />
+                </div>
+                <div style={{ flex: 1 }}>
+                  <label style={{ fontSize: "var(--text-xs)", color: "var(--text-muted)" }}>Requests</label>
+                  <input type="number" value={benchReqs} onChange={e => setBenchReqs(+e.target.value)}
+                    className="input" style={{ width: "100%", marginTop: 4 }} min={1} max={10000} />
+                </div>
+              </div>
+              <button className="btn btn-primary" disabled={benchRunning || !benchUrl} onClick={async () => {
+                setBenchRunning(true); setBenchResult(null);
+                try {
+                  const raw = await k8sApi.benchmark(benchUrl, benchConc, benchReqs, benchMethod);
+                  setBenchResult(typeof raw === "string" ? JSON.parse(raw) : raw);
+                } catch (e) {
+                  globalToast("error", `Benchmark failed: ${e}`);
+                } finally {
+                  setBenchRunning(false);
+                }
+              }}>
+                {benchRunning ? <><div className="spinner" style={{ width: 14, height: 14 }} /> Running...</> : "Run Benchmark"}
+              </button>
+              {benchResult && (
+                <div className="card" style={{ padding: 16 }}>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginBottom: 12 }}>
+                    <div style={{ textAlign: "center" }}>
+                      <div style={{ fontSize: "var(--text-xl)", fontWeight: 700, color: "var(--accent-green)" }}>{benchResult.requests_per_sec}</div>
+                      <div style={{ fontSize: "var(--text-xs)", color: "var(--text-muted)" }}>req/s</div>
+                    </div>
+                    <div style={{ textAlign: "center" }}>
+                      <div style={{ fontSize: "var(--text-xl)", fontWeight: 700, color: "var(--accent-blue)" }}>{benchResult.success}/{benchResult.total_requests}</div>
+                      <div style={{ fontSize: "var(--text-xs)", color: "var(--text-muted)" }}>success</div>
+                    </div>
+                    <div style={{ textAlign: "center" }}>
+                      <div style={{ fontSize: "var(--text-xl)", fontWeight: 700, color: benchResult.failed > 0 ? "var(--accent-red)" : "var(--text-secondary)" }}>{benchResult.failed}</div>
+                      <div style={{ fontSize: "var(--text-xs)", color: "var(--text-muted)" }}>failed</div>
+                    </div>
+                  </div>
+                  <table style={{ width: "100%", fontSize: "var(--text-xs)", fontFamily: "var(--font-mono)" }}>
+                    <thead>
+                      <tr style={{ color: "var(--text-muted)", borderBottom: "1px solid var(--border-primary)" }}>
+                        <th style={{ textAlign: "left", padding: 4 }}>Metric</th>
+                        <th style={{ textAlign: "right", padding: 4 }}>Value</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {[{ l: "Avg", v: benchResult.avg_latency_ms }, { l: "Min", v: benchResult.min_latency_ms }, { l: "Max", v: benchResult.max_latency_ms }, { l: "P50", v: benchResult.p50_ms }, { l: "P95", v: benchResult.p95_ms, c: "var(--accent-yellow)" }, { l: "P99", v: benchResult.p99_ms, c: "var(--accent-red)" }].map(r => (
+                        <tr key={r.l}>
+                          <td style={{ padding: 4, color: "var(--text-secondary)" }}>{r.l}</td>
+                          <td style={{ padding: 4, textAlign: "right", color: r.c || "var(--text-primary)" }}>{r.v}ms</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  <div style={{ marginTop: 8, fontSize: "var(--text-xs)", color: "var(--text-muted)" }}>
+                    Total time: {benchResult.total_time_ms}ms · {benchMethod} · Concurrency: {benchResult.concurrency}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 }
