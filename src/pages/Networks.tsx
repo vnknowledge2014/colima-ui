@@ -60,9 +60,9 @@ export default function Networks(_props: NetworksProps) {
     setActionLoading(name);
     try {
       await networksApi.removeNetwork(name);
-      // Clear from selection if it was selected
+      // Always clear from selection (avoid stale closure from confirm dialog)
       const net = networks.find(n => n.Name === name);
-      if (net && selected.has(net.Id)) {
+      if (net) {
         setSelected(prev => { const next = new Set(prev); next.delete(net.Id); return next; });
       }
       await refresh();
