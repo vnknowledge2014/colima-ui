@@ -29,4 +29,9 @@ tower-http = { version = "0.6", features = ["cors"] }
 serde_yaml = "0.9"
 libc = "0.2"
 lazy_static = "1.4"
+bollard = "0.18"
+futures-util = "0.3"
+tokio-stream = { version = "0.1", features = ["sync"] }
+async-stream = "0.3"
+reqwest = { version = "0.12", features = ["json"] }
 

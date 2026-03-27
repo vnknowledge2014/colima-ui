@@ -1,7 +1,7 @@
 use axum::{
     extract::{Query, State},
     http::StatusCode,
-    response::Json,
+    response::{Json, sse::{Event, Sse}},
     routing::{get, post},
     Router,
 };
@@ -10,10 +10,54 @@ use std::collections::HashMap;
 use std::process::Command;
 use std::sync::{Mutex, OnceLock};
 use tower_http::cors::{Any, CorsLayer};
+use tokio::sync::broadcast;
+use futures_util::stream::StreamExt;
+use std::convert::Infallible;
 
 use crate::commands::{colima, docker, models, networks, system, volumes};
 use crate::instance_reader;
 use crate::terminal_session::{self, SharedSessionManager};
+
+// ===== SSE Broadcast Infrastructure =====
+
+static SSE_TX: OnceLock<broadcast::Sender<SseMessage>> = OnceLock::new();
+
+#[derive(Clone, Debug)]
+struct SseMessage {
+    event: String,
+    data: String,
+}
+
+fn get_sse_tx() -> broadcast::Sender<SseMessage> {
+    SSE_TX.get_or_init(|| {
+        let (tx, _) = broadcast::channel(64);
+        tx
+    }).clone()
+}
+
+/// Publish an event to all connected SSE browser clients
+pub fn publish_sse_event(event_type: &str, data: &serde_json::Value) {
+    let tx = get_sse_tx();
+    let _ = tx.send(SseMessage {
+        event: event_type.to_string(),
+        data: data.to_string(),
+    });
+}
+
+async fn api_events() -> Sse<impl futures_util::Stream<Item = Result<Event, Infallible>>> {
+    let rx = get_sse_tx().subscribe();
+    let stream = tokio_stream::wrappers::BroadcastStream::new(rx)
+        .filter_map(|msg| async move {
+            match msg {
+                Ok(m) => Some(Ok(Event::default().event(m.event).data(m.data))),
+                Err(_) => None,
+            }
+        });
+    Sse::new(stream).keep_alive(
+        axum::response::sse::KeepAlive::new()
+            .interval(std::time::Duration::from_secs(15))
+    )
+}
 
 /// Generic API response wrapper
 #[derive(Serialize)]
@@ -64,10 +108,9 @@ where
 /// then returns the socket path for that profile.
 fn detect_docker_host() -> Option<String> {
     let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
-    let colima_home = std::env::var("COLIMA_HOME")
-        .unwrap_or_else(|_| format!("{}/.colima", home));
+    let colima_home = std::env::var("COLIMA_HOME").unwrap_or_else(|_| format!("{}/.colima", home));
     let colima_path = std::path::Path::new(&colima_home);
-    
+
     if !colima_path.exists() {
         return None;
     }
@@ -79,11 +122,15 @@ fn detect_docker_host() -> Option<String> {
             if name.starts_with('_') || name.starts_with('.') || !entry.path().is_dir() {
                 continue;
             }
-            
+
             // Map profile to lima instance name
-            let lima_name = if name == "default" { "colima".to_string() } else { format!("colima-{}", name) };
+            let lima_name = if name == "default" {
+                "colima".to_string()
+            } else {
+                format!("colima-{}", name)
+            };
             let lima_dir = colima_path.join("_lima").join(&lima_name);
-            
+
             if lima_dir.join("ha.sock").exists() || lima_dir.join("ha.pid").exists() {
                 // Found running instance — return its docker socket
                 let sock = colima_path.join(&name).join("docker.sock");
@@ -93,29 +140,43 @@ fn detect_docker_host() -> Option<String> {
             }
         }
     }
-    
+
     // Fallback: check the colima-level docker.sock symlink
     let fallback = colima_path.join("docker.sock");
     if fallback.exists() {
         return Some(format!("unix://{}", fallback.display()));
     }
-    
+
     None
 }
 
 fn run_cmd(program: &str, args: &[&str]) -> Result<String, String> {
     let mut cmd = Command::new(program);
     cmd.args(args);
-    
+
     // Auto-set DOCKER_HOST for docker/docker-compose/kind commands
     if program == "docker" || program == "docker-compose" || program == "kind" {
         if let Some(host) = detect_docker_host() {
             cmd.env("DOCKER_HOST", host);
         }
     }
-    
-    let output = cmd.output()
-        .map_err(|e| format!("Failed to execute {}: {}", program, e))?;
+
+    let output = cmd.output().map_err(|e| {
+        if e.kind() == std::io::ErrorKind::NotFound {
+            let hint = match program {
+                "kind" => "Install with: brew install kind",
+                "kubectl" => "Install with: brew install kubectl",
+                "helm" => "Install with: brew install helm",
+                "limactl" => "Install with: brew install lima",
+                "colima" => "Install with: brew install colima",
+                "docker" => "Install with: brew install docker",
+                _ => "Please install it and try again",
+            };
+            format!("'{}' is not installed. {}", program, hint)
+        } else {
+            format!("Failed to execute {}: {}", program, e)
+        }
+    })?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
@@ -156,9 +217,7 @@ fn load_system_info() -> system::SystemInfo {
 
 async fn api_check_system() -> (StatusCode, Json<ApiResponse<system::SystemInfo>>) {
     // First call: load from CLI (slow but only once). Subsequent: instant from cache.
-    let info = SYSTEM_INFO_CACHE.get_or_init(|| {
-        load_system_info()
-    });
+    let info = SYSTEM_INFO_CACHE.get_or_init(|| load_system_info());
     ok(info.clone())
 }
 
@@ -175,9 +234,7 @@ struct HomebrewStatus {
 
 async fn api_check_homebrew() -> (StatusCode, Json<ApiResponse<HomebrewStatus>>) {
     match run_blocking(|| {
-        let output = Command::new("brew")
-            .arg("--version")
-            .output();
+        let output = Command::new("brew").arg("--version").output();
         match output {
             Ok(o) if o.status.success() => {
                 let version = String::from_utf8_lossy(&o.stdout)
@@ -194,6 +251,72 @@ async fn api_check_homebrew() -> (StatusCode, Json<ApiResponse<HomebrewStatus>>)
                 installed: false,
                 version: String::new(),
             }),
+        }
+    })
+    .await
+    {
+        Ok(status) => ok(status),
+        Err(e) => err(e),
+    }
+}
+
+#[derive(Deserialize)]
+struct ToolQuery {
+    name: String,
+}
+
+#[derive(Serialize)]
+struct ToolStatus {
+    installed: bool,
+    version: String,
+}
+
+async fn api_check_tool(Query(q): Query<ToolQuery>) -> (StatusCode, Json<ApiResponse<ToolStatus>>) {
+    let name = q.name;
+    // Whitelist of allowed tools to prevent arbitrary command execution
+    let allowed = ["kubectl", "kind", "helm", "krunkit", "nerdctl"];
+    if !allowed.contains(&name.as_str()) {
+        return err(format!("Unknown tool: {}", name));
+    }
+    match run_blocking(move || {
+        let output = Command::new(&name).arg("version").output();
+        match output {
+            Ok(o) if o.status.success() => {
+                let version = String::from_utf8_lossy(&o.stdout)
+                    .lines()
+                    .next()
+                    .unwrap_or("")
+                    .trim()
+                    .to_string();
+                Ok(ToolStatus { installed: true, version })
+            }
+            Ok(o) => {
+                // Some tools use --version instead of version
+                let output2 = Command::new(&name).arg("--version").output();
+                match output2 {
+                    Ok(o2) if o2.status.success() => {
+                        let version = String::from_utf8_lossy(&o2.stdout)
+                            .lines()
+                            .next()
+                            .unwrap_or("")
+                            .trim()
+                            .to_string();
+                        Ok(ToolStatus { installed: true, version })
+                    }
+                    _ => {
+                        // Binary exists but version command failed — still installed
+                        let stderr = String::from_utf8_lossy(&o.stderr);
+                        Ok(ToolStatus {
+                            installed: true,
+                            version: stderr.lines().next().unwrap_or("").trim().to_string(),
+                        })
+                    }
+                }
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                Ok(ToolStatus { installed: false, version: String::new() })
+            }
+            Err(e) => Err(format!("Failed to check {}: {}", name, e)),
         }
     })
     .await
@@ -252,7 +375,11 @@ fn detect_platform() -> PlatformInfo {
 
     // On Windows, check if WSL is available
     let wsl_available = if cfg!(target_os = "windows") {
-        Command::new("wsl").arg("--list").output().map(|o| o.status.success()).unwrap_or(false)
+        Command::new("wsl")
+            .arg("--list")
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false)
     } else {
         false
     };
@@ -328,7 +455,9 @@ struct InstallResult {
     output: String,
 }
 
-async fn api_install_dep(Json(req): Json<InstallDepRequest>) -> (StatusCode, Json<ApiResponse<InstallResult>>) {
+async fn api_install_dep(
+    Json(req): Json<InstallDepRequest>,
+) -> (StatusCode, Json<ApiResponse<InstallResult>>) {
     let valid_names = ["colima", "docker", "lima"];
     if !valid_names.contains(&req.name.as_str()) {
         return err(format!("Invalid dependency name: {}", req.name));
@@ -345,25 +474,22 @@ async fn api_install_dep(Json(req): Json<InstallDepRequest>) -> (StatusCode, Jso
             ("manual", _) => {
                 return Ok(InstallResult {
                     success: true,
-                    output: "Manual installation: visit https://github.com/abiosoft/colima".to_string(),
+                    output: "Manual installation: visit https://github.com/abiosoft/colima"
+                        .to_string(),
                 });
             }
             _ => return Err(format!("Unknown install method: {}", req.method)),
         };
 
         let output = match req.method.as_str() {
-            "brew" => {
-                Command::new("brew")
-                    .args(["install", &pkg])
-                    .output()
-                    .map_err(|e| format!("brew install failed: {}", e))?
-            }
-            "apt" => {
-                Command::new("sudo")
-                    .args(["apt-get", "install", "-y", &pkg])
-                    .output()
-                    .map_err(|e| format!("apt install failed: {}", e))?
-            }
+            "brew" => Command::new("brew")
+                .args(["install", &pkg])
+                .output()
+                .map_err(|e| format!("brew install failed: {}", e))?,
+            "apt" => Command::new("sudo")
+                .args(["apt-get", "install", "-y", &pkg])
+                .output()
+                .map_err(|e| format!("apt install failed: {}", e))?,
             "nix" => {
                 let nix_pkg = format!("nixpkgs.{}", pkg);
                 Command::new("nix-env")
@@ -371,12 +497,10 @@ async fn api_install_dep(Json(req): Json<InstallDepRequest>) -> (StatusCode, Jso
                     .output()
                     .map_err(|e| format!("nix install failed: {}", e))?
             }
-            "wsl-brew" => {
-                Command::new("wsl")
-                    .args(["-e", "brew", "install", &pkg])
-                    .output()
-                    .map_err(|e| format!("wsl brew install failed: {}", e))?
-            }
+            "wsl-brew" => Command::new("wsl")
+                .args(["-e", "brew", "install", &pkg])
+                .output()
+                .map_err(|e| format!("wsl brew install failed: {}", e))?,
             _ => return Err(format!("Unknown method: {}", req.method)),
         };
 
@@ -422,7 +546,9 @@ fn default_profile() -> String {
     "default".to_string()
 }
 
-async fn api_stop_instance(Query(q): Query<ProfileQuery>) -> (StatusCode, Json<ApiResponse<String>>) {
+async fn api_stop_instance(
+    Query(q): Query<ProfileQuery>,
+) -> (StatusCode, Json<ApiResponse<String>>) {
     let profile = q.profile;
     let force = q.force;
     match run_blocking(move || {
@@ -442,16 +568,23 @@ async fn api_stop_instance(Query(q): Query<ProfileQuery>) -> (StatusCode, Json<A
             .map_err(|e| format!("Failed to stop colima: {}", e))?;
 
         if !output.status.success() {
-            return Err(format!("colima stop failed: {}", String::from_utf8_lossy(&output.stderr)));
+            return Err(format!(
+                "colima stop failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            ));
         }
         Ok(format!("Instance '{}' stopped", profile))
-    }).await {
+    })
+    .await
+    {
         Ok(msg) => ok(msg),
         Err(e) => err(e),
     }
 }
 
-async fn api_delete_instance(Query(q): Query<ProfileQuery>) -> (StatusCode, Json<ApiResponse<String>>) {
+async fn api_delete_instance(
+    Query(q): Query<ProfileQuery>,
+) -> (StatusCode, Json<ApiResponse<String>>) {
     let profile = q.profile;
     let force = q.force;
     match run_blocking(move || {
@@ -471,16 +604,23 @@ async fn api_delete_instance(Query(q): Query<ProfileQuery>) -> (StatusCode, Json
             .map_err(|e| format!("Failed to delete colima: {}", e))?;
 
         if !output.status.success() {
-            return Err(format!("colima delete failed: {}", String::from_utf8_lossy(&output.stderr)));
+            return Err(format!(
+                "colima delete failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            ));
         }
         Ok(format!("Instance '{}' deleted", profile))
-    }).await {
+    })
+    .await
+    {
         Ok(msg) => ok(msg),
         Err(e) => err(e),
     }
 }
 
-async fn api_instance_status(Query(q): Query<ProfileQuery>) -> (StatusCode, Json<ApiResponse<colima::InstanceStatus>>) {
+async fn api_instance_status(
+    Query(q): Query<ProfileQuery>,
+) -> (StatusCode, Json<ApiResponse<colima::InstanceStatus>>) {
     let profile = q.profile;
     match run_blocking(move || {
         let mut args = vec!["status", "--json", "--extended"];
@@ -496,18 +636,25 @@ async fn api_instance_status(Query(q): Query<ProfileQuery>) -> (StatusCode, Json
             .map_err(|e| format!("Failed to get status: {}", e))?;
 
         if !output.status.success() {
-            return Err(format!("colima status failed: {}", String::from_utf8_lossy(&output.stderr)));
+            return Err(format!(
+                "colima status failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            ));
         }
 
         let stdout = String::from_utf8_lossy(&output.stdout);
         serde_json::from_str(&stdout).map_err(|e| format!("Failed to parse status: {}", e))
-    }).await {
+    })
+    .await
+    {
         Ok(status) => ok(status),
         Err(e) => err(e),
     }
 }
 
-async fn api_ssh_command(Query(q): Query<ProfileQuery>) -> (StatusCode, Json<ApiResponse<Vec<String>>>) {
+async fn api_ssh_command(
+    Query(q): Query<ProfileQuery>,
+) -> (StatusCode, Json<ApiResponse<Vec<String>>>) {
     let profile = q.profile;
     let mut args = vec!["ssh".to_string()];
     if profile != "default" && !profile.is_empty() {
@@ -550,18 +697,25 @@ async fn api_k8s_action(Query(q): Query<K8sQuery>) -> (StatusCode, Json<ApiRespo
             if (action == "delete" || action == "stop")
                 && (stderr.contains("not enabled") || stderr.contains("not running"))
             {
-                return Ok(format!("Kubernetes {} completed (already disabled)", action));
+                return Ok(format!(
+                    "Kubernetes {} completed (already disabled)",
+                    action
+                ));
             }
             return Err(format!("kubernetes {} failed: {}", action, stderr));
         }
         Ok(format!("Kubernetes {} completed", action))
-    }).await {
+    })
+    .await
+    {
         Ok(msg) => ok(msg),
         Err(e) => err(e),
     }
 }
 
-async fn api_start_instance(Json(config): Json<colima::StartConfig>) -> (StatusCode, Json<ApiResponse<String>>) {
+async fn api_start_instance(
+    Json(config): Json<colima::StartConfig>,
+) -> (StatusCode, Json<ApiResponse<String>>) {
     match run_blocking(move || {
         let mut args = vec!["start".to_string()];
 
@@ -604,10 +758,18 @@ async fn api_start_instance(Json(config): Json<colima::StartConfig>) -> (StatusC
             .map_err(|e| format!("Failed to start colima: {}", e))?;
 
         if !output.status.success() {
-            return Err(format!("colima start failed: {}", String::from_utf8_lossy(&output.stderr)));
+            return Err(format!(
+                "colima start failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            ));
         }
-        Ok(format!("Instance '{}' started successfully", config.profile))
-    }).await {
+        Ok(format!(
+            "Instance '{}' started successfully",
+            config.profile
+        ))
+    })
+    .await
+    {
         Ok(msg) => ok(msg),
         Err(e) => err(e),
     }
@@ -621,28 +783,40 @@ struct ContainerQuery {
     all: bool,
 }
 
-async fn api_list_containers(Query(q): Query<ContainerQuery>) -> (StatusCode, Json<ApiResponse<Vec<docker::DockerContainer>>>) {
+async fn api_list_containers(
+    Query(q): Query<ContainerQuery>,
+) -> (StatusCode, Json<ApiResponse<Vec<docker::DockerContainer>>>) {
     let all = q.all;
     match run_blocking(move || {
         let mut args = vec!["ps", "--format", "json", "--no-trunc"];
-        if all { args.push("-a"); }
+        if all {
+            args.push("-a");
+        }
         let output = docker_cmd()
             .args(&args)
             .output()
             .map_err(|e| format!("Failed to execute docker: {}", e))?;
 
         if !output.status.success() {
-            return Err(format!("docker ps failed: {}", String::from_utf8_lossy(&output.stderr)));
+            return Err(format!(
+                "docker ps failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            ));
         }
 
         let stdout = String::from_utf8_lossy(&output.stdout);
-        if stdout.trim().is_empty() { return Ok(vec![]); }
+        if stdout.trim().is_empty() {
+            return Ok(vec![]);
+        }
 
-        Ok(stdout.lines()
+        Ok(stdout
+            .lines()
             .filter(|l| !l.trim().is_empty())
             .filter_map(|l| serde_json::from_str(l).ok())
             .collect())
-    }).await {
+    })
+    .await
+    {
         Ok(list) => ok(list),
         Err(e) => err(e),
     }
@@ -658,47 +832,75 @@ struct ContainerIdQuery {
     lines: u32,
 }
 
-fn default_lines() -> u32 { 200 }
+fn default_lines() -> u32 {
+    200
+}
 
-async fn api_start_container(Query(q): Query<ContainerIdQuery>) -> (StatusCode, Json<ApiResponse<String>>) {
+async fn api_start_container(
+    Query(q): Query<ContainerIdQuery>,
+) -> (StatusCode, Json<ApiResponse<String>>) {
     let id = q.container_id;
-    match run_blocking(move || run_cmd("docker", &["start", &id]).map(|_| format!("Container {} started", id))).await {
+    match run_blocking(move || {
+        run_cmd("docker", &["start", &id]).map(|_| format!("Container {} started", id))
+    })
+    .await
+    {
         Ok(msg) => ok(msg),
         Err(e) => err(e),
     }
 }
 
-async fn api_stop_container(Query(q): Query<ContainerIdQuery>) -> (StatusCode, Json<ApiResponse<String>>) {
+async fn api_stop_container(
+    Query(q): Query<ContainerIdQuery>,
+) -> (StatusCode, Json<ApiResponse<String>>) {
     let id = q.container_id;
-    match run_blocking(move || run_cmd("docker", &["stop", &id]).map(|_| format!("Container {} stopped", id))).await {
+    match run_blocking(move || {
+        run_cmd("docker", &["stop", &id]).map(|_| format!("Container {} stopped", id))
+    })
+    .await
+    {
         Ok(msg) => ok(msg),
         Err(e) => err(e),
     }
 }
 
-async fn api_restart_container(Query(q): Query<ContainerIdQuery>) -> (StatusCode, Json<ApiResponse<String>>) {
+async fn api_restart_container(
+    Query(q): Query<ContainerIdQuery>,
+) -> (StatusCode, Json<ApiResponse<String>>) {
     let id = q.container_id;
-    match run_blocking(move || run_cmd("docker", &["restart", &id]).map(|_| format!("Container {} restarted", id))).await {
+    match run_blocking(move || {
+        run_cmd("docker", &["restart", &id]).map(|_| format!("Container {} restarted", id))
+    })
+    .await
+    {
         Ok(msg) => ok(msg),
         Err(e) => err(e),
     }
 }
 
-async fn api_remove_container(Query(q): Query<ContainerIdQuery>) -> (StatusCode, Json<ApiResponse<String>>) {
+async fn api_remove_container(
+    Query(q): Query<ContainerIdQuery>,
+) -> (StatusCode, Json<ApiResponse<String>>) {
     let id = q.container_id;
     let force = q.force;
     match run_blocking(move || {
         let mut args = vec!["rm"];
-        if force { args.push("-f"); }
+        if force {
+            args.push("-f");
+        }
         args.push(&id);
         run_cmd("docker", &args).map(|_| format!("Container {} removed", id))
-    }).await {
+    })
+    .await
+    {
         Ok(msg) => ok(msg),
         Err(e) => err(e),
     }
 }
 
-async fn api_container_logs(Query(q): Query<ContainerIdQuery>) -> (StatusCode, Json<ApiResponse<String>>) {
+async fn api_container_logs(
+    Query(q): Query<ContainerIdQuery>,
+) -> (StatusCode, Json<ApiResponse<String>>) {
     let id = q.container_id;
     let lines = q.lines;
     match run_blocking(move || {
@@ -709,18 +911,29 @@ async fn api_container_logs(Query(q): Query<ContainerIdQuery>) -> (StatusCode, J
             .map_err(|e| format!("Failed to get logs: {}", e))?;
 
         if !output.status.success() {
-            return Err(format!("docker logs failed: {}", String::from_utf8_lossy(&output.stderr)));
+            return Err(format!(
+                "docker logs failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            ));
         }
         let stdout = String::from_utf8_lossy(&output.stdout);
         let stderr = String::from_utf8_lossy(&output.stderr);
-        Ok(if stdout.is_empty() { stderr.to_string() } else { stdout.to_string() })
-    }).await {
+        Ok(if stdout.is_empty() {
+            stderr.to_string()
+        } else {
+            stdout.to_string()
+        })
+    })
+    .await
+    {
         Ok(logs) => ok(logs),
         Err(e) => err(e),
     }
 }
 
-async fn api_inspect_container(Query(q): Query<ContainerIdQuery>) -> (StatusCode, Json<ApiResponse<String>>) {
+async fn api_inspect_container(
+    Query(q): Query<ContainerIdQuery>,
+) -> (StatusCode, Json<ApiResponse<String>>) {
     let id = q.container_id;
     match run_blocking(move || run_cmd("docker", &["inspect", &id])).await {
         Ok(info) => ok(info),
@@ -736,17 +949,25 @@ async fn api_list_images() -> (StatusCode, Json<ApiResponse<Vec<docker::DockerIm
             .map_err(|e| format!("Failed to list images: {}", e))?;
 
         if !output.status.success() {
-            return Err(format!("docker images failed: {}", String::from_utf8_lossy(&output.stderr)));
+            return Err(format!(
+                "docker images failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            ));
         }
 
         let stdout = String::from_utf8_lossy(&output.stdout);
-        if stdout.trim().is_empty() { return Ok(vec![]); }
+        if stdout.trim().is_empty() {
+            return Ok(vec![]);
+        }
 
-        Ok(stdout.lines()
+        Ok(stdout
+            .lines()
             .filter(|l| !l.trim().is_empty())
             .filter_map(|l| serde_json::from_str(l).ok())
             .collect())
-    }).await {
+    })
+    .await
+    {
         Ok(list) => ok(list),
         Err(e) => err(e),
     }
@@ -780,13 +1001,17 @@ struct PruneQuery {
     all: Option<bool>,
 }
 
-async fn api_remove_image(Query(q): Query<ImageIdQuery>) -> (StatusCode, Json<ApiResponse<String>>) {
+async fn api_remove_image(
+    Query(q): Query<ImageIdQuery>,
+) -> (StatusCode, Json<ApiResponse<String>>) {
     let id = q.image_id;
     let force = q.force.unwrap_or(false);
     match run_blocking(move || {
         // First attempt: simple rmi
         let mut args = vec!["rmi"];
-        if force { args.push("-f"); }
+        if force {
+            args.push("-f");
+        }
         args.push(&id);
         let result = run_cmd("docker", &args);
 
@@ -802,7 +1027,9 @@ async fn api_remove_image(Query(q): Query<ImageIdQuery>) -> (StatusCode, Json<Ap
                 let container_ids = String::from_utf8_lossy(&ps_output.stdout);
                 for cid in container_ids.lines() {
                     let cid = cid.trim();
-                    if cid.is_empty() { continue; }
+                    if cid.is_empty() {
+                        continue;
+                    }
                     // Stop then remove
                     let _ = docker_cmd().args(["stop", cid]).output();
                     let _ = docker_cmd().args(["rm", "-f", cid]).output();
@@ -813,13 +1040,17 @@ async fn api_remove_image(Query(q): Query<ImageIdQuery>) -> (StatusCode, Json<Ap
             }
             Err(e) => Err(e),
         }
-    }).await {
+    })
+    .await
+    {
         Ok(out) => ok(out),
         Err(e) => err(e),
     }
 }
 
-async fn api_pull_image(Query(q): Query<ImagePullQuery>) -> (StatusCode, Json<ApiResponse<String>>) {
+async fn api_pull_image(
+    Query(q): Query<ImagePullQuery>,
+) -> (StatusCode, Json<ApiResponse<String>>) {
     let name = q.image_name;
     match run_blocking(move || run_cmd("docker", &["pull", &name])).await {
         Ok(out) => ok(out),
@@ -834,7 +1065,9 @@ async fn api_prune_images() -> (StatusCode, Json<ApiResponse<String>>) {
     }
 }
 
-async fn api_inspect_image(Query(q): Query<ImageIdQuery>) -> (StatusCode, Json<ApiResponse<String>>) {
+async fn api_inspect_image(
+    Query(q): Query<ImageIdQuery>,
+) -> (StatusCode, Json<ApiResponse<String>>) {
     let id = q.image_id;
     match run_blocking(move || run_cmd("docker", &["image", "inspect", &id])).await {
         Ok(out) => ok(out),
@@ -853,9 +1086,13 @@ async fn api_system_prune(Query(q): Query<PruneQuery>) -> (StatusCode, Json<ApiR
     let all = q.all.unwrap_or(false);
     match run_blocking(move || {
         let mut args = vec!["system", "prune", "-f"];
-        if all { args.push("-a"); }
+        if all {
+            args.push("-a");
+        }
         run_cmd("docker", &args)
-    }).await {
+    })
+    .await
+    {
         Ok(out) => ok(out),
         Err(e) => err(e),
     }
@@ -891,18 +1128,31 @@ async fn api_list_volumes() -> (StatusCode, Json<ApiResponse<Vec<volumes::Docker
             .output()
             .map_err(|e| format!("Failed to list volumes: {}", e))?;
         if !output.status.success() {
-            return Err(format!("docker volume ls failed: {}", String::from_utf8_lossy(&output.stderr)));
+            return Err(format!(
+                "docker volume ls failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            ));
         }
         let stdout = String::from_utf8_lossy(&output.stdout);
-        if stdout.trim().is_empty() { return Ok(vec![]); }
-        Ok(stdout.lines().filter(|l| !l.trim().is_empty()).filter_map(|l| serde_json::from_str(l).ok()).collect())
-    }).await {
+        if stdout.trim().is_empty() {
+            return Ok(vec![]);
+        }
+        Ok(stdout
+            .lines()
+            .filter(|l| !l.trim().is_empty())
+            .filter_map(|l| serde_json::from_str(l).ok())
+            .collect())
+    })
+    .await
+    {
         Ok(list) => ok(list),
         Err(e) => err(e),
     }
 }
 
-async fn api_create_volume(Json(body): Json<CreateVolumeBody>) -> (StatusCode, Json<ApiResponse<String>>) {
+async fn api_create_volume(
+    Json(body): Json<CreateVolumeBody>,
+) -> (StatusCode, Json<ApiResponse<String>>) {
     match run_blocking(move || {
         let mut args = vec!["volume".to_string(), "create".to_string()];
         if !body.driver.is_empty() && body.driver != "local" {
@@ -912,21 +1162,29 @@ async fn api_create_volume(Json(body): Json<CreateVolumeBody>) -> (StatusCode, J
         args.push(body.name);
         let args_ref: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
         run_cmd("docker", &args_ref)
-    }).await {
+    })
+    .await
+    {
         Ok(out) => ok(out),
         Err(e) => err(e),
     }
 }
 
-async fn api_remove_volume(Query(q): Query<VolumeNameQuery>) -> (StatusCode, Json<ApiResponse<String>>) {
+async fn api_remove_volume(
+    Query(q): Query<VolumeNameQuery>,
+) -> (StatusCode, Json<ApiResponse<String>>) {
     let name = q.name;
     let force = q.force.unwrap_or(false);
     match run_blocking(move || {
         let mut args = vec!["volume", "rm"];
-        if force { args.push("-f"); }
+        if force {
+            args.push("-f");
+        }
         args.push(&name);
         run_cmd("docker", &args)
-    }).await {
+    })
+    .await
+    {
         Ok(out) => ok(out),
         Err(e) => err(e),
     }
@@ -939,7 +1197,9 @@ async fn api_prune_volumes() -> (StatusCode, Json<ApiResponse<String>>) {
     }
 }
 
-async fn api_inspect_volume(Query(q): Query<VolumeNameQuery>) -> (StatusCode, Json<ApiResponse<String>>) {
+async fn api_inspect_volume(
+    Query(q): Query<VolumeNameQuery>,
+) -> (StatusCode, Json<ApiResponse<String>>) {
     let name = q.name;
     match run_blocking(move || run_cmd("docker", &["volume", "inspect", &name])).await {
         Ok(out) => ok(out),
@@ -970,18 +1230,31 @@ async fn api_list_networks() -> (StatusCode, Json<ApiResponse<Vec<networks::Dock
             .output()
             .map_err(|e| format!("Failed to list networks: {}", e))?;
         if !output.status.success() {
-            return Err(format!("docker network ls failed: {}", String::from_utf8_lossy(&output.stderr)));
+            return Err(format!(
+                "docker network ls failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            ));
         }
         let stdout = String::from_utf8_lossy(&output.stdout);
-        if stdout.trim().is_empty() { return Ok(vec![]); }
-        Ok(stdout.lines().filter(|l| !l.trim().is_empty()).filter_map(|l| serde_json::from_str(l).ok()).collect())
-    }).await {
+        if stdout.trim().is_empty() {
+            return Ok(vec![]);
+        }
+        Ok(stdout
+            .lines()
+            .filter(|l| !l.trim().is_empty())
+            .filter_map(|l| serde_json::from_str(l).ok())
+            .collect())
+    })
+    .await
+    {
         Ok(list) => ok(list),
         Err(e) => err(e),
     }
 }
 
-async fn api_create_network(Json(body): Json<CreateNetworkBody>) -> (StatusCode, Json<ApiResponse<String>>) {
+async fn api_create_network(
+    Json(body): Json<CreateNetworkBody>,
+) -> (StatusCode, Json<ApiResponse<String>>) {
     match run_blocking(move || {
         let mut args = vec!["network".to_string(), "create".to_string()];
         if !body.driver.is_empty() {
@@ -995,13 +1268,17 @@ async fn api_create_network(Json(body): Json<CreateNetworkBody>) -> (StatusCode,
         args.push(body.name);
         let args_ref: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
         run_cmd("docker", &args_ref)
-    }).await {
+    })
+    .await
+    {
         Ok(out) => ok(out),
         Err(e) => err(e),
     }
 }
 
-async fn api_remove_network(Query(q): Query<NetworkNameQuery>) -> (StatusCode, Json<ApiResponse<String>>) {
+async fn api_remove_network(
+    Query(q): Query<NetworkNameQuery>,
+) -> (StatusCode, Json<ApiResponse<String>>) {
     let name = q.name;
     match run_blocking(move || run_cmd("docker", &["network", "rm", &name])).await {
         Ok(out) => ok(out),
@@ -1009,7 +1286,9 @@ async fn api_remove_network(Query(q): Query<NetworkNameQuery>) -> (StatusCode, J
     }
 }
 
-async fn api_inspect_network(Query(q): Query<NetworkNameQuery>) -> (StatusCode, Json<ApiResponse<String>>) {
+async fn api_inspect_network(
+    Query(q): Query<NetworkNameQuery>,
+) -> (StatusCode, Json<ApiResponse<String>>) {
     let name = q.name;
     match run_blocking(move || run_cmd("docker", &["network", "inspect", &name])).await {
         Ok(out) => ok(out),
@@ -1052,7 +1331,9 @@ struct RunContainerBody {
     extra_args: Vec<String>,
 }
 
-fn default_true() -> bool { true }
+fn default_true() -> bool {
+    true
+}
 
 #[derive(Deserialize)]
 struct RenameContainerBody {
@@ -1062,9 +1343,15 @@ struct RenameContainerBody {
     new_name: String,
 }
 
-async fn api_container_stats(Query(q): Query<ContainerIdQuery>) -> (StatusCode, Json<ApiResponse<String>>) {
+async fn api_container_stats(
+    Query(q): Query<ContainerIdQuery>,
+) -> (StatusCode, Json<ApiResponse<String>>) {
     let id = q.container_id;
-    match run_blocking(move || run_cmd("docker", &["stats", "--no-stream", "--format", "json", &id])).await {
+    match run_blocking(move || {
+        run_cmd("docker", &["stats", "--no-stream", "--format", "json", &id])
+    })
+    .await
+    {
         Ok(out) => ok(out),
         Err(e) => err(e),
     }
@@ -1077,7 +1364,9 @@ async fn api_all_container_stats() -> (StatusCode, Json<ApiResponse<String>>) {
     }
 }
 
-async fn api_container_top(Query(q): Query<ContainerIdQuery>) -> (StatusCode, Json<ApiResponse<String>>) {
+async fn api_container_top(
+    Query(q): Query<ContainerIdQuery>,
+) -> (StatusCode, Json<ApiResponse<String>>) {
     let id = q.container_id;
     match run_blocking(move || run_cmd("docker", &["top", &id])).await {
         Ok(out) => ok(out),
@@ -1085,43 +1374,77 @@ async fn api_container_top(Query(q): Query<ContainerIdQuery>) -> (StatusCode, Js
     }
 }
 
-async fn api_container_exec(Json(body): Json<ContainerExecBody>) -> (StatusCode, Json<ApiResponse<String>>) {
-    match run_blocking(move || run_cmd("docker", &["exec", &body.container_id, "sh", "-c", &body.command])).await {
+async fn api_container_exec(
+    Json(body): Json<ContainerExecBody>,
+) -> (StatusCode, Json<ApiResponse<String>>) {
+    match run_blocking(move || {
+        run_cmd(
+            "docker",
+            &["exec", &body.container_id, "sh", "-c", &body.command],
+        )
+    })
+    .await
+    {
         Ok(out) => ok(out),
         Err(e) => err(e),
     }
 }
 
-async fn api_run_container(Json(body): Json<RunContainerBody>) -> (StatusCode, Json<ApiResponse<String>>) {
+async fn api_run_container(
+    Json(body): Json<RunContainerBody>,
+) -> (StatusCode, Json<ApiResponse<String>>) {
     match run_blocking(move || {
         let mut args = vec!["run".to_string()];
-        if body.detach { args.push("-d".to_string()); }
-        if body.remove_on_exit { args.push("--rm".to_string()); }
+        if body.detach {
+            args.push("-d".to_string());
+        }
+        if body.remove_on_exit {
+            args.push("--rm".to_string());
+        }
         if !body.name.is_empty() {
             args.push("--name".to_string());
             args.push(body.name);
         }
-        for p in &body.ports { args.push("-p".to_string()); args.push(p.clone()); }
-        for e in &body.env_vars { args.push("-e".to_string()); args.push(e.clone()); }
-        for v in &body.volumes { args.push("-v".to_string()); args.push(v.clone()); }
-        for a in &body.extra_args { args.push(a.clone()); }
+        for p in &body.ports {
+            args.push("-p".to_string());
+            args.push(p.clone());
+        }
+        for e in &body.env_vars {
+            args.push("-e".to_string());
+            args.push(e.clone());
+        }
+        for v in &body.volumes {
+            args.push("-v".to_string());
+            args.push(v.clone());
+        }
+        for a in &body.extra_args {
+            args.push(a.clone());
+        }
         args.push(body.image);
         let args_ref: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
         run_cmd("docker", &args_ref)
-    }).await {
+    })
+    .await
+    {
         Ok(out) => ok(out),
         Err(e) => err(e),
     }
 }
 
-async fn api_rename_container(Json(body): Json<RenameContainerBody>) -> (StatusCode, Json<ApiResponse<String>>) {
-    match run_blocking(move || run_cmd("docker", &["rename", &body.container_id, &body.new_name])).await {
+async fn api_rename_container(
+    Json(body): Json<RenameContainerBody>,
+) -> (StatusCode, Json<ApiResponse<String>>) {
+    match run_blocking(move || run_cmd("docker", &["rename", &body.container_id, &body.new_name]))
+        .await
+    {
         Ok(out) => ok(out),
         Err(e) => err(e),
     }
 }
 
-async fn api_pause_container(Query(q): Query<ContainerIdQuery>) -> (StatusCode, Json<ApiResponse<String>>) {
+async fn api_pause_container(
+    Query(q): Query<ContainerIdQuery>,
+) -> (StatusCode, Json<ApiResponse<String>>) {
     let id = q.container_id;
     match run_blocking(move || run_cmd("docker", &["pause", &id])).await {
         Ok(out) => ok(out),
@@ -1129,7 +1452,9 @@ async fn api_pause_container(Query(q): Query<ContainerIdQuery>) -> (StatusCode, 
     }
 }
 
-async fn api_unpause_container(Query(q): Query<ContainerIdQuery>) -> (StatusCode, Json<ApiResponse<String>>) {
+async fn api_unpause_container(
+    Query(q): Query<ContainerIdQuery>,
+) -> (StatusCode, Json<ApiResponse<String>>) {
     let id = q.container_id;
     match run_blocking(move || run_cmd("docker", &["unpause", &id])).await {
         Ok(out) => ok(out),
@@ -1148,30 +1473,77 @@ struct ModelQuery {
     model_name: String,
     #[serde(default = "default_port")]
     port: u16,
+    #[serde(default)]
+    runner: String,
 }
 
-fn default_port() -> u16 { 11434 }
+fn default_port() -> u16 {
+    11434
+}
 
-async fn api_list_models(Query(q): Query<ModelQuery>) -> (StatusCode, Json<ApiResponse<Vec<models::AiModel>>>) {
+async fn api_list_models(
+    Query(q): Query<ModelQuery>,
+) -> (StatusCode, Json<ApiResponse<Vec<models::AiModel>>>) {
     let profile = q.profile;
+    let runner = q.runner;
     match run_blocking(move || {
+        let mut args = vec!["model", "list", "--profile", &profile];
+        if !runner.is_empty() {
+            args.push("--runner");
+            args.push(&runner);
+        }
         let output = Command::new("colima")
-            .args(["ssh", "--profile", &profile, "--", "ollama", "list", "--json"])
+            .args(&args)
             .output()
-            .map_err(|e| format!("Failed to list models: {}", e))?;
+            .map_err(|e| {
+                if e.kind() == std::io::ErrorKind::NotFound {
+                    "'colima' is not installed. Install with: brew install colima".to_string()
+                } else {
+                    format!("Failed to list models: {}", e)
+                }
+            })?;
 
         if !output.status.success() {
-            return Err(format!("list models failed: {}", String::from_utf8_lossy(&output.stderr)));
+            let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+            if stderr.contains("not supported") || stderr.contains("not available") {
+                return Ok(vec![]);
+            }
+            if stderr.contains("krunkit") || stderr.contains("vm-type") {
+                return Err("GPU support requires krunkit. Install with: brew tap slp/krunkit && brew install krunkit\nThen restart: colima start --runtime docker --vm-type krunkit".to_string());
+            }
+            return Err(format!("list models failed: {}", stderr));
         }
 
         let stdout = String::from_utf8_lossy(&output.stdout);
-        if stdout.trim().is_empty() { return Ok(vec![]); }
+        if stdout.trim().is_empty() {
+            return Ok(vec![]);
+        }
 
-        Ok(stdout.lines()
-            .filter(|l| !l.trim().is_empty())
-            .filter_map(|l| serde_json::from_str(l).ok())
+        // Try JSON parse first
+        if let Ok(models) = serde_json::from_str::<Vec<models::AiModel>>(&stdout) {
+            return Ok(models);
+        }
+
+        // Fallback: parse text table output
+        Ok(stdout
+            .lines()
+            .skip(1) // Skip header
+            .filter(|l| !l.trim().is_empty() && !l.starts_with("---"))
+            .map(|line| {
+                let parts: Vec<&str> = line.split_whitespace().collect();
+                models::AiModel {
+                    name: parts.first().unwrap_or(&"unknown").to_string(),
+                    size: parts.get(1).unwrap_or(&"").to_string(),
+                    format: parts.get(2).unwrap_or(&"").to_string(),
+                    family: parts.get(3).unwrap_or(&"").to_string(),
+                    parameters: parts.get(4).unwrap_or(&"").to_string(),
+                    quantization: parts.get(5).unwrap_or(&"").to_string(),
+                }
+            })
             .collect())
-    }).await {
+    })
+    .await
+    {
         Ok(list) => ok(list),
         Err(e) => err(e),
     }
@@ -1180,10 +1552,18 @@ async fn api_list_models(Query(q): Query<ModelQuery>) -> (StatusCode, Json<ApiRe
 async fn api_pull_model(Query(q): Query<ModelQuery>) -> (StatusCode, Json<ApiResponse<String>>) {
     let profile = q.profile;
     let model_name = q.model_name;
+    let runner = q.runner;
     match run_blocking(move || {
-        run_cmd("colima", &["ssh", "--profile", &profile, "--", "ollama", "pull", &model_name])
+        let mut args = vec!["model", "pull", &model_name, "--profile", &profile];
+        if !runner.is_empty() {
+            args.push("--runner");
+            args.push(&runner);
+        }
+        run_cmd("colima", &args)
             .map(|_| format!("Model '{}' pulled", model_name))
-    }).await {
+    })
+    .await
+    {
         Ok(msg) => ok(msg),
         Err(e) => err(e),
     }
@@ -1193,10 +1573,21 @@ async fn api_serve_model(Query(q): Query<ModelQuery>) -> (StatusCode, Json<ApiRe
     let profile = q.profile;
     let model_name = q.model_name;
     let port = q.port;
+    let runner = q.runner;
+    let port_str = port.to_string();
     match run_blocking(move || {
-        run_cmd("colima", &["ssh", "--profile", &profile, "--", "ollama", "serve", &model_name, "--port", &port.to_string()])
+        let mut args = vec![
+            "model", "serve", &model_name, "--port", &port_str, "--profile", &profile,
+        ];
+        if !runner.is_empty() {
+            args.push("--runner");
+            args.push(&runner);
+        }
+        run_cmd("colima", &args)
             .map(|_| format!("Model '{}' served on port {}", model_name, port))
-    }).await {
+    })
+    .await
+    {
         Ok(msg) => ok(msg),
         Err(e) => err(e),
     }
@@ -1205,10 +1596,18 @@ async fn api_serve_model(Query(q): Query<ModelQuery>) -> (StatusCode, Json<ApiRe
 async fn api_delete_model(Query(q): Query<ModelQuery>) -> (StatusCode, Json<ApiResponse<String>>) {
     let profile = q.profile;
     let model_name = q.model_name;
+    let runner = q.runner;
     match run_blocking(move || {
-        run_cmd("colima", &["ssh", "--profile", &profile, "--", "ollama", "rm", &model_name])
+        let mut args = vec!["model", "delete", &model_name, "--profile", &profile];
+        if !runner.is_empty() {
+            args.push("--runner");
+            args.push(&runner);
+        }
+        run_cmd("colima", &args)
             .map(|_| format!("Model '{}' deleted", model_name))
-    }).await {
+    })
+    .await
+    {
         Ok(msg) => ok(msg),
         Err(e) => err(e),
     }
@@ -1306,7 +1705,9 @@ async fn api_terminal_resize(
 
 // ===== AI Chat route =====
 
-async fn api_ai_chat(Json(body): Json<serde_json::Value>) -> (StatusCode, Json<ApiResponse<String>>) {
+async fn api_ai_chat(
+    Json(body): Json<serde_json::Value>,
+) -> (StatusCode, Json<ApiResponse<String>>) {
     let provider = body["provider"].as_str().unwrap_or("").to_string();
     let model = body["model"].as_str().unwrap_or("").to_string();
     let api_key = body["api_key"].as_str().unwrap_or("").to_string();
@@ -1339,7 +1740,9 @@ async fn api_ai_chat(Json(body): Json<serde_json::Value>) -> (StatusCode, Json<A
     }
 }
 
-async fn api_ai_list_models(Json(body): Json<serde_json::Value>) -> (StatusCode, Json<ApiResponse<String>>) {
+async fn api_ai_list_models(
+    Json(body): Json<serde_json::Value>,
+) -> (StatusCode, Json<ApiResponse<String>>) {
     let provider = body["provider"].as_str().unwrap_or("").to_string();
     let api_key = body["api_key"].as_str().unwrap_or("").to_string();
     let endpoint = body["endpoint"].as_str().unwrap_or("").to_string();
@@ -1409,7 +1812,9 @@ async fn api_lima_stop(Json(body): Json<LimaNameBody>) -> (StatusCode, Json<ApiR
     }
 }
 
-async fn api_lima_delete(Json(body): Json<LimaDeleteBody>) -> (StatusCode, Json<ApiResponse<String>>) {
+async fn api_lima_delete(
+    Json(body): Json<LimaDeleteBody>,
+) -> (StatusCode, Json<ApiResponse<String>>) {
     let name = body.name;
     let force = body.force;
     match run_blocking(move || {
@@ -1418,7 +1823,9 @@ async fn api_lima_delete(Json(body): Json<LimaDeleteBody>) -> (StatusCode, Json<
         } else {
             run_cmd("limactl", &["delete", &name])
         }
-    }).await {
+    })
+    .await
+    {
         Ok(out) => ok(out),
         Err(e) => err(e),
     }
@@ -1431,10 +1838,51 @@ async fn api_lima_info() -> (StatusCode, Json<ApiResponse<String>>) {
     }
 }
 
-async fn api_lima_shell(Json(body): Json<LimaShellBody>) -> (StatusCode, Json<ApiResponse<String>>) {
+async fn api_lima_shell(
+    Json(body): Json<LimaShellBody>,
+) -> (StatusCode, Json<ApiResponse<String>>) {
     let name = body.name;
     let command = body.command;
-    match run_blocking(move || run_cmd("limactl", &["shell", &name, "--", "sh", "-c", &command])).await {
+    match run_blocking(move || {
+        let output = Command::new("limactl")
+            .args(["shell", &name, "--", "sh", "-c", &command])
+            .output()
+            .map_err(|e| {
+                if e.kind() == std::io::ErrorKind::NotFound {
+                    "'limactl' is not installed. Install with: brew install lima".to_string()
+                } else {
+                    format!("Failed to execute shell command: {}", e)
+                }
+            })?;
+
+        // Combine stdout and stderr — shell commands write to both
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+
+        let mut result = String::new();
+        if !stdout.is_empty() {
+            result.push_str(&stdout);
+        }
+        if !stderr.is_empty() {
+            if !result.is_empty() && !result.ends_with('\n') {
+                result.push('\n');
+            }
+            result.push_str(&stderr);
+        }
+
+        // Non-zero exit is not a fatal error for shell commands
+        // (e.g. apt returns 100 for lock errors but still has useful output)
+        if !output.status.success() && result.trim().is_empty() {
+            return Err(format!(
+                "Command exited with code {:?}",
+                output.status.code()
+            ));
+        }
+
+        Ok(result)
+    })
+    .await
+    {
         Ok(out) => ok(out),
         Err(e) => err(e),
     }
@@ -1459,11 +1907,19 @@ struct LimaCreateBody {
     #[serde(default)]
     template: String,
 }
-fn default_cpus() -> u32 { 2 }
-fn default_memory() -> u32 { 2 }
-fn default_disk() -> u32 { 60 }
+fn default_cpus() -> u32 {
+    2
+}
+fn default_memory() -> u32 {
+    2
+}
+fn default_disk() -> u32 {
+    60
+}
 
-async fn api_lima_create(Json(body): Json<LimaCreateBody>) -> (StatusCode, Json<ApiResponse<String>>) {
+async fn api_lima_create(
+    Json(body): Json<LimaCreateBody>,
+) -> (StatusCode, Json<ApiResponse<String>>) {
     let name = body.name.clone();
     let cpus = body.cpus;
     let memory = body.memory;
@@ -1487,7 +1943,9 @@ async fn api_lima_create(Json(body): Json<LimaCreateBody>) -> (StatusCode, Json<
         run_cmd("limactl", &arg_refs)?;
         // auto-start after create
         run_cmd("limactl", &["start", &name_start])
-    }).await {
+    })
+    .await
+    {
         Ok(out) => ok(out),
         Err(e) => err(e),
     }
@@ -1548,11 +2006,16 @@ async fn api_k8s_pods(Query(q): Query<K8sNsQuery>) -> (StatusCode, Json<ApiRespo
     let ns = q.namespace;
     match run_blocking(move || {
         if ns.is_empty() || ns == "all" {
-            run_cmd("kubectl", &["get", "pods", "-o", "json", "--all-namespaces"])
+            run_cmd(
+                "kubectl",
+                &["get", "pods", "-o", "json", "--all-namespaces"],
+            )
         } else {
             run_cmd("kubectl", &["get", "pods", "-o", "json", "-n", &ns])
         }
-    }).await {
+    })
+    .await
+    {
         Ok(out) => ok(out),
         Err(e) => err(e),
     }
@@ -1562,41 +2025,64 @@ async fn api_k8s_services(Query(q): Query<K8sNsQuery>) -> (StatusCode, Json<ApiR
     let ns = q.namespace;
     match run_blocking(move || {
         if ns.is_empty() || ns == "all" {
-            run_cmd("kubectl", &["get", "services", "-o", "json", "--all-namespaces"])
+            run_cmd(
+                "kubectl",
+                &["get", "services", "-o", "json", "--all-namespaces"],
+            )
         } else {
             run_cmd("kubectl", &["get", "services", "-o", "json", "-n", &ns])
         }
-    }).await {
+    })
+    .await
+    {
         Ok(out) => ok(out),
         Err(e) => err(e),
     }
 }
 
-async fn api_k8s_deployments(Query(q): Query<K8sNsQuery>) -> (StatusCode, Json<ApiResponse<String>>) {
+async fn api_k8s_deployments(
+    Query(q): Query<K8sNsQuery>,
+) -> (StatusCode, Json<ApiResponse<String>>) {
     let ns = q.namespace;
     match run_blocking(move || {
         if ns.is_empty() || ns == "all" {
-            run_cmd("kubectl", &["get", "deployments", "-o", "json", "--all-namespaces"])
+            run_cmd(
+                "kubectl",
+                &["get", "deployments", "-o", "json", "--all-namespaces"],
+            )
         } else {
             run_cmd("kubectl", &["get", "deployments", "-o", "json", "-n", &ns])
         }
-    }).await {
+    })
+    .await
+    {
         Ok(out) => ok(out),
         Err(e) => err(e),
     }
 }
 
-async fn api_k8s_pod_logs(Query(q): Query<K8sPodLogQuery>) -> (StatusCode, Json<ApiResponse<String>>) {
+async fn api_k8s_pod_logs(
+    Query(q): Query<K8sPodLogQuery>,
+) -> (StatusCode, Json<ApiResponse<String>>) {
     let tail = q.lines.to_string();
     let ns = q.namespace;
     let pod = q.pod;
-    match run_blocking(move || run_cmd("kubectl", &["logs", "-n", &ns, &pod, "--tail", &tail, "--timestamps"])).await {
+    match run_blocking(move || {
+        run_cmd(
+            "kubectl",
+            &["logs", "-n", &ns, &pod, "--tail", &tail, "--timestamps"],
+        )
+    })
+    .await
+    {
         Ok(out) => ok(out),
         Err(e) => err(e),
     }
 }
 
-async fn api_k8s_delete_pod(Json(body): Json<K8sDeletePodBody>) -> (StatusCode, Json<ApiResponse<String>>) {
+async fn api_k8s_delete_pod(
+    Json(body): Json<K8sDeletePodBody>,
+) -> (StatusCode, Json<ApiResponse<String>>) {
     let ns = body.namespace;
     let pod = body.pod;
     match run_blocking(move || run_cmd("kubectl", &["delete", "pod", "-n", &ns, &pod])).await {
@@ -1605,7 +2091,9 @@ async fn api_k8s_delete_pod(Json(body): Json<K8sDeletePodBody>) -> (StatusCode, 
     }
 }
 
-async fn api_k8s_describe(Query(q): Query<K8sDescribeQuery>) -> (StatusCode, Json<ApiResponse<String>>) {
+async fn api_k8s_describe(
+    Query(q): Query<K8sDescribeQuery>,
+) -> (StatusCode, Json<ApiResponse<String>>) {
     let rt = q.resource_type;
     let ns = q.namespace;
     let name = q.name;
@@ -1619,7 +2107,14 @@ async fn api_k8s_scale(Json(body): Json<K8sScaleBody>) -> (StatusCode, Json<ApiR
     let replicas = format!("--replicas={}", body.replicas);
     let ns = body.namespace;
     let dep = body.deployment;
-    match run_blocking(move || run_cmd("kubectl", &["scale", "deployment", &dep, "-n", &ns, &replicas])).await {
+    match run_blocking(move || {
+        run_cmd(
+            "kubectl",
+            &["scale", "deployment", &dep, "-n", &ns, &replicas],
+        )
+    })
+    .await
+    {
         Ok(out) => ok(out),
         Err(e) => err(e),
     }
@@ -1636,11 +2131,30 @@ async fn api_k8s_events(Query(q): Query<K8sNsQuery>) -> (StatusCode, Json<ApiRes
     let ns = q.namespace;
     match run_blocking(move || {
         if ns.is_empty() || ns == "all" {
-            run_cmd("kubectl", &["get", "events", "--sort-by=.metadata.creationTimestamp", "--all-namespaces"])
+            run_cmd(
+                "kubectl",
+                &[
+                    "get",
+                    "events",
+                    "--sort-by=.metadata.creationTimestamp",
+                    "--all-namespaces",
+                ],
+            )
         } else {
-            run_cmd("kubectl", &["get", "events", "--sort-by=.metadata.creationTimestamp", "-n", &ns])
+            run_cmd(
+                "kubectl",
+                &[
+                    "get",
+                    "events",
+                    "--sort-by=.metadata.creationTimestamp",
+                    "-n",
+                    &ns,
+                ],
+            )
         }
-    }).await {
+    })
+    .await
+    {
         Ok(out) => ok(out),
         Err(e) => err(e),
     }
@@ -1654,27 +2168,59 @@ struct K8sResourceQuery {
     namespace: String,
 }
 
-async fn api_k8s_resources(Query(q): Query<K8sResourceQuery>) -> (StatusCode, Json<ApiResponse<String>>) {
+async fn api_k8s_resources(
+    Query(q): Query<K8sResourceQuery>,
+) -> (StatusCode, Json<ApiResponse<String>>) {
     let resource = q.resource;
     let ns = q.namespace;
     // Whitelist allowed resource types
-    let allowed = ["pods", "deployments", "services", "namespaces",
-                   "configmaps", "secrets", "statefulsets", "daemonsets", "replicasets",
-                   "jobs", "cronjobs", "ingresses", "persistentvolumes", "persistentvolumeclaims",
-                   "pv", "pvc", "endpoints", "serviceaccounts", "roles", "rolebindings",
-                   "clusterroles", "clusterrolebindings", "storageclasses", "networkpolicies",
-                   "horizontalpodautoscalers", "hpa", "limitranges", "resourcequotas",
-                   "poddisruptionbudgets", "pdb"];
+    let allowed = [
+        "pods",
+        "deployments",
+        "services",
+        "namespaces",
+        "configmaps",
+        "secrets",
+        "statefulsets",
+        "daemonsets",
+        "replicasets",
+        "jobs",
+        "cronjobs",
+        "ingresses",
+        "persistentvolumes",
+        "persistentvolumeclaims",
+        "pv",
+        "pvc",
+        "endpoints",
+        "serviceaccounts",
+        "roles",
+        "rolebindings",
+        "clusterroles",
+        "clusterrolebindings",
+        "storageclasses",
+        "networkpolicies",
+        "horizontalpodautoscalers",
+        "hpa",
+        "limitranges",
+        "resourcequotas",
+        "poddisruptionbudgets",
+        "pdb",
+    ];
     if !allowed.contains(&resource.as_str()) {
         return err(format!("Resource type '{}' not allowed", resource));
     }
     match run_blocking(move || {
         if ns.is_empty() || ns == "all" {
-            run_cmd("kubectl", &["get", &resource, "-o", "json", "--all-namespaces"])
+            run_cmd(
+                "kubectl",
+                &["get", &resource, "-o", "json", "--all-namespaces"],
+            )
         } else {
             run_cmd("kubectl", &["get", &resource, "-o", "json", "-n", &ns])
         }
-    }).await {
+    })
+    .await
+    {
         Ok(out) => ok(out),
         Err(e) => err(e),
     }
@@ -1689,7 +2235,9 @@ struct K8sDeleteBody {
     name: String,
 }
 
-async fn api_k8s_delete_resource(Json(body): Json<K8sDeleteBody>) -> (StatusCode, Json<ApiResponse<String>>) {
+async fn api_k8s_delete_resource(
+    Json(body): Json<K8sDeleteBody>,
+) -> (StatusCode, Json<ApiResponse<String>>) {
     let rt = body.resource_type;
     let ns = body.namespace;
     let name = body.name;
@@ -1708,12 +2256,16 @@ struct K8sRestartBody {
     name: String,
 }
 
-async fn api_k8s_restart(Json(body): Json<K8sRestartBody>) -> (StatusCode, Json<ApiResponse<String>>) {
+async fn api_k8s_restart(
+    Json(body): Json<K8sRestartBody>,
+) -> (StatusCode, Json<ApiResponse<String>>) {
     let rt = body.resource_type;
     let ns = body.namespace;
     let name = body.name;
     let target = format!("{}/{}", rt, name);
-    match run_blocking(move || run_cmd("kubectl", &["rollout", "restart", &target, "-n", &ns])).await {
+    match run_blocking(move || run_cmd("kubectl", &["rollout", "restart", &target, "-n", &ns]))
+        .await
+    {
         Ok(out) => ok(out),
         Err(e) => err(e),
     }
@@ -1738,7 +2290,9 @@ async fn api_k8s_yaml(Query(q): Query<K8sYamlQuery>) -> (StatusCode, Json<ApiRes
         } else {
             run_cmd("kubectl", &["get", &rt, &name, "-n", &ns, "-o", "yaml"])
         }
-    }).await {
+    })
+    .await
+    {
         Ok(out) => ok(out),
         Err(e) => err(e),
     }
@@ -1753,15 +2307,29 @@ async fn api_k8s_nodes_json() -> (StatusCode, Json<ApiResponse<String>>) {
 }
 
 // Events as JSON
-async fn api_k8s_events_json(Query(q): Query<K8sNsQuery>) -> (StatusCode, Json<ApiResponse<String>>) {
+async fn api_k8s_events_json(
+    Query(q): Query<K8sNsQuery>,
+) -> (StatusCode, Json<ApiResponse<String>>) {
     let ns = q.namespace;
     match run_blocking(move || {
         if ns.is_empty() || ns == "all" {
-            run_cmd("kubectl", &["get", "events", "-o", "json", "--sort-by=.metadata.creationTimestamp", "--all-namespaces"])
+            run_cmd(
+                "kubectl",
+                &[
+                    "get",
+                    "events",
+                    "-o",
+                    "json",
+                    "--sort-by=.metadata.creationTimestamp",
+                    "--all-namespaces",
+                ],
+            )
         } else {
             run_cmd("kubectl", &["get", "events", "-o", "json", "-n", &ns])
         }
-    }).await {
+    })
+    .await
+    {
         Ok(out) => ok(out),
         Err(e) => err(e),
     }
@@ -1787,7 +2355,9 @@ struct K8sContextBody {
     context: String,
 }
 
-async fn api_k8s_set_context(Json(body): Json<K8sContextBody>) -> (StatusCode, Json<ApiResponse<String>>) {
+async fn api_k8s_set_context(
+    Json(body): Json<K8sContextBody>,
+) -> (StatusCode, Json<ApiResponse<String>>) {
     let ctx = body.context;
     match run_blocking(move || run_cmd("kubectl", &["config", "use-context", &ctx])).await {
         Ok(out) => ok(out),
@@ -1808,8 +2378,8 @@ async fn api_k8s_apply(Json(body): Json<K8sApplyBody>) -> (StatusCode, Json<ApiR
     let yaml_content = body.yaml;
     let ns = body.namespace;
     match run_blocking(move || {
-        use std::process::{Command, Stdio};
         use std::io::Write;
+        use std::process::{Command, Stdio};
         let mut args = vec!["apply", "-f", "-"];
         if !ns.is_empty() && ns != "all" {
             args.push("-n");
@@ -1823,24 +2393,27 @@ async fn api_k8s_apply(Json(body): Json<K8sApplyBody>) -> (StatusCode, Json<ApiR
             .spawn()
             .map_err(|e| format!("Failed to spawn kubectl: {}", e))?;
         if let Some(mut stdin) = child.stdin.take() {
-            stdin.write_all(yaml_content.as_bytes())
+            stdin
+                .write_all(yaml_content.as_bytes())
                 .map_err(|e| format!("Failed to write YAML: {}", e))?;
         }
-        let output = child.wait_with_output()
+        let output = child
+            .wait_with_output()
             .map_err(|e| format!("Failed to wait: {}", e))?;
         if output.status.success() {
             Ok(String::from_utf8_lossy(&output.stdout).to_string())
         } else {
             Err(String::from_utf8_lossy(&output.stderr).to_string())
         }
-    }).await {
+    })
+    .await
+    {
         Ok(out) => ok(out),
         Err(e) => err(e),
     }
 }
 
 // ===== Phase 2: Port Forward =====
-
 
 lazy_static::lazy_static! {
     static ref PORT_FORWARDS: Mutex<HashMap<String, u32>> = Mutex::new(HashMap::new());
@@ -1857,10 +2430,14 @@ struct K8sPortForwardBody {
     #[serde(alias = "remotePort")]
     remote_port: u16,
 }
-fn default_pod_type() -> String { "pod".to_string() }
+fn default_pod_type() -> String {
+    "pod".to_string()
+}
 
-async fn api_k8s_port_forward_start(Json(body): Json<K8sPortForwardBody>) -> (StatusCode, Json<ApiResponse<String>>) {
-    let key = format!("{}:{}", body.local_port, body.remote_port);
+async fn api_k8s_port_forward_start(
+    Json(body): Json<K8sPortForwardBody>,
+) -> (StatusCode, Json<ApiResponse<String>>) {
+    let _key = format!("{}:{}", body.local_port, body.remote_port);
     let ns = body.namespace;
     let target = format!("{}/{}", body.resource_type, body.name);
     let ports = format!("{}:{}", body.local_port, body.remote_port);
@@ -1878,8 +2455,13 @@ async fn api_k8s_port_forward_start(Json(body): Json<K8sPortForwardBody>) -> (St
         if let Ok(mut fwds) = PORT_FORWARDS.lock() {
             fwds.insert(format!("{}", local_port), pid);
         }
-        Ok(format!("Port forward started: localhost:{} → {}", local_port, ports))
-    }).await {
+        Ok(format!(
+            "Port forward started: localhost:{} → {}",
+            local_port, ports
+        ))
+    })
+    .await
+    {
         Ok(out) => ok(out),
         Err(e) => err(e),
     }
@@ -1891,14 +2473,18 @@ struct K8sPortForwardStopBody {
     local_port: u16,
 }
 
-async fn api_k8s_port_forward_stop(Json(body): Json<K8sPortForwardStopBody>) -> (StatusCode, Json<ApiResponse<String>>) {
+async fn api_k8s_port_forward_stop(
+    Json(body): Json<K8sPortForwardStopBody>,
+) -> (StatusCode, Json<ApiResponse<String>>) {
     let port = body.local_port;
     match run_blocking(move || {
         if let Ok(mut fwds) = PORT_FORWARDS.lock() {
             let key = format!("{}", port);
             if let Some(pid) = fwds.remove(&key) {
                 #[cfg(unix)]
-                unsafe { libc::kill(pid as i32, libc::SIGTERM); }
+                unsafe {
+                    libc::kill(pid as i32, libc::SIGTERM);
+                }
                 return Ok(format!("Port forward on {} stopped", port));
             }
         }
@@ -1909,12 +2495,16 @@ async fn api_k8s_port_forward_stop(Json(body): Json<K8sPortForwardStopBody>) -> 
             .and_then(|o| {
                 let pids = String::from_utf8_lossy(&o.stdout).trim().to_string();
                 if !pids.is_empty() {
-                    std::process::Command::new("kill").args(pids.split('\n')).output()?;
+                    std::process::Command::new("kill")
+                        .args(pids.split('\n'))
+                        .output()?;
                 }
                 Ok(())
             });
         Ok(format!("Port forward on {} stopped", port))
-    }).await {
+    })
+    .await
+    {
         Ok(out) => ok(out),
         Err(e) => err(e),
     }
@@ -1923,9 +2513,14 @@ async fn api_k8s_port_forward_stop(Json(body): Json<K8sPortForwardStopBody>) -> 
 async fn api_k8s_port_forward_list() -> (StatusCode, Json<ApiResponse<String>>) {
     match run_blocking(|| {
         let fwds = PORT_FORWARDS.lock().map_err(|e| format!("{}", e))?;
-        let result: Vec<String> = fwds.iter().map(|(port, pid)| format!("{}:{}", port, pid)).collect();
+        let result: Vec<String> = fwds
+            .iter()
+            .map(|(port, pid)| format!("{}:{}", port, pid))
+            .collect();
         Ok(result.join("\n"))
-    }).await {
+    })
+    .await
+    {
         Ok(out) => ok(out),
         Err(e) => err(e),
     }
@@ -1956,9 +2551,10 @@ async fn api_k8s_exec(Json(body): Json<K8sExecBody>) -> (StatusCode, Json<ApiRes
         #[cfg(target_os = "macos")]
         {
             std::process::Command::new("osascript")
-                .args(&["-e", &format!(
-                    "tell application \"Terminal\" to do script \"{}\"", cmd_str
-                )])
+                .args(&[
+                    "-e",
+                    &format!("tell application \"Terminal\" to do script \"{}\"", cmd_str),
+                ])
                 .spawn()
                 .map_err(|e| format!("Failed to open terminal: {}", e))?;
         }
@@ -1982,7 +2578,9 @@ async fn api_k8s_exec(Json(body): Json<K8sExecBody>) -> (StatusCode, Json<ApiRes
             }
         }
         Ok(format!("Shell opened for pod {}", pod))
-    }).await {
+    })
+    .await
+    {
         Ok(out) => ok(out),
         Err(e) => err(e),
     }
@@ -2002,7 +2600,9 @@ struct K8sContainerLogQuery {
     previous: bool,
 }
 
-async fn api_k8s_container_logs(Query(q): Query<K8sContainerLogQuery>) -> (StatusCode, Json<ApiResponse<String>>) {
+async fn api_k8s_container_logs(
+    Query(q): Query<K8sContainerLogQuery>,
+) -> (StatusCode, Json<ApiResponse<String>>) {
     let tail = q.lines.to_string();
     let ns = q.namespace;
     let pod = q.pod;
@@ -2018,19 +2618,36 @@ async fn api_k8s_container_logs(Query(q): Query<K8sContainerLogQuery>) -> (Statu
             args.push("--previous");
         }
         run_cmd("kubectl", &args)
-    }).await {
+    })
+    .await
+    {
         Ok(out) => ok(out),
         Err(e) => err(e),
     }
 }
 
 // Get pod containers list
-async fn api_k8s_pod_containers(Query(q): Query<K8sDeletePodBody>) -> (StatusCode, Json<ApiResponse<String>>) {
+async fn api_k8s_pod_containers(
+    Query(q): Query<K8sDeletePodBody>,
+) -> (StatusCode, Json<ApiResponse<String>>) {
     let ns = q.namespace;
     let pod = q.pod;
     match run_blocking(move || {
-        run_cmd("kubectl", &["get", "pod", "-n", &ns, &pod, "-o", "jsonpath={.spec.containers[*].name}"])
-    }).await {
+        run_cmd(
+            "kubectl",
+            &[
+                "get",
+                "pod",
+                "-n",
+                &ns,
+                &pod,
+                "-o",
+                "jsonpath={.spec.containers[*].name}",
+            ],
+        )
+    })
+    .await
+    {
         Ok(out) => ok(out),
         Err(e) => err(e),
     }
@@ -2044,17 +2661,28 @@ struct K8sNodeBody {
     action: String, // cordon, uncordon, drain
 }
 
-async fn api_k8s_node_action(Json(body): Json<K8sNodeBody>) -> (StatusCode, Json<ApiResponse<String>>) {
+async fn api_k8s_node_action(
+    Json(body): Json<K8sNodeBody>,
+) -> (StatusCode, Json<ApiResponse<String>>) {
     let name = body.name;
     let action = body.action;
-    match run_blocking(move || {
-        match action.as_str() {
-            "cordon" => run_cmd("kubectl", &["cordon", &name]),
-            "uncordon" => run_cmd("kubectl", &["uncordon", &name]),
-            "drain" => run_cmd("kubectl", &["drain", &name, "--ignore-daemonsets", "--delete-emptydir-data", "--force"]),
-            _ => Err(format!("Unknown action: {}", action)),
-        }
-    }).await {
+    match run_blocking(move || match action.as_str() {
+        "cordon" => run_cmd("kubectl", &["cordon", &name]),
+        "uncordon" => run_cmd("kubectl", &["uncordon", &name]),
+        "drain" => run_cmd(
+            "kubectl",
+            &[
+                "drain",
+                &name,
+                "--ignore-daemonsets",
+                "--delete-emptydir-data",
+                "--force",
+            ],
+        ),
+        _ => Err(format!("Unknown action: {}", action)),
+    })
+    .await
+    {
         Ok(out) => ok(out),
         Err(e) => err(e),
     }
@@ -2076,7 +2704,9 @@ struct KindCreateBody {
     image: String,
 }
 
-async fn api_kind_create(Json(body): Json<KindCreateBody>) -> (StatusCode, Json<ApiResponse<String>>) {
+async fn api_kind_create(
+    Json(body): Json<KindCreateBody>,
+) -> (StatusCode, Json<ApiResponse<String>>) {
     let name = body.name;
     let image = body.image;
     match run_blocking(move || {
@@ -2086,7 +2716,9 @@ async fn api_kind_create(Json(body): Json<KindCreateBody>) -> (StatusCode, Json<
             args.push(&image);
         }
         run_cmd("kind", &args)
-    }).await {
+    })
+    .await
+    {
         Ok(out) => ok(out),
         Err(e) => err(e),
     }
@@ -2097,7 +2729,9 @@ struct KindDeleteBody {
     name: String,
 }
 
-async fn api_kind_delete(Json(body): Json<KindDeleteBody>) -> (StatusCode, Json<ApiResponse<String>>) {
+async fn api_kind_delete(
+    Json(body): Json<KindDeleteBody>,
+) -> (StatusCode, Json<ApiResponse<String>>) {
     let name = body.name;
     match run_blocking(move || run_cmd("kind", &["delete", "cluster", "--name", &name])).await {
         Ok(out) => ok(out),
@@ -2115,14 +2749,20 @@ struct K8sGenericScaleBody {
     name: String,
     replicas: u32,
 }
-fn default_deployment_type() -> String { "deployment".to_string() }
+fn default_deployment_type() -> String {
+    "deployment".to_string()
+}
 
-async fn api_k8s_generic_scale(Json(body): Json<K8sGenericScaleBody>) -> (StatusCode, Json<ApiResponse<String>>) {
+async fn api_k8s_generic_scale(
+    Json(body): Json<K8sGenericScaleBody>,
+) -> (StatusCode, Json<ApiResponse<String>>) {
     let replicas = format!("--replicas={}", body.replicas);
     let ns = body.namespace;
     let name = body.name;
     let rt = body.resource_type;
-    match run_blocking(move || run_cmd("kubectl", &["scale", &rt, &name, "-n", &ns, &replicas])).await {
+    match run_blocking(move || run_cmd("kubectl", &["scale", &rt, &name, "-n", &ns, &replicas]))
+        .await
+    {
         Ok(out) => ok(out),
         Err(e) => err(e),
     }
@@ -2354,9 +2994,225 @@ async fn api_k8s_cluster_health() -> (StatusCode, Json<ApiResponse<String>>) {
     }
 }
 
+// ===== CRD Support =====
+
+/// List all Custom Resource Definitions
+async fn api_k8s_crds() -> (StatusCode, Json<ApiResponse<String>>) {
+    match run_blocking(|| {
+        run_cmd("kubectl", &["get", "crd", "-o", "json"])
+    })
+    .await
+    {
+        Ok(out) => ok(out),
+        Err(e) => err(e),
+    }
+}
+
+#[derive(Deserialize)]
+struct K8sCrdQuery {
+    resource: String,    // e.g. "kustomizations.kustomize.toolkit.fluxcd.io"
+    #[serde(default)]
+    namespace: String,
+}
+
+/// List instances of a specific CRD type
+async fn api_k8s_crd_resources(
+    Query(q): Query<K8sCrdQuery>,
+) -> (StatusCode, Json<ApiResponse<String>>) {
+    let resource = q.resource;
+    let ns = q.namespace;
+    // Validate: must look like a valid k8s resource name (alphanumeric, dots, hyphens)
+    if resource.is_empty() || !resource.chars().all(|c| c.is_alphanumeric() || c == '.' || c == '-') {
+        return err(format!("Invalid CRD resource: {}", resource));
+    }
+    match run_blocking(move || {
+        if ns.is_empty() || ns == "all" {
+            run_cmd("kubectl", &["get", &resource, "-o", "json", "--all-namespaces"])
+        } else {
+            run_cmd("kubectl", &["get", &resource, "-o", "json", "-n", &ns])
+        }
+    })
+    .await
+    {
+        Ok(out) => ok(out),
+        Err(e) => err(e),
+    }
+}
+
+// ===== Real-time Log Streaming via SSE =====
+
+#[derive(Deserialize)]
+struct K8sLogStreamQuery {
+    namespace: String,
+    pod: String,
+    #[serde(default)]
+    container: String,
+    #[serde(default = "default_tail_lines")]
+    tail: u32,
+}
+
+fn default_tail_lines() -> u32 { 50 }
+
+async fn api_k8s_log_stream(
+    Query(q): Query<K8sLogStreamQuery>,
+) -> Sse<impl futures_util::Stream<Item = Result<Event, Infallible>>> {
+    let ns = q.namespace;
+    let pod = q.pod;
+    let container = q.container;
+    let tail = q.tail.to_string();
+
+    let stream = async_stream::stream! {
+        let mut args = vec![
+            "logs".to_string(), "-f".to_string(),
+            "-n".to_string(), ns,
+            pod,
+            "--tail".to_string(), tail,
+            "--timestamps".to_string(),
+        ];
+        if !container.is_empty() {
+            args.push("-c".to_string());
+            args.push(container);
+        }
+        let child = tokio::process::Command::new("kubectl")
+            .args(&args)
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn();
+
+        match child {
+            Ok(mut child) => {
+                if let Some(stdout) = child.stdout.take() {
+                    let reader = tokio::io::BufReader::new(stdout);
+                    let mut lines = tokio::io::AsyncBufReadExt::lines(reader);
+                    while let Ok(Some(line)) = lines.next_line().await {
+                        yield Ok(Event::default().data(line));
+                    }
+                }
+                let _ = child.kill().await;
+            }
+            Err(e) => {
+                yield Ok(Event::default().data(format!("[error] Failed to start kubectl: {}", e)));
+            }
+        }
+    };
+
+    Sse::new(stream).keep_alive(
+        axum::response::sse::KeepAlive::new()
+            .interval(std::time::Duration::from_secs(15))
+            .text("ping")
+    )
+}
+
+// ===== HTTP Benchmark =====
+
+#[derive(Deserialize)]
+struct BenchmarkBody {
+    url: String,
+    #[serde(default = "default_concurrency")]
+    concurrency: u32,
+    #[serde(default = "default_requests")]
+    requests: u32,
+    #[serde(default)]
+    method: String,   // GET, POST, PUT, DELETE
+}
+
+fn default_concurrency() -> u32 { 5 }
+fn default_requests() -> u32 { 50 }
+
+async fn api_k8s_benchmark(
+    Json(body): Json<BenchmarkBody>,
+) -> (StatusCode, Json<ApiResponse<String>>) {
+    let url = body.url;
+    let concurrency = body.concurrency.min(100).max(1);
+    let total = body.requests.min(10000).max(1);
+    let method = if body.method.is_empty() { "GET".to_string() } else { body.method.to_uppercase() };
+
+    // Validate URL — only allow localhost / 127.0.0.1 / K8s service IPs
+    if !url.starts_with("http://") && !url.starts_with("https://") {
+        return err("URL must start with http:// or https://".to_string());
+    }
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .build()
+        .unwrap_or_default();
+
+    let semaphore = std::sync::Arc::new(tokio::sync::Semaphore::new(concurrency as usize));
+    let latencies = std::sync::Arc::new(tokio::sync::Mutex::new(Vec::<u128>::with_capacity(total as usize)));
+    let successes = std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0));
+    let failures = std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0));
+
+    let start = std::time::Instant::now();
+    let mut handles = Vec::new();
+
+    for _ in 0..total {
+        let permit = semaphore.clone().acquire_owned().await.unwrap();
+        let c = client.clone();
+        let u = url.clone();
+        let m = method.clone();
+        let lats = latencies.clone();
+        let succ = successes.clone();
+        let fail = failures.clone();
+
+        handles.push(tokio::spawn(async move {
+            let req_start = std::time::Instant::now();
+            let result = match m.as_str() {
+                "POST" => c.post(&u).send().await,
+                "PUT" => c.put(&u).send().await,
+                "DELETE" => c.delete(&u).send().await,
+                _ => c.get(&u).send().await,
+            };
+            let elapsed = req_start.elapsed().as_millis();
+            match result {
+                Ok(resp) if resp.status().is_success() || resp.status().is_redirection() => {
+                    succ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                }
+                _ => {
+                    fail.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                }
+            }
+            lats.lock().await.push(elapsed);
+            drop(permit);
+        }));
+    }
+
+    for h in handles {
+        let _ = h.await;
+    }
+
+    let total_time = start.elapsed().as_millis();
+    let mut lats = latencies.lock().await;
+    lats.sort();
+
+    let count = lats.len();
+    let avg = if count > 0 { lats.iter().sum::<u128>() / count as u128 } else { 0 };
+    let p50 = if count > 0 { lats[count * 50 / 100] } else { 0 };
+    let p95 = if count > 0 { lats[count * 95 / 100] } else { 0 };
+    let p99 = if count > 0 { lats[count.saturating_sub(1) * 99 / 100] } else { 0 };
+    let min = lats.first().copied().unwrap_or(0);
+    let max = lats.last().copied().unwrap_or(0);
+    let rps = if total_time > 0 { count as f64 / total_time as f64 * 1000.0 } else { 0.0 };
+
+    let result = serde_json::json!({
+        "total_requests": total,
+        "success": successes.load(std::sync::atomic::Ordering::Relaxed),
+        "failed": failures.load(std::sync::atomic::Ordering::Relaxed),
+        "total_time_ms": total_time,
+        "avg_latency_ms": avg,
+        "min_latency_ms": min,
+        "max_latency_ms": max,
+        "p50_ms": p50,
+        "p95_ms": p95,
+        "p99_ms": p99,
+        "requests_per_sec": format!("{:.1}", rps),
+        "concurrency": concurrency,
+        "method": method,
+    });
+
+    ok(result.to_string())
+}
+
 // ===== Compose routes =====
-
-
 
 #[derive(Deserialize)]
 struct ComposeUpBody {
@@ -2386,7 +3242,9 @@ struct ComposePsQuery {
     project_name: String,
 }
 
-fn default_log_lines() -> u32 { 200 }
+fn default_log_lines() -> u32 {
+    200
+}
 
 async fn api_list_compose() -> (StatusCode, Json<ApiResponse<String>>) {
     match run_blocking(|| run_cmd("docker", &["compose", "ls", "--format", "json", "-a"])).await {
@@ -2395,45 +3253,85 @@ async fn api_list_compose() -> (StatusCode, Json<ApiResponse<String>>) {
     }
 }
 
-async fn api_compose_up(Json(body): Json<ComposeUpBody>) -> (StatusCode, Json<ApiResponse<String>>) {
+async fn api_compose_up(
+    Json(body): Json<ComposeUpBody>,
+) -> (StatusCode, Json<ApiResponse<String>>) {
     match run_blocking(move || {
         let mut args = vec!["compose"];
         if !body.project_dir.is_empty() {
             // project dir mode
         }
         args.push("up");
-        if body.detach { args.push("-d"); }
+        if body.detach {
+            args.push("-d");
+        }
         run_cmd("docker", &args)
-    }).await {
+    })
+    .await
+    {
         Ok(out) => ok(out),
         Err(e) => err(e),
     }
 }
 
-async fn api_compose_down(Json(body): Json<ComposeProjectBody>) -> (StatusCode, Json<ApiResponse<String>>) {
-    match run_blocking(move || run_cmd("docker", &["compose", "-p", &body.project_name, "down"])).await {
+async fn api_compose_down(
+    Json(body): Json<ComposeProjectBody>,
+) -> (StatusCode, Json<ApiResponse<String>>) {
+    match run_blocking(move || run_cmd("docker", &["compose", "-p", &body.project_name, "down"]))
+        .await
+    {
         Ok(out) => ok(out),
         Err(e) => err(e),
     }
 }
 
-async fn api_compose_restart(Json(body): Json<ComposeProjectBody>) -> (StatusCode, Json<ApiResponse<String>>) {
-    match run_blocking(move || run_cmd("docker", &["compose", "-p", &body.project_name, "restart"])).await {
+async fn api_compose_restart(
+    Json(body): Json<ComposeProjectBody>,
+) -> (StatusCode, Json<ApiResponse<String>>) {
+    match run_blocking(move || run_cmd("docker", &["compose", "-p", &body.project_name, "restart"]))
+        .await
+    {
         Ok(out) => ok(out),
         Err(e) => err(e),
     }
 }
 
-async fn api_compose_logs(Query(q): Query<ComposeLogsQuery>) -> (StatusCode, Json<ApiResponse<String>>) {
+async fn api_compose_logs(
+    Query(q): Query<ComposeLogsQuery>,
+) -> (StatusCode, Json<ApiResponse<String>>) {
     let tail = q.lines.to_string();
-    match run_blocking(move || run_cmd("docker", &["compose", "-p", &q.project_name, "logs", "--tail", &tail, "--no-color"])).await {
+    match run_blocking(move || {
+        run_cmd(
+            "docker",
+            &[
+                "compose",
+                "-p",
+                &q.project_name,
+                "logs",
+                "--tail",
+                &tail,
+                "--no-color",
+            ],
+        )
+    })
+    .await
+    {
         Ok(out) => ok(out),
         Err(e) => err(e),
     }
 }
 
-async fn api_compose_ps(Query(q): Query<ComposePsQuery>) -> (StatusCode, Json<ApiResponse<String>>) {
-    match run_blocking(move || run_cmd("docker", &["compose", "-p", &q.project_name, "ps", "--format", "json"])).await {
+async fn api_compose_ps(
+    Query(q): Query<ComposePsQuery>,
+) -> (StatusCode, Json<ApiResponse<String>>) {
+    match run_blocking(move || {
+        run_cmd(
+            "docker",
+            &["compose", "-p", &q.project_name, "ps", "--format", "json"],
+        )
+    })
+    .await
+    {
         Ok(out) => ok(out),
         Err(e) => err(e),
     }
@@ -2447,10 +3345,13 @@ pub fn build_router() -> Router {
         .allow_headers(Any);
 
     Router::new()
+        // SSE stream for browser mode
+        .route("/api/events", get(api_events))
         // System
         .route("/api/system/check", get(api_check_system))
         .route("/api/system/version", get(api_get_version))
         .route("/api/system/homebrew", get(api_check_homebrew))
+        .route("/api/system/check-tool", get(api_check_tool))
         .route("/api/system/platform", get(api_get_platform))
         .route("/api/system/install", post(api_install_dep))
         // Colima instances
@@ -2533,8 +3434,14 @@ pub fn build_router() -> Router {
         .route("/api/k8s/contexts/set", post(api_k8s_set_context))
         // K8s Phase 2
         .route("/api/k8s/apply", post(api_k8s_apply))
-        .route("/api/k8s/port-forward/start", post(api_k8s_port_forward_start))
-        .route("/api/k8s/port-forward/stop", post(api_k8s_port_forward_stop))
+        .route(
+            "/api/k8s/port-forward/start",
+            post(api_k8s_port_forward_start),
+        )
+        .route(
+            "/api/k8s/port-forward/stop",
+            post(api_k8s_port_forward_stop),
+        )
         .route("/api/k8s/port-forward/list", get(api_k8s_port_forward_list))
         .route("/api/k8s/exec", post(api_k8s_exec))
         .route("/api/k8s/pods/containers", get(api_k8s_pod_containers))
@@ -2547,6 +3454,13 @@ pub fn build_router() -> Router {
         // K8s Phase 3
         .route("/api/k8s/scale-generic", post(api_k8s_generic_scale))
         .route("/api/k8s/cluster-health", get(api_k8s_cluster_health))
+        // CRDs
+        .route("/api/k8s/crds", get(api_k8s_crds))
+        .route("/api/k8s/crds/resources", get(api_k8s_crd_resources))
+        // Log streaming
+        .route("/api/k8s/pods/logs/stream", get(api_k8s_log_stream))
+        // Benchmark
+        .route("/api/k8s/benchmark", post(api_k8s_benchmark))
         // Lima
         .route("/api/lima", get(api_lima_list))
         .route("/api/lima/start", post(api_lima_start))
@@ -2572,20 +3486,203 @@ pub fn build_router() -> Router {
         .layer(cors)
 }
 
-/// Start the HTTP API server on port 11420 on a dedicated thread
+/// Start the HTTP API server on port 11420 on a dedicated thread.
+/// Never panics — if binding fails, the server simply won't start.
 pub fn start_api_server() {
+    // Initialize SSE broadcast channel eagerly
+    let _ = get_sse_tx();
+
     std::thread::spawn(|| {
-        let rt = tokio::runtime::Builder::new_multi_thread()
+        let rt = match tokio::runtime::Builder::new_multi_thread()
             .enable_all()
             .build()
-            .expect("Failed to create tokio runtime for API server");
+        {
+            Ok(rt) => rt,
+            Err(e) => {
+                eprintln!("[API Server] Failed to create tokio runtime: {}", e);
+                return;
+            }
+        };
         rt.block_on(async {
             let app = build_router();
-            let listener = tokio::net::TcpListener::bind("127.0.0.1:11420")
-                .await
-                .expect("Failed to bind API server to port 11420");
-            println!("HTTP API server running on http://127.0.0.1:11420");
-            axum::serve(listener, app).await.unwrap();
+
+            // Spawn Docker bollard watcher for SSE events
+            tokio::spawn(sse_docker_watcher());
+            // Spawn instance change publisher for SSE events
+            tokio::spawn(sse_instance_publisher());
+
+            // Try to bind with retries (previous instance may still be releasing the port)
+            let mut listener_opt = None;
+            for attempt in 0..5 {
+                match tokio::net::TcpListener::bind("127.0.0.1:11420").await {
+                    Ok(l) => {
+                        listener_opt = Some(l);
+                        break;
+                    }
+                    Err(e) => {
+                        eprintln!(
+                            "[API Server] Bind attempt {}/5 failed: {} — retrying in 1s",
+                            attempt + 1,
+                            e
+                        );
+                        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                    }
+                }
+            }
+
+            match listener_opt {
+                Some(listener) => {
+                    println!("HTTP API server running on http://127.0.0.1:11420");
+                    if let Err(e) = axum::serve(listener, app).await {
+                        eprintln!("[API Server] Server error: {}", e);
+                    }
+                }
+                None => {
+                    eprintln!("[API Server] Could not bind to port 11420 after 5 attempts — API server disabled");
+                }
+            }
         });
     });
+}
+
+/// Watch Docker events via bollard and broadcast state changes to SSE clients
+async fn sse_docker_watcher() {
+    use bollard::system::EventsOptions;
+
+    // Connect to Docker using detected socket
+    let docker = match detect_docker_host() {
+        Some(host) => {
+            bollard::Docker::connect_with_local(
+                host.trim_start_matches("unix://"),
+                120,
+                bollard::API_DEFAULT_VERSION,
+            ).ok()
+        }
+        None => bollard::Docker::connect_with_defaults().ok(),
+    };
+
+    let docker = match docker {
+        Some(d) => d,
+        None => {
+            eprintln!("[SSE] Could not connect to Docker — SSE Docker watcher disabled");
+            return;
+        }
+    };
+
+    // Initial push
+    if let Some(data) = fetch_docker_state(&docker).await {
+        publish_sse_event("docker-state-updated", &data);
+    }
+
+    // Watch events and push updates
+    let mut stream = docker.events(Some(EventsOptions::<String>::default()));
+    while let Some(event) = stream.next().await {
+        if event.is_ok() {
+            if let Some(data) = fetch_docker_state(&docker).await {
+                publish_sse_event("docker-state-updated", &data);
+            }
+        }
+    }
+}
+
+/// Fetch current Docker containers + images and return as JSON
+async fn fetch_docker_state(docker: &bollard::Docker) -> Option<serde_json::Value> {
+    use bollard::container::ListContainersOptions;
+    use bollard::image::ListImagesOptions;
+
+    let containers = docker
+        .list_containers(Some(ListContainersOptions::<String> {
+            all: true,
+            ..Default::default()
+        }))
+        .await
+        .unwrap_or_default();
+
+    let images = docker
+        .list_images(Some(ListImagesOptions::<String> {
+            all: false,
+            ..Default::default()
+        }))
+        .await
+        .unwrap_or_default();
+
+    let mut mapped_containers = Vec::new();
+    for c in containers {
+        let names = c.names.unwrap_or_default().join(", ").replace("/", "");
+        let ports = match c.ports {
+            Some(ports) => ports
+                .iter()
+                .map(|p| {
+                    let typ_str = p
+                        .typ
+                        .as_ref()
+                        .map(|t| format!("{:?}", t).to_lowercase().replace("\"", ""))
+                        .unwrap_or_else(|| "tcp".to_string());
+                    if let Some(ip) = &p.ip {
+                        format!("{}:{}->{}/{}", ip, p.public_port.unwrap_or(0), p.private_port, typ_str)
+                    } else {
+                        format!("{}/{}", p.private_port, typ_str)
+                    }
+                })
+                .collect::<Vec<String>>()
+                .join(", "),
+            None => "".to_string(),
+        };
+
+        mapped_containers.push(serde_json::json!({
+            "id": c.id.unwrap_or_default(),
+            "Names": names,
+            "Image": c.image.unwrap_or_default(),
+            "Status": c.status.unwrap_or_default(),
+            "State": c.state.unwrap_or_default(),
+            "Ports": ports,
+            "CreatedAt": c.created.unwrap_or(0).to_string(),
+            "Size": c.size_rw.unwrap_or(0).to_string(),
+            "Command": c.command.unwrap_or_default(),
+        }));
+    }
+
+    let mut mapped_images = Vec::new();
+    for i in images {
+        let tags = i.repo_tags.clone();
+        let (repo, tag) = if !tags.is_empty() && tags[0] != "<none>:<none>" {
+            let parts: Vec<&str> = tags[0].split(':').collect();
+            if parts.len() == 2 {
+                (parts[0].to_string(), parts[1].to_string())
+            } else {
+                (tags[0].clone(), "latest".to_string())
+            }
+        } else {
+            ("<none>".to_string(), "<none>".to_string())
+        };
+
+        mapped_images.push(serde_json::json!({
+            "id": i.id.replace("sha256:", ""),
+            "Repository": repo,
+            "Tag": tag,
+            "Size": i.size.to_string(),
+            "CreatedAt": i.created.to_string(),
+        }));
+    }
+
+    Some(serde_json::json!({
+        "containers": mapped_containers,
+        "images": mapped_images
+    }))
+}
+
+/// Periodically publish instance state to SSE clients
+async fn sse_instance_publisher() {
+    let mut last_json = String::new();
+    loop {
+        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+        let instances = instance_reader::list_instances_fast();
+        let data = serde_json::json!({ "instances": instances });
+        let json = data.to_string();
+        // Only publish if state actually changed (avoid noise)
+        if json != last_json {
+            publish_sse_event("instances-update", &data);
+            last_json = json;
+        }
+    }
 }

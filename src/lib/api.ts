@@ -394,6 +394,10 @@ export const systemApi = {
     call<{ enabled: boolean }>(
       "get_autostart_status", undefined, "GET", "/api/system/autostart"
     ),
+  checkTool: (name: string) =>
+    call<{ installed: boolean; version: string }>(
+      "check_tool", { name }, "GET", "/api/system/check-tool", { name }
+    ),
 };
 
 // ===== Compose API =====
@@ -441,17 +445,17 @@ export const composeApi = {
 // ===== Models API =====
 
 export const modelsApi = {
-  listModels: (profile: string) =>
-    call<AiModel[]>("list_models", { profile }, "GET", "/api/models", { profile }),
+  listModels: (profile: string, runner = "") =>
+    call<AiModel[]>("list_models", { profile, runner: runner || undefined }, "GET", "/api/models", { profile, ...(runner ? { runner } : {}) }),
 
-  pullModel: (profile: string, modelName: string) =>
-    call<string>("pull_model", { profile, modelName }, "POST", "/api/models/pull", { profile, modelName }),
+  pullModel: (profile: string, modelName: string, runner = "") =>
+    call<string>("pull_model", { profile, modelName, runner: runner || undefined }, "POST", "/api/models/pull", { profile, modelName, ...(runner ? { runner } : {}) }),
 
-  serveModel: (profile: string, modelName: string, port: number) =>
-    call<string>("serve_model", { profile, modelName, port }, "POST", "/api/models/serve", { profile, modelName, port: String(port) }),
+  serveModel: (profile: string, modelName: string, port: number, runner = "") =>
+    call<string>("serve_model", { profile, modelName, port, runner: runner || undefined }, "POST", "/api/models/serve", { profile, modelName, port: String(port), ...(runner ? { runner } : {}) }),
 
-  deleteModel: (profile: string, modelName: string) =>
-    call<string>("delete_model", { profile, modelName }, "POST", "/api/models/delete", { profile, modelName }),
+  deleteModel: (profile: string, modelName: string, runner = "") =>
+    call<string>("delete_model", { profile, modelName, runner: runner || undefined }, "POST", "/api/models/delete", { profile, modelName, ...(runner ? { runner } : {}) }),
 };
 
 // ===== Kubernetes API =====
@@ -520,6 +524,20 @@ export const k8sApi = {
     call<string>("k8s_generic_scale", { resourceType, namespace, name, replicas }, "POST", "/api/k8s/scale-generic", undefined, { resourceType, namespace, name, replicas }),
   clusterHealth: () =>
     call<string>("k8s_cluster_health", undefined, "GET", "/api/k8s/cluster-health"),
+  // CRDs
+  crds: () =>
+    call<string>("k8s_crds", undefined, "GET", "/api/k8s/crds"),
+  crdResources: (resource: string, namespace = "all") =>
+    call<string>("k8s_crd_resources", { resource, namespace }, "GET", "/api/k8s/crds/resources", { resource, namespace }),
+  // Log streaming — returns URL for EventSource (SSE)
+  logStreamUrl: (namespace: string, pod: string, container = "", tail = 50) => {
+    const params = new URLSearchParams({ namespace, pod, tail: String(tail) });
+    if (container) params.set("container", container);
+    return `http://127.0.0.1:11420/api/k8s/pods/logs/stream?${params}`;
+  },
+  // Benchmark
+  benchmark: (url: string, concurrency = 5, requests = 50, method = "GET") =>
+    call<string>("k8s_benchmark", { url, concurrency, requests, method }, "POST", "/api/k8s/benchmark", undefined, { url, concurrency, requests, method }),
 };
 
 // ===== Kind API =====
