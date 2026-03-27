@@ -129,6 +129,9 @@ export default function Images() {
       setImages(list);
     } catch { /* ignore */ }
   }, [setImages]);
+
+  // Fetch fresh data on mount (same pattern as Volumes/Networks)
+  useEffect(() => { refreshImages(); }, [refreshImages]);
   const [searchTerm, setSearchTerm] = useState("");
   const deferredSearch = useDeferredValue(searchTerm);
 

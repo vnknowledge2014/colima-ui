@@ -588,6 +588,9 @@ export default function Containers() {
       setContainers(list);
     } catch { /* ignore */ }
   }, [setContainers]);
+
+  // Fetch fresh data on mount (same pattern as Volumes/Networks)
+  useEffect(() => { refreshContainers(); }, [refreshContainers]);
   const [filter, setFilter] = useState<"all" | "running" | "stopped">("all");
   const [searchTerm, setSearchTerm] = useState("");
   const deferredSearch = useDeferredValue(searchTerm);
