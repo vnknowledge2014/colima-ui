@@ -133,7 +133,7 @@ pub fn map_containers(containers: &[bollard::models::ContainerSummary]) -> Vec<s
         };
 
         mapped.push(serde_json::json!({
-            "id": c.id.clone().unwrap_or_default(),
+            "Id": c.id.clone().unwrap_or_default(),
             "Names": names,
             "Image": c.image.clone().unwrap_or_default(),
             "Status": c.status.clone().unwrap_or_default(),
@@ -164,7 +164,7 @@ pub fn map_images(images: &[bollard::models::ImageSummary]) -> Vec<serde_json::V
         };
 
         mapped.push(serde_json::json!({
-            "id": i.id.replace("sha256:", ""),
+            "Id": i.id.replace("sha256:", ""),
             "Repository": repo,
             "Tag": tag,
             "Size": i.size.to_string(),
