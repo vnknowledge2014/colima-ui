@@ -46,7 +46,7 @@ fn docker_cmd() -> Command {
 }
 
 /// List all Docker containers
-/// Returns cached data if available; otherwise queries Docker directly.
+/// Returns cached data if available; falls back to Docker CLI if Bollard fails.
 #[tauri::command]
 pub async fn list_containers(
     state: tauri::State<'_, std::sync::Arc<tokio::sync::RwLock<crate::docker_state::DockerState>>>,
@@ -64,9 +64,8 @@ pub async fn list_containers(
         }
     }
 
-    // Cache empty — do a live query and populate cache
+    // Cache empty — try Bollard, then fall back to Docker CLI
     let mut lock = state.write().await;
-    // Double-check after acquiring write lock (another task may have filled it)
     if !lock.containers_cache.is_empty() {
         return if all {
             Ok(lock.containers_cache.clone())
@@ -75,20 +74,53 @@ pub async fn list_containers(
         };
     }
 
-    let docker = match &lock.docker {
-        Some(d) => d.clone(),
-        None => return Err("Docker daemon is not connected".to_string()),
-    };
+    // Try Bollard SDK first
+    let mut mapped = Vec::new();
+    if let Some(docker) = &lock.docker {
+        let containers = docker
+            .list_containers(Some(bollard::container::ListContainersOptions::<String> {
+                all: true,
+                ..Default::default()
+            }))
+            .await
+            .unwrap_or_default();
+        mapped = crate::docker_state::map_containers(&containers);
+    }
 
-    let containers = docker
-        .list_containers(Some(bollard::container::ListContainersOptions::<String> {
-            all: true,
-            ..Default::default()
-        }))
-        .await
-        .unwrap_or_default();
+    // Fallback to Docker CLI if Bollard returned empty
+    if mapped.is_empty() {
+        let mut args = vec!["ps", "--format", "json", "--no-trunc", "-a"];
+        if !all {
+            args.retain(|a| *a != "-a");
+        }
+        if let Ok(output) = docker_cmd().args(&args).output() {
+            if output.status.success() {
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                let cli_containers: Vec<serde_json::Value> = stdout
+                    .lines()
+                    .filter(|l| !l.trim().is_empty())
+                    .filter_map(|l| serde_json::from_str(l).ok())
+                    .collect();
+                if !cli_containers.is_empty() {
+                    // Normalize CLI field names to match expected format
+                    mapped = cli_containers.iter().map(|c| {
+                        serde_json::json!({
+                            "Id": c.get("ID").or(c.get("Id")).unwrap_or(&serde_json::Value::String(String::new())),
+                            "Names": c.get("Names").or(c.get("names")).unwrap_or(&serde_json::Value::String(String::new())),
+                            "Image": c.get("Image").or(c.get("image")).unwrap_or(&serde_json::Value::String(String::new())),
+                            "Status": c.get("Status").or(c.get("status")).unwrap_or(&serde_json::Value::String(String::new())),
+                            "State": c.get("State").or(c.get("state")).unwrap_or(&serde_json::Value::String(String::new())),
+                            "Ports": c.get("Ports").or(c.get("ports")).unwrap_or(&serde_json::Value::String(String::new())),
+                            "CreatedAt": c.get("CreatedAt").or(c.get("created_at")).unwrap_or(&serde_json::Value::String(String::new())),
+                            "Size": c.get("Size").or(c.get("size")).unwrap_or(&serde_json::Value::String(String::new())),
+                            "Command": c.get("Command").or(c.get("command")).unwrap_or(&serde_json::Value::String(String::new())),
+                        })
+                    }).collect();
+                }
+            }
+        }
+    }
 
-    let mapped = crate::docker_state::map_containers(&containers);
     lock.containers_cache = mapped.clone();
 
     if all {
@@ -192,7 +224,7 @@ pub async fn container_logs(container_id: String, lines: u32) -> Result<String, 
 }
 
 /// List Docker images
-/// Returns cached data if available; otherwise queries Docker directly.
+/// Returns cached data if available; falls back to Docker CLI if Bollard fails.
 #[tauri::command]
 pub async fn list_images(
     state: tauri::State<'_, std::sync::Arc<tokio::sync::RwLock<crate::docker_state::DockerState>>>,
@@ -205,29 +237,51 @@ pub async fn list_images(
         }
     }
 
-    // Cache empty — do a live query and populate cache
+    // Cache empty — try Bollard, then fall back to Docker CLI
     let mut lock = state.write().await;
-    // Double-check after acquiring write lock
     if !lock.images_cache.is_empty() {
         return Ok(lock.images_cache.clone());
     }
 
-    let docker = match &lock.docker {
-        Some(d) => d.clone(),
-        None => return Err("Docker daemon is not connected".to_string()),
-    };
+    // Try Bollard SDK first
+    let mut mapped = Vec::new();
+    if let Some(docker) = &lock.docker {
+        let images = docker
+            .list_images(Some(bollard::image::ListImagesOptions::<String> {
+                all: false,
+                ..Default::default()
+            }))
+            .await
+            .unwrap_or_default();
+        mapped = crate::docker_state::map_images(&images);
+    }
 
-    let images = docker
-        .list_images(Some(bollard::image::ListImagesOptions::<String> {
-            all: false,
-            ..Default::default()
-        }))
-        .await
-        .unwrap_or_default();
+    // Fallback to Docker CLI if Bollard returned empty
+    if mapped.is_empty() {
+        if let Ok(output) = docker_cmd().args(["images", "--format", "json", "--no-trunc"]).output() {
+            if output.status.success() {
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                let cli_images: Vec<serde_json::Value> = stdout
+                    .lines()
+                    .filter(|l| !l.trim().is_empty())
+                    .filter_map(|l| serde_json::from_str(l).ok())
+                    .collect();
+                if !cli_images.is_empty() {
+                    mapped = cli_images.iter().map(|img| {
+                        serde_json::json!({
+                            "Id": img.get("ID").or(img.get("Id")).unwrap_or(&serde_json::Value::String(String::new())),
+                            "Repository": img.get("Repository").or(img.get("repository")).unwrap_or(&serde_json::Value::String(String::new())),
+                            "Tag": img.get("Tag").or(img.get("tag")).unwrap_or(&serde_json::Value::String(String::new())),
+                            "Size": img.get("Size").or(img.get("size")).unwrap_or(&serde_json::Value::String(String::new())),
+                            "CreatedAt": img.get("CreatedAt").or(img.get("CreatedSince")).or(img.get("created_at")).unwrap_or(&serde_json::Value::String(String::new())),
+                        })
+                    }).collect();
+                }
+            }
+        }
+    }
 
-    let mapped = crate::docker_state::map_images(&images);
     lock.images_cache = mapped.clone();
-
     Ok(mapped)
 }
 
