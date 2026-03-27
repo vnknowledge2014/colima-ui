@@ -47,40 +47,52 @@ fn docker_cmd() -> Command {
 
 /// List all Docker containers
 /// Always fetches fresh data: tries Bollard first (fast), falls back to Docker CLI.
+/// Returns Err if Docker daemon is unavailable.
 #[tauri::command]
 pub async fn list_containers(
     state: tauri::State<'_, std::sync::Arc<tokio::sync::RwLock<crate::docker_state::DockerState>>>,
     all: bool,
 ) -> Result<Vec<serde_json::Value>, String> {
     // Try Bollard SDK first (faster — uses Docker socket directly)
+    let mut bollard_error: Option<String> = None;
     let mut mapped = Vec::new();
     {
         let lock = state.read().await;
         if let Some(docker) = &lock.docker {
-            let containers = docker
+            match docker
                 .list_containers(Some(bollard::container::ListContainersOptions::<String> {
                     all: true,
                     ..Default::default()
                 }))
                 .await
-                .unwrap_or_default();
-            mapped = crate::docker_state::map_containers(&containers);
+            {
+                Ok(containers) => {
+                    mapped = crate::docker_state::map_containers(&containers);
+                    // Bollard succeeded — return data (even if empty = no containers)
+                    return if all {
+                        Ok(mapped)
+                    } else {
+                        Ok(mapped.iter().filter(|c| c["State"] == "running").cloned().collect())
+                    };
+                }
+                Err(e) => {
+                    bollard_error = Some(format!("{}", e));
+                }
+            }
         }
     }
 
-    // Fallback to Docker CLI if Bollard returned empty or unavailable
-    if mapped.is_empty() {
-        let args = vec!["ps", "--format", "json", "--no-trunc", "-a"];
-        if let Ok(output) = docker_cmd().args(&args).output() {
+    // Fallback to Docker CLI
+    let args = vec!["ps", "--format", "json", "--no-trunc", "-a"];
+    match docker_cmd().args(&args).output() {
+        Ok(output) => {
             if output.status.success() {
                 let stdout = String::from_utf8_lossy(&output.stdout);
-                let cli_containers: Vec<serde_json::Value> = stdout
+                mapped = stdout
                     .lines()
                     .filter(|l| !l.trim().is_empty())
                     .filter_map(|l| serde_json::from_str(l).ok())
-                    .collect();
-                if !cli_containers.is_empty() {
-                    mapped = cli_containers.iter().map(|c| {
+                    .map(|c: serde_json::Value| {
                         serde_json::json!({
                             "Id": c.get("ID").or(c.get("Id")).unwrap_or(&serde_json::Value::String(String::new())),
                             "Names": c.get("Names").or(c.get("names")).unwrap_or(&serde_json::Value::String(String::new())),
@@ -92,16 +104,21 @@ pub async fn list_containers(
                             "Size": c.get("Size").or(c.get("size")).unwrap_or(&serde_json::Value::String(String::new())),
                             "Command": c.get("Command").or(c.get("command")).unwrap_or(&serde_json::Value::String(String::new())),
                         })
-                    }).collect();
+                    })
+                    .collect();
+                if all {
+                    Ok(mapped)
+                } else {
+                    Ok(mapped.iter().filter(|c| c["State"] == "running").cloned().collect())
                 }
+            } else {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                Err(format!("Docker is not available: {}", stderr.trim()))
             }
         }
-    }
-
-    if all {
-        Ok(mapped)
-    } else {
-        Ok(mapped.iter().filter(|c| c["State"] == "running").cloned().collect())
+        Err(e) => {
+            Err(bollard_error.unwrap_or_else(|| format!("Docker is not available: {}", e)))
+        }
     }
 }
 
@@ -215,38 +232,43 @@ pub async fn container_logs(container_id: String, lines: u32) -> Result<String, 
 
 /// List Docker images
 /// Always fetches fresh data: tries Bollard first (fast), falls back to Docker CLI.
+/// Returns Err if Docker daemon is unavailable.
 #[tauri::command]
 pub async fn list_images(
     state: tauri::State<'_, std::sync::Arc<tokio::sync::RwLock<crate::docker_state::DockerState>>>,
 ) -> Result<Vec<serde_json::Value>, String> {
     // Try Bollard SDK first (faster — uses Docker socket directly)
-    let mut mapped = Vec::new();
+    let mut bollard_error: Option<String> = None;
     {
         let lock = state.read().await;
         if let Some(docker) = &lock.docker {
-            let images = docker
+            match docker
                 .list_images(Some(bollard::image::ListImagesOptions::<String> {
                     all: false,
                     ..Default::default()
                 }))
                 .await
-                .unwrap_or_default();
-            mapped = crate::docker_state::map_images(&images);
+            {
+                Ok(images) => {
+                    return Ok(crate::docker_state::map_images(&images));
+                }
+                Err(e) => {
+                    bollard_error = Some(format!("{}", e));
+                }
+            }
         }
     }
 
-    // Fallback to Docker CLI if Bollard returned empty or unavailable
-    if mapped.is_empty() {
-        if let Ok(output) = docker_cmd().args(["images", "--format", "json", "--no-trunc"]).output() {
+    // Fallback to Docker CLI
+    match docker_cmd().args(["images", "--format", "json", "--no-trunc"]).output() {
+        Ok(output) => {
             if output.status.success() {
                 let stdout = String::from_utf8_lossy(&output.stdout);
-                let cli_images: Vec<serde_json::Value> = stdout
+                let mapped: Vec<serde_json::Value> = stdout
                     .lines()
                     .filter(|l| !l.trim().is_empty())
                     .filter_map(|l| serde_json::from_str(l).ok())
-                    .collect();
-                if !cli_images.is_empty() {
-                    mapped = cli_images.iter().map(|img| {
+                    .map(|img: serde_json::Value| {
                         serde_json::json!({
                             "Id": img.get("ID").or(img.get("Id")).unwrap_or(&serde_json::Value::String(String::new())),
                             "Repository": img.get("Repository").or(img.get("repository")).unwrap_or(&serde_json::Value::String(String::new())),
@@ -254,13 +276,18 @@ pub async fn list_images(
                             "Size": img.get("Size").or(img.get("size")).unwrap_or(&serde_json::Value::String(String::new())),
                             "CreatedAt": img.get("CreatedAt").or(img.get("CreatedSince")).or(img.get("created_at")).unwrap_or(&serde_json::Value::String(String::new())),
                         })
-                    }).collect();
-                }
+                    })
+                    .collect();
+                Ok(mapped)
+            } else {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                Err(format!("Docker is not available: {}", stderr.trim()))
             }
         }
+        Err(e) => {
+            Err(bollard_error.unwrap_or_else(|| format!("Docker is not available: {}", e)))
+        }
     }
-
-    Ok(mapped)
 }
 
 /// Inspect a container (raw JSON)

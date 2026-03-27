@@ -581,12 +581,17 @@ function VirtualContainerRows({
 export default function Containers() {
   const [containers, setContainers] = useAtom(containersAtom);
   const loading = useAtomValue(dockerLoadingAtom);
+  const [error, setError] = useState<string | null>(null);
 
   const refreshContainers = useCallback(async () => {
     try {
+      setError(null);
       const list = await dockerApi.listContainers(true);
       setContainers(list);
-    } catch { /* ignore */ }
+    } catch (e) {
+      setError(String(e));
+      setContainers([]);
+    }
   }, [setContainers]);
 
   // Fetch fresh data on mount (same pattern as Volumes/Networks)
@@ -791,6 +796,14 @@ export default function Containers() {
               onClick={() => setSelected(new Set())}>
               Clear
             </button>
+          </div>
+        )}
+
+        {/* Error */}
+        {error && (
+          <div style={{ padding: "12px", background: "rgba(248,81,73,0.1)", color: "var(--accent-red)", borderRadius: "8px", marginBottom: "16px", fontSize: "var(--text-sm)" }}>
+            <WarningIcon size={14} style={{ display: "inline", verticalAlign: "middle", marginRight: 4 }} /> {error}
+            <button className="btn btn-ghost" style={{ marginLeft: "8px", fontSize: "var(--text-xs)" }} onClick={() => setError(null)}>Dismiss</button>
           </div>
         )}
 
