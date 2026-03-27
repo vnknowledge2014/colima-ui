@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback, useDeferredValue } from "reac
 import { dockerApi, DockerContainer } from "../lib/api";
 import { globalToast } from "../lib/globalToast";
 import { ConfirmDialog, useConfirm } from "../components/ConfirmDialog";
-import { useAtomValue } from "jotai";
+import { useAtom, useAtomValue } from "jotai";
 import { containersAtom, dockerLoadingAtom } from "../store/dockerAtom";
 import { StopIcon, PlayIcon, PauseIcon, RestartIcon, CloseIcon, WarningIcon } from "../components/Icons";
 import { useVirtualizer } from "@tanstack/react-virtual";
@@ -576,8 +576,15 @@ function VirtualContainerRows({
 
 /* ===== Main Containers Page ===== */
 export default function Containers() {
-  const containers = useAtomValue(containersAtom);
+  const [containers, setContainers] = useAtom(containersAtom);
   const loading = useAtomValue(dockerLoadingAtom);
+
+  const refreshContainers = useCallback(async () => {
+    try {
+      const list = await dockerApi.listContainers(true);
+      setContainers(list);
+    } catch { /* ignore */ }
+  }, [setContainers]);
   const [filter, setFilter] = useState<"all" | "running" | "stopped">("all");
   const [searchTerm, setSearchTerm] = useState("");
   const deferredSearch = useDeferredValue(searchTerm);
@@ -645,6 +652,7 @@ export default function Containers() {
         start: "started", stop: "stopped", restart: "restarted", remove: "removed", pause: "paused", unpause: "unpaused",
       };
       globalToast("success", `Container '${name}' ${pastTense[action] || action}`);
+      await refreshContainers();
     } catch (e) {
       globalToast("error", String(e));
     } finally {
@@ -666,6 +674,7 @@ export default function Containers() {
     globalToast("success", `Stopped ${ok_count} container${ok_count > 1 ? "s" : ""}`);
     setSelected(new Set());
     setBatchLoading(false);
+    await refreshContainers();
   };
 
   const handleBatchRemove = async () => {
@@ -681,6 +690,7 @@ export default function Containers() {
     globalToast("success", `Removed ${ok_count} container${ok_count > 1 ? "s" : ""}`);
     setSelected(new Set());
     setBatchLoading(false);
+    await refreshContainers();
   };
 
   const filtered = containers.filter((c) => {

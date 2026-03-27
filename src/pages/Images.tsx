@@ -1,8 +1,8 @@
-import { useState, useEffect, useRef, useDeferredValue } from "react";
+import { useState, useEffect, useRef, useDeferredValue, useCallback } from "react";
 import { dockerApi, DockerImage } from "../lib/api";
 import { globalToast } from "../lib/globalToast";
 import { ConfirmDialog, useConfirm } from "../components/ConfirmDialog";
-import { useAtomValue } from "jotai";
+import { useAtom, useAtomValue } from "jotai";
 import { imagesAtom, dockerLoadingAtom } from "../store/dockerAtom";
 import { TrashIcon, DownloadIcon, InspectIcon, BroomIcon, TagIcon } from "../components/Icons";
 import { useVirtualizer } from "@tanstack/react-virtual";
@@ -116,8 +116,15 @@ function VirtualImageRows({
 }
 
 export default function Images() {
-  const images = useAtomValue(imagesAtom);
+  const [images, setImages] = useAtom(imagesAtom);
   const loading = useAtomValue(dockerLoadingAtom);
+
+  const refreshImages = useCallback(async () => {
+    try {
+      const list = await dockerApi.listImages();
+      setImages(list);
+    } catch { /* ignore */ }
+  }, [setImages]);
   const [searchTerm, setSearchTerm] = useState("");
   const deferredSearch = useDeferredValue(searchTerm);
 
@@ -190,6 +197,7 @@ export default function Images() {
     } finally {
       setActionLoading(null);
     }
+    await refreshImages();
   };
 
   const handlePrune = async () => {
@@ -205,6 +213,7 @@ export default function Images() {
     } finally {
       setActionLoading(null);
     }
+    await refreshImages();
   };
 
   const handleInspect = async (imageId: string) => {
@@ -281,6 +290,7 @@ export default function Images() {
     globalToast("success", `Removed ${ok_count} image${ok_count > 1 ? "s" : ""}`);
     setSelected(new Set());
     setBatchLoading(false);
+    await refreshImages();
   };
 
   if (loading) {
