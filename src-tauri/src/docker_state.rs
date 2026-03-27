@@ -34,28 +34,70 @@ impl DockerState {
     }
 }
 
+/// Resilient Docker event watcher with auto-reconnect.
+/// Runs forever: connects → streams events → on disconnect, clears state → retries.
+/// Push-based (no polling) — same approach as OrbStack.
 pub async fn start_docker_watcher(app: AppHandle, state: Arc<RwLock<DockerState>>) {
-    let docker = {
-        let s = state.read().await;
-        match &s.docker {
-            Some(d) => d.clone(),
-            None => {
-                eprintln!("[DockerWatcher] No Docker connection — watcher disabled");
-                return;
+    loop {
+        // Try to connect (or reconnect) to Docker daemon
+        let docker = match Docker::connect_with_defaults() {
+            Ok(d) => {
+                // Verify connection is actually alive with a ping
+                if d.ping().await.is_err() {
+                    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                    continue;
+                }
+                eprintln!("[DockerWatcher] Connected to Docker daemon");
+                d
+            }
+            Err(_) => {
+                tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                continue;
+            }
+        };
+
+        // Update DockerState with fresh connection (so list_containers/list_images use it)
+        {
+            let mut lock = state.write().await;
+            lock.docker = Some(docker.clone());
+        }
+
+        // Initial fetch on (re)connect — push to frontend immediately
+        if let Ok(data) = update_cache(&docker, &state).await {
+            let _ = app.emit("docker-state-updated", data);
+        }
+
+        // Stream Docker events until connection drops
+        let mut stream = docker.events(Some(EventsOptions::<String>::default()));
+        while let Some(event) = stream.next().await {
+            match event {
+                Ok(_) => {
+                    if let Ok(data) = update_cache(&docker, &state).await {
+                        let _ = app.emit("docker-state-updated", data);
+                    }
+                }
+                Err(_) => {
+                    // Connection error — break to reconnect
+                    break;
+                }
             }
         }
-    };
 
-    // Initial fetch
-    let _ = update_cache(&docker, &state).await;
-
-    let mut stream = docker.events(Some(EventsOptions::<String>::default()));
-    while let Some(event) = stream.next().await {
-        if event.is_ok() {
-            if let Ok(data) = update_cache(&docker, &state).await {
-                let _ = app.emit("docker-state-updated", data);
-            }
+        // Stream ended (Docker stopped or connection lost)
+        // Clear stale data and notify frontend
+        {
+            let mut lock = state.write().await;
+            lock.docker = None;
+            lock.containers_cache = vec![];
+            lock.images_cache = vec![];
         }
+        let _ = app.emit("docker-state-updated", serde_json::json!({
+            "containers": [],
+            "images": []
+        }));
+
+        eprintln!("[DockerWatcher] Connection lost — will retry in 2s");
+        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
     }
 }
 
