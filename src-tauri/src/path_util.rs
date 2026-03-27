@@ -30,10 +30,7 @@ const NIX_USER_PATHS: &[&str] = &[
 /// Call this once at app startup to fix the PATH for all subsequent Command calls.
 pub fn fix_path_env() {
     let current_path = env::var("PATH").unwrap_or_default();
-    let mut paths: Vec<String> = current_path
-        .split(':')
-        .map(|s| s.to_string())
-        .collect();
+    let mut paths: Vec<String> = current_path.split(':').map(|s| s.to_string()).collect();
 
     for extra in EXTRA_PATHS {
         let extra_str = extra.to_string();
@@ -78,10 +75,7 @@ pub fn fix_path_env() {
 #[allow(dead_code)]
 pub fn resolve_binary(name: &str) -> String {
     // First check if the binary can be found via `which`
-    if let Ok(output) = Command::new("/usr/bin/which")
-        .arg(name)
-        .output()
-    {
+    if let Ok(output) = Command::new("/usr/bin/which").arg(name).output() {
         if output.status.success() {
             let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
             if !path.is_empty() {

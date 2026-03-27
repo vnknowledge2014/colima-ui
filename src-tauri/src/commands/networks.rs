@@ -56,7 +56,11 @@ pub async fn list_networks() -> Result<Vec<DockerNetwork>, String> {
 
 /// Create a Docker network
 #[tauri::command]
-pub async fn create_network(name: String, driver: String, subnet: String) -> Result<String, String> {
+pub async fn create_network(
+    name: String,
+    driver: String,
+    subnet: String,
+) -> Result<String, String> {
     let mut args = vec!["network", "create"];
 
     let driver_flag;

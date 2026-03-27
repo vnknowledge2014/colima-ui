@@ -69,7 +69,6 @@ fn colima_cmd() -> Command {
     Command::new("colima")
 }
 
-
 /// List all Colima instances
 /// Uses the fast filesystem reader (shared with API server) for consistency.
 #[tauri::command]
@@ -149,7 +148,10 @@ pub async fn start_instance(config: StartConfig) -> Result<String, String> {
         ));
     }
 
-    Ok(format!("Instance '{}' started successfully", config.profile))
+    Ok(format!(
+        "Instance '{}' started successfully",
+        config.profile
+    ))
 }
 
 /// Stop a Colima instance
@@ -284,12 +286,12 @@ pub async fn kubernetes_action(profile: String, action: String) -> Result<String
         if (action == "delete" || action == "stop")
             && (stderr.contains("not enabled") || stderr.contains("not running"))
         {
-            return Ok(format!("Kubernetes {} completed (already disabled)", action));
+            return Ok(format!(
+                "Kubernetes {} completed (already disabled)",
+                action
+            ));
         }
-        return Err(format!(
-            "kubernetes {} failed: {}",
-            action, stderr
-        ));
+        return Err(format!("kubernetes {} failed: {}", action, stderr));
     }
 
     Ok(format!("Kubernetes {} completed", action))

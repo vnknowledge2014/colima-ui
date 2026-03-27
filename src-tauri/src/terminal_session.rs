@@ -40,7 +40,7 @@ impl SessionManager {
         }
 
         let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
-        
+
         let (ssh_config, host) = if vm_type == "lima" {
             // Standalone Lima VM: ~/.lima/<name>/ssh.config, host = lima-<name>
             let config = format!("{}/.lima/{}/ssh.config", home, profile);

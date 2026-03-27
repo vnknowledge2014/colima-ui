@@ -46,114 +46,118 @@ fn docker_cmd() -> Command {
 }
 
 /// List all Docker containers
+/// Returns cached data if available; otherwise queries Docker directly.
 #[tauri::command]
-pub async fn list_containers(all: bool) -> Result<Vec<DockerContainer>, String> {
-    let mut args = vec!["ps", "--format", "json", "--no-trunc"];
+pub async fn list_containers(
+    state: tauri::State<'_, std::sync::Arc<tokio::sync::RwLock<crate::docker_state::DockerState>>>,
+    all: bool,
+) -> Result<Vec<serde_json::Value>, String> {
+    // Try cache first
+    {
+        let lock = state.read().await;
+        if !lock.containers_cache.is_empty() {
+            return if all {
+                Ok(lock.containers_cache.clone())
+            } else {
+                Ok(lock.containers_cache.iter().filter(|c| c["State"] == "running").cloned().collect())
+            };
+        }
+    }
+
+    // Cache empty — do a live query and populate cache
+    let mut lock = state.write().await;
+    // Double-check after acquiring write lock (another task may have filled it)
+    if !lock.containers_cache.is_empty() {
+        return if all {
+            Ok(lock.containers_cache.clone())
+        } else {
+            Ok(lock.containers_cache.iter().filter(|c| c["State"] == "running").cloned().collect())
+        };
+    }
+
+    let docker = match &lock.docker {
+        Some(d) => d.clone(),
+        None => return Err("Docker daemon is not connected".to_string()),
+    };
+
+    let containers = docker
+        .list_containers(Some(bollard::container::ListContainersOptions::<String> {
+            all: true,
+            ..Default::default()
+        }))
+        .await
+        .unwrap_or_default();
+
+    let mapped = crate::docker_state::map_containers(&containers);
+    lock.containers_cache = mapped.clone();
+
     if all {
-        args.push("-a");
+        Ok(mapped)
+    } else {
+        Ok(mapped.iter().filter(|c| c["State"] == "running").cloned().collect())
     }
-
-    let output = docker_cmd()
-        .args(&args)
-        .output()
-        .map_err(|e| format!("Failed to execute docker: {}", e))?;
-
-    if !output.status.success() {
-        return Err(format!(
-            "docker ps failed: {}",
-            String::from_utf8_lossy(&output.stderr)
-        ));
-    }
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    if stdout.trim().is_empty() {
-        return Ok(vec![]);
-    }
-
-    let containers: Vec<DockerContainer> = stdout
-        .lines()
-        .filter(|line| !line.trim().is_empty())
-        .filter_map(|line| serde_json::from_str(line).ok())
-        .collect();
-
-    Ok(containers)
 }
 
 /// Start a Docker container
 #[tauri::command]
-pub async fn start_container(container_id: String) -> Result<String, String> {
-    let output = docker_cmd()
-        .args(["start", &container_id])
-        .output()
-        .map_err(|e| format!("Failed to start container: {}", e))?;
-
-    if !output.status.success() {
-        return Err(format!(
-            "docker start failed: {}",
-            String::from_utf8_lossy(&output.stderr)
-        ));
-    }
-
+pub async fn start_container(
+    state: tauri::State<'_, std::sync::Arc<tokio::sync::RwLock<crate::docker_state::DockerState>>>,
+    container_id: String,
+) -> Result<String, String> {
+    let lock = state.read().await;
+    let docker = lock.docker()?;
+    docker
+        .start_container::<String>(&container_id, None)
+        .await
+        .map_err(|e| e.to_string())?;
     Ok(format!("Container {} started", container_id))
 }
 
 /// Stop a Docker container
 #[tauri::command]
-pub async fn stop_container(container_id: String) -> Result<String, String> {
-    let output = docker_cmd()
-        .args(["stop", &container_id])
-        .output()
-        .map_err(|e| format!("Failed to stop container: {}", e))?;
-
-    if !output.status.success() {
-        return Err(format!(
-            "docker stop failed: {}",
-            String::from_utf8_lossy(&output.stderr)
-        ));
-    }
-
+pub async fn stop_container(
+    state: tauri::State<'_, std::sync::Arc<tokio::sync::RwLock<crate::docker_state::DockerState>>>,
+    container_id: String,
+) -> Result<String, String> {
+    let lock = state.read().await;
+    let docker = lock.docker()?;
+    docker
+        .stop_container(&container_id, None)
+        .await
+        .map_err(|e| e.to_string())?;
     Ok(format!("Container {} stopped", container_id))
 }
 
 /// Restart a Docker container
 #[tauri::command]
-pub async fn restart_container(container_id: String) -> Result<String, String> {
-    let output = docker_cmd()
-        .args(["restart", &container_id])
-        .output()
-        .map_err(|e| format!("Failed to restart container: {}", e))?;
-
-    if !output.status.success() {
-        return Err(format!(
-            "docker restart failed: {}",
-            String::from_utf8_lossy(&output.stderr)
-        ));
-    }
-
+pub async fn restart_container(
+    state: tauri::State<'_, std::sync::Arc<tokio::sync::RwLock<crate::docker_state::DockerState>>>,
+    container_id: String,
+) -> Result<String, String> {
+    let lock = state.read().await;
+    let docker = lock.docker()?;
+    docker
+        .restart_container(&container_id, None)
+        .await
+        .map_err(|e| e.to_string())?;
     Ok(format!("Container {} restarted", container_id))
 }
 
 /// Remove a Docker container
 #[tauri::command]
-pub async fn remove_container(container_id: String, force: bool) -> Result<String, String> {
-    let mut args = vec!["rm"];
-    if force {
-        args.push("-f");
-    }
-    args.push(&container_id);
-
-    let output = docker_cmd()
-        .args(&args)
-        .output()
-        .map_err(|e| format!("Failed to remove container: {}", e))?;
-
-    if !output.status.success() {
-        return Err(format!(
-            "docker rm failed: {}",
-            String::from_utf8_lossy(&output.stderr)
-        ));
-    }
-
+pub async fn remove_container(
+    state: tauri::State<'_, std::sync::Arc<tokio::sync::RwLock<crate::docker_state::DockerState>>>,
+    container_id: String,
+    force: bool,
+) -> Result<String, String> {
+    let lock = state.read().await;
+    let docker = lock.docker()?;
+    let mut options = bollard::container::RemoveContainerOptions::default();
+    options.force = force;
+    docker
+        .remove_container(&container_id, Some(options))
+        .await
+        .map_err(|e| e.to_string())?;
     Ok(format!("Container {} removed", container_id))
 }
 
@@ -188,32 +192,43 @@ pub async fn container_logs(container_id: String, lines: u32) -> Result<String, 
 }
 
 /// List Docker images
+/// Returns cached data if available; otherwise queries Docker directly.
 #[tauri::command]
-pub async fn list_images() -> Result<Vec<DockerImage>, String> {
-    let output = docker_cmd()
-        .args(["images", "--format", "json"])
-        .output()
-        .map_err(|e| format!("Failed to list images: {}", e))?;
-
-    if !output.status.success() {
-        return Err(format!(
-            "docker images failed: {}",
-            String::from_utf8_lossy(&output.stderr)
-        ));
+pub async fn list_images(
+    state: tauri::State<'_, std::sync::Arc<tokio::sync::RwLock<crate::docker_state::DockerState>>>,
+) -> Result<Vec<serde_json::Value>, String> {
+    // Try cache first
+    {
+        let lock = state.read().await;
+        if !lock.images_cache.is_empty() {
+            return Ok(lock.images_cache.clone());
+        }
     }
 
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    if stdout.trim().is_empty() {
-        return Ok(vec![]);
+    // Cache empty — do a live query and populate cache
+    let mut lock = state.write().await;
+    // Double-check after acquiring write lock
+    if !lock.images_cache.is_empty() {
+        return Ok(lock.images_cache.clone());
     }
 
-    let images: Vec<DockerImage> = stdout
-        .lines()
-        .filter(|line| !line.trim().is_empty())
-        .filter_map(|line| serde_json::from_str(line).ok())
-        .collect();
+    let docker = match &lock.docker {
+        Some(d) => d.clone(),
+        None => return Err("Docker daemon is not connected".to_string()),
+    };
 
-    Ok(images)
+    let images = docker
+        .list_images(Some(bollard::image::ListImagesOptions::<String> {
+            all: false,
+            ..Default::default()
+        }))
+        .await
+        .unwrap_or_default();
+
+    let mapped = crate::docker_state::map_images(&images);
+    lock.images_cache = mapped.clone();
+
+    Ok(mapped)
 }
 
 /// Inspect a container (raw JSON)
@@ -353,22 +368,19 @@ pub async fn system_prune(all: bool) -> Result<String, String> {
     Ok(String::from_utf8_lossy(&output.stdout).to_string())
 }
 
-/// Docker system disk usage
+/// Docker system disk usage (plain text for frontend parsing)
 #[tauri::command]
 pub async fn system_df() -> Result<String, String> {
     let output = docker_cmd()
-        .args(["system", "df", "-v", "--format", "json"])
+        .args(["system", "df"])
         .output()
         .map_err(|e| format!("Failed to get system df: {}", e))?;
 
-    // system df may not support --format json on all versions
     if !output.status.success() {
-        // Fallback to plain text
-        let fallback = docker_cmd()
-            .args(["system", "df", "-v"])
-            .output()
-            .map_err(|e| format!("Failed to get system df: {}", e))?;
-        return Ok(String::from_utf8_lossy(&fallback.stdout).to_string());
+        return Err(format!(
+            "docker system df failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        ));
     }
 
     Ok(String::from_utf8_lossy(&output.stdout).to_string())

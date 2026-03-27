@@ -1,5 +1,6 @@
 mod api_server;
 mod commands;
+mod docker_state;
 mod instance_reader;
 mod path_util;
 mod poller;
@@ -32,6 +33,19 @@ pub fn run() {
             api_server::start_api_server();
             // Start background instance poller
             poller::start_instance_poller(app.handle());
+
+            // Setup DockerState
+            use std::sync::Arc;
+            use tauri::Manager;
+            use tokio::sync::RwLock;
+            let docker_state = Arc::new(RwLock::new(docker_state::DockerState::new()));
+            app.manage(docker_state.clone());
+
+            // Start Docker state watcher
+            let app_handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                docker_state::start_docker_watcher(app_handle, docker_state).await;
+            });
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -87,6 +101,7 @@ pub fn run() {
             // System commands
             system::check_system,
             system::get_colima_version,
+            system::check_tool,
             // Compose commands
             compose::list_compose_projects,
             compose::compose_up,
@@ -121,4 +136,3 @@ pub fn run() {
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
-

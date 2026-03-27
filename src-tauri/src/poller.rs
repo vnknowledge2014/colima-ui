@@ -42,10 +42,8 @@ pub fn start_instance_poller(app: &AppHandle) {
             tick.tick().await;
 
             // Use the fast filesystem reader (shared with Tauri command and API server)
-            let result = tokio::task::spawn_blocking(|| {
-                crate::instance_reader::list_instances_fast()
-            })
-            .await;
+            let result =
+                tokio::task::spawn_blocking(|| crate::instance_reader::list_instances_fast()).await;
 
             if let Ok(parsed) = result {
                 // Update shared state
@@ -60,10 +58,13 @@ pub fn start_instance_poller(app: &AppHandle) {
                     .as_secs();
 
                 // Emit event to frontend
-                let _ = handle.emit("instances-update", InstancesUpdate {
-                    instances: parsed,
-                    timestamp: ts,
-                });
+                let _ = handle.emit(
+                    "instances-update",
+                    InstancesUpdate {
+                        instances: parsed,
+                        timestamp: ts,
+                    },
+                );
             }
         }
     });

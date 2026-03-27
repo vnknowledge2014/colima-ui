@@ -47,3 +47,19 @@ pub async fn get_colima_version() -> Result<String, String> {
 
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
 }
+
+/// Check if an optional tool is installed
+#[tauri::command]
+pub async fn check_tool(name: String) -> Result<serde_json::Value, String> {
+    let allowed = ["kubectl", "kind", "helm", "krunkit", "nerdctl"];
+    if !allowed.contains(&name.as_str()) {
+        return Err(format!("Unknown tool: {}", name));
+    }
+    // Try "version" first, then "--version"
+    let version = get_version(&name, &["version"])
+        .or_else(|| get_version(&name, &["--version"]));
+    Ok(serde_json::json!({
+        "installed": version.is_some(),
+        "version": version.unwrap_or_default()
+    }))
+}

@@ -70,7 +70,7 @@ pub async fn list_volumes() -> Result<Vec<DockerVolume>, String> {
 #[tauri::command]
 pub async fn create_volume(name: String, driver: String) -> Result<String, String> {
     let mut args = vec!["volume", "create"];
-    
+
     let driver_flag;
     if !driver.is_empty() && driver != "local" {
         driver_flag = driver.clone();

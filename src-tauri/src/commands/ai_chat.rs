@@ -9,12 +9,12 @@ pub struct ChatMessage {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AiChatRequest {
-    pub provider: String,   // "anthropic" | "openai" | "gemini" | "ollama-local" | "ollama-cloud"
+    pub provider: String, // "anthropic" | "openai" | "gemini" | "ollama-local" | "ollama-cloud"
     pub model: String,
     pub api_key: String,
     pub messages: Vec<ChatMessage>,
     #[serde(default)]
-    pub endpoint: String,   // custom endpoint for ollama-cloud
+    pub endpoint: String, // custom endpoint for ollama-cloud
 }
 
 /// Proxy AI chat requests to various LLM providers via curl
@@ -39,11 +39,19 @@ pub async fn ai_chat(request: AiChatRequest) -> Result<String, String> {
 
 /// List available models for a provider dynamically
 #[tauri::command]
-pub async fn ai_list_models(provider: String, api_key: String, endpoint: String) -> Result<String, String> {
+pub async fn ai_list_models(
+    provider: String,
+    api_key: String,
+    endpoint: String,
+) -> Result<String, String> {
     match provider.as_str() {
         "ollama-local" => list_ollama_models("http://localhost:11434", ""),
         "ollama-cloud" => {
-            let ep = if endpoint.is_empty() { "http://localhost:11434".to_string() } else { endpoint.trim_end_matches('/').to_string() };
+            let ep = if endpoint.is_empty() {
+                "http://localhost:11434".to_string()
+            } else {
+                endpoint.trim_end_matches('/').to_string()
+            };
             list_ollama_models(&ep, &api_key)
         }
         "gemini" => list_gemini_models(&api_key),
@@ -71,8 +79,8 @@ fn list_ollama_models(base_url: &str, api_key: &str) -> Result<String, String> {
         return Ok("[]".to_string());
     }
 
-    let resp: serde_json::Value = serde_json::from_str(&stdout)
-        .map_err(|e| format!("JSON parse error: {}", e))?;
+    let resp: serde_json::Value =
+        serde_json::from_str(&stdout).map_err(|e| format!("JSON parse error: {}", e))?;
 
     let models: Vec<String> = resp["models"]
         .as_array()
@@ -102,8 +110,8 @@ fn list_gemini_models(api_key: &str) -> Result<String, String> {
         return Ok("[]".to_string());
     }
 
-    let resp: serde_json::Value = serde_json::from_str(&stdout)
-        .map_err(|e| format!("JSON parse error: {}", e))?;
+    let resp: serde_json::Value =
+        serde_json::from_str(&stdout).map_err(|e| format!("JSON parse error: {}", e))?;
 
     let models: Vec<String> = resp["models"]
         .as_array()
@@ -115,7 +123,10 @@ fn list_gemini_models(api_key: &str) -> Result<String, String> {
                     let short = name.strip_prefix("models/").unwrap_or(name);
                     // Only include generateContent-capable models
                     let methods = m["supportedGenerationMethods"].as_array()?;
-                    if methods.iter().any(|v| v.as_str() == Some("generateContent")) {
+                    if methods
+                        .iter()
+                        .any(|v| v.as_str() == Some("generateContent"))
+                    {
                         Some(short.to_string())
                     } else {
                         None
@@ -137,8 +148,10 @@ fn list_anthropic_models(api_key: &str) -> Result<String, String> {
         .args([
             "-s",
             "https://api.anthropic.com/v1/models",
-            "-H", &format!("x-api-key: {}", api_key),
-            "-H", "anthropic-version: 2023-06-01",
+            "-H",
+            &format!("x-api-key: {}", api_key),
+            "-H",
+            "anthropic-version: 2023-06-01",
         ])
         .output()
         .map_err(|e| format!("curl failed: {}", e))?;
@@ -148,8 +161,8 @@ fn list_anthropic_models(api_key: &str) -> Result<String, String> {
         return Ok("[]".to_string());
     }
 
-    let resp: serde_json::Value = serde_json::from_str(&stdout)
-        .map_err(|e| format!("JSON parse error: {}", e))?;
+    let resp: serde_json::Value =
+        serde_json::from_str(&stdout).map_err(|e| format!("JSON parse error: {}", e))?;
 
     let models: Vec<String> = resp["data"]
         .as_array()
@@ -172,7 +185,8 @@ fn list_openai_models(api_key: &str) -> Result<String, String> {
         .args([
             "-s",
             "https://api.openai.com/v1/models",
-            "-H", &format!("Authorization: Bearer {}", api_key),
+            "-H",
+            &format!("Authorization: Bearer {}", api_key),
         ])
         .output()
         .map_err(|e| format!("curl failed: {}", e))?;
@@ -182,8 +196,8 @@ fn list_openai_models(api_key: &str) -> Result<String, String> {
         return Ok("[]".to_string());
     }
 
-    let resp: serde_json::Value = serde_json::from_str(&stdout)
-        .map_err(|e| format!("JSON parse error: {}", e))?;
+    let resp: serde_json::Value =
+        serde_json::from_str(&stdout).map_err(|e| format!("JSON parse error: {}", e))?;
 
     let mut models: Vec<String> = resp["data"]
         .as_array()
@@ -192,7 +206,12 @@ fn list_openai_models(api_key: &str) -> Result<String, String> {
                 .filter_map(|m| {
                     let id = m["id"].as_str()?;
                     // Filter to chat-capable models (gpt, o1, o3, o4, chatgpt)
-                    if id.starts_with("gpt-") || id.starts_with("o1") || id.starts_with("o3") || id.starts_with("o4") || id.starts_with("chatgpt") {
+                    if id.starts_with("gpt-")
+                        || id.starts_with("o1")
+                        || id.starts_with("o3")
+                        || id.starts_with("o4")
+                        || id.starts_with("chatgpt")
+                    {
                         Some(id.to_string())
                     } else {
                         None
@@ -238,12 +257,17 @@ fn call_anthropic(req: &AiChatRequest) -> Result<String, String> {
     let output = Command::new("curl")
         .args([
             "-s",
-            "-X", "POST",
+            "-X",
+            "POST",
             "https://api.anthropic.com/v1/messages",
-            "-H", "Content-Type: application/json",
-            "-H", &format!("x-api-key: {}", req.api_key),
-            "-H", "anthropic-version: 2023-06-01",
-            "-d", &body.to_string(),
+            "-H",
+            "Content-Type: application/json",
+            "-H",
+            &format!("x-api-key: {}", req.api_key),
+            "-H",
+            "anthropic-version: 2023-06-01",
+            "-d",
+            &body.to_string(),
         ])
         .output()
         .map_err(|e| format!("curl failed: {}", e))?;
@@ -301,11 +325,15 @@ fn call_openai(req: &AiChatRequest) -> Result<String, String> {
     let output = Command::new("curl")
         .args([
             "-s",
-            "-X", "POST",
+            "-X",
+            "POST",
             "https://api.openai.com/v1/chat/completions",
-            "-H", "Content-Type: application/json",
-            "-H", &format!("Authorization: Bearer {}", req.api_key),
-            "-d", &body.to_string(),
+            "-H",
+            "Content-Type: application/json",
+            "-H",
+            &format!("Authorization: Bearer {}", req.api_key),
+            "-d",
+            &body.to_string(),
         ])
         .output()
         .map_err(|e| format!("curl failed: {}", e))?;
@@ -380,10 +408,13 @@ fn call_gemini(req: &AiChatRequest) -> Result<String, String> {
     let output = Command::new("curl")
         .args([
             "-s",
-            "-X", "POST",
+            "-X",
+            "POST",
             &url,
-            "-H", "Content-Type: application/json",
-            "-d", &body.to_string(),
+            "-H",
+            "Content-Type: application/json",
+            "-d",
+            &body.to_string(),
         ])
         .output()
         .map_err(|e| format!("curl failed: {}", e))?;
@@ -433,9 +464,11 @@ fn call_ollama(req: &AiChatRequest, base_url: &str) -> Result<String, String> {
 
     let mut args = vec![
         "-s".to_string(),
-        "-X".to_string(), "POST".to_string(),
+        "-X".to_string(),
+        "POST".to_string(),
         url,
-        "-H".to_string(), "Content-Type: application/json".to_string(),
+        "-H".to_string(),
+        "Content-Type: application/json".to_string(),
     ];
 
     // Add auth if API key provided (for cloud Ollama)
@@ -464,15 +497,28 @@ fn call_ollama(req: &AiChatRequest, base_url: &str) -> Result<String, String> {
         return Err("Empty response from Ollama — is the server running?".to_string());
     }
 
-    let resp: serde_json::Value =
-        serde_json::from_str(&stdout).map_err(|e| format!("JSON parse error: {} — raw: {}", e, &stdout[..stdout.len().min(200)]))?;
+    let resp: serde_json::Value = serde_json::from_str(&stdout).map_err(|e| {
+        format!(
+            "JSON parse error: {} — raw: {}",
+            e,
+            &stdout[..stdout.len().min(200)]
+        )
+    })?;
 
     if let Some(err) = resp.get("error") {
-        return Err(format!("Ollama error: {}", err.as_str().unwrap_or("unknown")));
+        return Err(format!(
+            "Ollama error: {}",
+            err.as_str().unwrap_or("unknown")
+        ));
     }
 
     resp["message"]["content"]
         .as_str()
         .map(|s| s.to_string())
-        .ok_or_else(|| format!("No response content from Ollama — raw: {}", &stdout[..stdout.len().min(200)]))
+        .ok_or_else(|| {
+            format!(
+                "No response content from Ollama — raw: {}",
+                &stdout[..stdout.len().min(200)]
+            )
+        })
 }
