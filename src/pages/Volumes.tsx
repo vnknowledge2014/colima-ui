@@ -58,8 +58,7 @@ export default function Volumes(_props: VolumesProps) {
     setActionLoading(name);
     try {
       await volumesApi.removeVolume(name, true);
-      // Always clear from selection (avoid stale closure from confirm dialog)
-      setSelected(prev => { const next = new Set(prev); next.delete(name); return next; });
+      setSelected(new Set());
       await refresh();
     } catch (e) {
       setError(String(e));

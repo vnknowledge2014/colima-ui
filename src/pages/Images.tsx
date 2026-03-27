@@ -189,8 +189,7 @@ export default function Images() {
     setActionLoading(imageId);
     try {
       await dockerApi.removeImage(imageId, true);
-      // Always clear from selection (avoid stale closure from confirm dialog)
-      setSelected(prev => { const next = new Set(prev); next.delete(imageId); return next; });
+      setSelected(new Set());
       globalToast("success", `Image "${name}" removed`);
     } catch (e) {
       const msg = String(e);

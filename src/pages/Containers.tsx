@@ -639,8 +639,7 @@ export default function Containers() {
           const ok = await confirm({ title: "Remove Container", message: `Remove container "${name}"?\n\nThis will permanently delete the container and its data.`, confirmText: "Remove", variant: "danger" });
           if (!ok) { setActionLoading(null); return; }
           await dockerApi.removeContainer(id, true);
-          // Always clear from selection (avoid stale closure from confirm dialog)
-          setSelected(prev => { const next = new Set(prev); next.delete(id); return next; });
+          setSelected(new Set());
           break;
         }
         case "pause": await dockerApi.pauseContainer(id); break;
