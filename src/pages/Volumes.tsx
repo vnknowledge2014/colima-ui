@@ -31,6 +31,7 @@ export default function Volumes(_props: VolumesProps) {
       setVolumes(list);
     } catch (e) {
       setError(String(e));
+      setVolumes([]);
     } finally {
       setLoading(false);
     }

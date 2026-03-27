@@ -4,6 +4,7 @@ import { onToast, ToastMessage } from "./lib/globalToast";
 import { WarningIcon } from "./components/Icons";
 import { useSetAtom } from "jotai";
 import { containersAtom, imagesAtom, dockerLoadingAtom } from "./store/dockerAtom";
+import { volumesAtom, networksAtom } from "./store/resourceAtom";
 import "./index.css";
 
 // Lazy-loaded pages — each becomes a separate chunk
@@ -196,19 +197,25 @@ function App() {
   const setContainers = useSetAtom(containersAtom);
   const setImages = useSetAtom(imagesAtom);
   const setDockerLoading = useSetAtom(dockerLoadingAtom);
+  const setVolumes = useSetAtom(volumesAtom);
+  const setNetworks = useSetAtom(networksAtom);
 
   // Global Docker State Effect
   useEffect(() => {
     if (isTauri) {
       let unlisten: (() => void) | undefined;
+      let unlisten2: (() => void) | undefined;
 
       // Immediate fetch via normalized API (handles field-name mapping)
       Promise.all([
-        dockerApi.listContainers(true).catch(() => []),
-        dockerApi.listImages().catch(() => []),
+        dockerApi.listContainers(true),
+        dockerApi.listImages(),
       ]).then(([c, i]) => {
         setContainers(c);
         setImages(i);
+        setDockerLoading(false);
+      }).catch(() => {
+        // Docker not available yet — atoms stay empty
         setDockerLoading(false);
       });
 
@@ -238,8 +245,17 @@ function App() {
           setImages(images);
           setDockerLoading(false);
         }).then((fn) => { unlisten = fn; });
+
+        // Listen for connection-lost event to clear ALL Docker state
+        mod.listen("docker-connection-lost", () => {
+          setContainers([]);
+          setImages([]);
+          setVolumes([]);
+          setNetworks([]);
+          setDockerLoading(false);
+        }).then((fn) => { unlisten2 = fn; });
       });
-      return () => { if (unlisten) unlisten(); };
+      return () => { if (unlisten) unlisten(); if (unlisten2) unlisten2(); };
     } else {
       // Browser mode: immediate fetch + SSE for real-time updates
       let pollInterval: ReturnType<typeof setInterval> | null = null;

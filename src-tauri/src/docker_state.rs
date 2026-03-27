@@ -91,6 +91,8 @@ pub async fn start_docker_watcher(app: AppHandle, state: Arc<RwLock<DockerState>
             lock.containers_cache = vec![];
             lock.images_cache = vec![];
         }
+        // Emit specific connection-lost event so frontend can clear ALL Docker state
+        let _ = app.emit("docker-connection-lost", serde_json::json!({}));
         let _ = app.emit("docker-state-updated", serde_json::json!({
             "containers": [],
             "images": []

@@ -31,6 +31,7 @@ export default function Networks(_props: NetworksProps) {
       setNetworks(list);
     } catch (e) {
       setError(String(e));
+      setNetworks([]);
     } finally {
       setLoading(false);
     }
