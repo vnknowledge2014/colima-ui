@@ -263,14 +263,20 @@ export default function Images() {
   });
 
   const totalSize = images.reduce((sum, img) => {
-    const match = img.Size.match(/([\d.]+)\s*(GB|MB|KB)/i);
+    const sizeStr = String(img.Size || '0');
+    // Handle formatted sizes like "75.89MB", "1.23GB"
+    const match = sizeStr.match(/([\d.]+)\s*(GB|MB|KB|B)/i);
     if (match) {
       const val = parseFloat(match[1]);
       const unit = match[2].toUpperCase();
       if (unit === "GB") return sum + val * 1024;
       if (unit === "MB") return sum + val;
       if (unit === "KB") return sum + val / 1024;
+      if (unit === "B") return sum + val / (1024 * 1024);
     }
+    // Handle raw byte count (number or numeric string)
+    const num = parseFloat(sizeStr);
+    if (!isNaN(num) && num > 0) return sum + num / (1024 * 1024);
     return sum;
   }, 0);
 
