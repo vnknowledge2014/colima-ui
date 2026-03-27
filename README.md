@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-0.1.0-blue" alt="version" />
+  <img src="https://img.shields.io/badge/version-0.2.0-blue" alt="version" />
   <img src="https://img.shields.io/badge/Tauri-v2-orange" alt="Tauri v2" />
   <img src="https://img.shields.io/badge/React-19-61dafb" alt="React 19" />
   <img src="https://img.shields.io/badge/Rust-Edition%202021-dea584" alt="Rust" />
@@ -29,7 +29,10 @@
 
 ### ☸️ Kubernetes
 - **Multi-resource browser** — Pods, Deployments, Services, ConfigMaps, Secrets, StatefulSets, DaemonSets, Jobs, CronJobs, Ingresses, PVCs, Namespaces, Nodes, Events
+- **Custom Resource Definitions (CRDs)** — Discover and browse custom resources dynamically in the sidebar
 - **Resource actions** — Describe, view/edit YAML, view logs (with container selection), delete, restart, scale replicas
+- **Real-time log streaming** — Follow pod logs via SSE with auto-scroll toggle
+- **HTTP Benchmark** — Benchmark Kubernetes services with configurable concurrency, request count, and latency statistics (p50/p95/p99)
 - **Port forwarding** — Create and manage port forwards to services and pods
 - **Exec** — Shell into pod containers
 - **Cluster health** — Health scan dashboard with node status, resource pressure, component health
@@ -262,6 +265,8 @@ Output goes to `dist/`.
 - `axum` + `tower-http` (CORS) — HTTP API server with SSE support
 - `bollard` — Native Docker API client for event streaming
 - `tokio` (broadcast channels) — Async runtime with pub/sub for SSE
+- `async-stream` — Async stream helpers for SSE log streaming
+- `reqwest` — HTTP client for benchmark tool
 - `serde` + `serde_json` + `serde_yaml` — Serialization
 - `tauri-plugin-shell` — Shell command execution from Tauri
 
