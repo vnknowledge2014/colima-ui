@@ -46,53 +46,31 @@ fn docker_cmd() -> Command {
 }
 
 /// List all Docker containers
-/// Returns cached data if available; falls back to Docker CLI if Bollard fails.
+/// Always fetches fresh data: tries Bollard first (fast), falls back to Docker CLI.
 #[tauri::command]
 pub async fn list_containers(
     state: tauri::State<'_, std::sync::Arc<tokio::sync::RwLock<crate::docker_state::DockerState>>>,
     all: bool,
 ) -> Result<Vec<serde_json::Value>, String> {
-    // Try cache first
+    // Try Bollard SDK first (faster — uses Docker socket directly)
+    let mut mapped = Vec::new();
     {
         let lock = state.read().await;
-        if !lock.containers_cache.is_empty() {
-            return if all {
-                Ok(lock.containers_cache.clone())
-            } else {
-                Ok(lock.containers_cache.iter().filter(|c| c["State"] == "running").cloned().collect())
-            };
+        if let Some(docker) = &lock.docker {
+            let containers = docker
+                .list_containers(Some(bollard::container::ListContainersOptions::<String> {
+                    all: true,
+                    ..Default::default()
+                }))
+                .await
+                .unwrap_or_default();
+            mapped = crate::docker_state::map_containers(&containers);
         }
     }
 
-    // Cache empty — try Bollard, then fall back to Docker CLI
-    let mut lock = state.write().await;
-    if !lock.containers_cache.is_empty() {
-        return if all {
-            Ok(lock.containers_cache.clone())
-        } else {
-            Ok(lock.containers_cache.iter().filter(|c| c["State"] == "running").cloned().collect())
-        };
-    }
-
-    // Try Bollard SDK first
-    let mut mapped = Vec::new();
-    if let Some(docker) = &lock.docker {
-        let containers = docker
-            .list_containers(Some(bollard::container::ListContainersOptions::<String> {
-                all: true,
-                ..Default::default()
-            }))
-            .await
-            .unwrap_or_default();
-        mapped = crate::docker_state::map_containers(&containers);
-    }
-
-    // Fallback to Docker CLI if Bollard returned empty
+    // Fallback to Docker CLI if Bollard returned empty or unavailable
     if mapped.is_empty() {
-        let mut args = vec!["ps", "--format", "json", "--no-trunc", "-a"];
-        if !all {
-            args.retain(|a| *a != "-a");
-        }
+        let args = vec!["ps", "--format", "json", "--no-trunc", "-a"];
         if let Ok(output) = docker_cmd().args(&args).output() {
             if output.status.success() {
                 let stdout = String::from_utf8_lossy(&output.stdout);
@@ -102,7 +80,6 @@ pub async fn list_containers(
                     .filter_map(|l| serde_json::from_str(l).ok())
                     .collect();
                 if !cli_containers.is_empty() {
-                    // Normalize CLI field names to match expected format
                     mapped = cli_containers.iter().map(|c| {
                         serde_json::json!({
                             "Id": c.get("ID").or(c.get("Id")).unwrap_or(&serde_json::Value::String(String::new())),
@@ -120,8 +97,6 @@ pub async fn list_containers(
             }
         }
     }
-
-    lock.containers_cache = mapped.clone();
 
     if all {
         Ok(mapped)
@@ -239,39 +214,28 @@ pub async fn container_logs(container_id: String, lines: u32) -> Result<String, 
 }
 
 /// List Docker images
-/// Returns cached data if available; falls back to Docker CLI if Bollard fails.
+/// Always fetches fresh data: tries Bollard first (fast), falls back to Docker CLI.
 #[tauri::command]
 pub async fn list_images(
     state: tauri::State<'_, std::sync::Arc<tokio::sync::RwLock<crate::docker_state::DockerState>>>,
 ) -> Result<Vec<serde_json::Value>, String> {
-    // Try cache first
+    // Try Bollard SDK first (faster — uses Docker socket directly)
+    let mut mapped = Vec::new();
     {
         let lock = state.read().await;
-        if !lock.images_cache.is_empty() {
-            return Ok(lock.images_cache.clone());
+        if let Some(docker) = &lock.docker {
+            let images = docker
+                .list_images(Some(bollard::image::ListImagesOptions::<String> {
+                    all: false,
+                    ..Default::default()
+                }))
+                .await
+                .unwrap_or_default();
+            mapped = crate::docker_state::map_images(&images);
         }
     }
 
-    // Cache empty — try Bollard, then fall back to Docker CLI
-    let mut lock = state.write().await;
-    if !lock.images_cache.is_empty() {
-        return Ok(lock.images_cache.clone());
-    }
-
-    // Try Bollard SDK first
-    let mut mapped = Vec::new();
-    if let Some(docker) = &lock.docker {
-        let images = docker
-            .list_images(Some(bollard::image::ListImagesOptions::<String> {
-                all: false,
-                ..Default::default()
-            }))
-            .await
-            .unwrap_or_default();
-        mapped = crate::docker_state::map_images(&images);
-    }
-
-    // Fallback to Docker CLI if Bollard returned empty
+    // Fallback to Docker CLI if Bollard returned empty or unavailable
     if mapped.is_empty() {
         if let Ok(output) = docker_cmd().args(["images", "--format", "json", "--no-trunc"]).output() {
             if output.status.success() {
@@ -296,7 +260,6 @@ pub async fn list_images(
         }
     }
 
-    lock.images_cache = mapped.clone();
     Ok(mapped)
 }
 
