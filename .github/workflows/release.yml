@@ -2,8 +2,12 @@ name: Release
 
 on:
   push:
+    branches: [main]
     tags:
       - 'v*'
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 permissions:
   contents: write
@@ -12,12 +16,22 @@ jobs:
   # ===== Auto-detect version from tag =====
   prepare:
     name: Prepare Release
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
     outputs:
       version: ${{ steps.version.outputs.version }}
       tag: ${{ steps.version.outputs.tag }}
     steps:
       - uses: actions/checkout@v4
+
+      - name: Verify tag is on main branch
+        run: |
+          git fetch origin main
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "❌ Tag must be on the main branch"
+            exit 1
+          fi
+          echo "✅ Tag is on main branch"
 
       - name: Extract version from tag
         id: version
@@ -55,7 +69,7 @@ jobs:
             target: x86_64-apple-darwin
             bundles: dmg
           - name: Linux x86_64
-            runner: ubuntu-22.04
+            runner: ubuntu-latest
             target: ""
             bundles: deb,appimage
     runs-on: ${{ matrix.runner }}
@@ -144,7 +158,7 @@ jobs:
   verify:
     name: Verify Release
     needs: [prepare, build]
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-latest
     steps:
       - name: Check release assets
         env:
