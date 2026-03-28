@@ -413,6 +413,7 @@ body {
   letter-spacing: 0.03em;
   max-width: 100%;
   overflow: hidden;
+  min-width: 0;
 }
 
 .badge-running {
@@ -468,6 +469,7 @@ body {
   white-space: nowrap;
   text-transform: none;
   letter-spacing: 0;
+  min-width: 0;
 }
 
 @keyframes pulse {
