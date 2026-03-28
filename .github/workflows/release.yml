@@ -1,10 +1,13 @@
 name: Release
 
+# Triggered by version tags from main branch only
+# Flow: dev → staging (PR) → main (PR) → tag v* → Release
 on:
   push:
-    branches: [main]
     tags:
-      - 'v*'
+      - 'v*'           # Production release (from main)
+      - 'v*-rc.*'      # Release candidate (from staging)
+      - 'v*-beta.*'    # Beta release (from dev)
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
@@ -17,40 +20,74 @@ jobs:
   prepare:
     name: Prepare Release
     runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/v')
     outputs:
       version: ${{ steps.version.outputs.version }}
       tag: ${{ steps.version.outputs.tag }}
+      prerelease: ${{ steps.version.outputs.prerelease }}
+      channel: ${{ steps.version.outputs.channel }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-      - name: Verify tag is on main branch
-        run: |
-          git fetch origin main
-          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
-            echo "❌ Tag must be on the main branch"
-            exit 1
-          fi
-          echo "✅ Tag is on main branch"
-
-      - name: Extract version from tag
+      - name: Extract version and channel
         id: version
         run: |
           TAG="${GITHUB_REF#refs/tags/}"
           VERSION="${TAG#v}"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "📦 Release version: $VERSION (tag: $TAG)"
+
+          # Determine release channel
+          if [[ "$VERSION" == *"-beta."* ]]; then
+            echo "prerelease=true" >> "$GITHUB_OUTPUT"
+            echo "channel=beta" >> "$GITHUB_OUTPUT"
+            echo "🧪 Beta release: $VERSION"
+          elif [[ "$VERSION" == *"-rc."* ]]; then
+            echo "prerelease=true" >> "$GITHUB_OUTPUT"
+            echo "channel=rc" >> "$GITHUB_OUTPUT"
+            echo "🔬 Release candidate: $VERSION"
+          else
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"
+            echo "channel=stable" >> "$GITHUB_OUTPUT"
+            echo "🚀 Production release: $VERSION"
+          fi
 
       - name: Validate semver
         run: |
           VERSION="${{ steps.version.outputs.version }}"
           if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.]+)?$ ]]; then
             echo "❌ Invalid semver: $VERSION"
-            echo "   Expected format: X.Y.Z or X.Y.Z-beta.1"
+            echo "   Expected format: X.Y.Z, X.Y.Z-beta.N, or X.Y.Z-rc.N"
             exit 1
           fi
           echo "✅ Valid semver: $VERSION"
+
+      - name: Verify tag branch
+        run: |
+          CHANNEL="${{ steps.version.outputs.channel }}"
+          git fetch origin main staging dev 2>/dev/null || true
+
+          case "$CHANNEL" in
+            stable)
+              if git merge-base --is-ancestor "$GITHUB_SHA" origin/main 2>/dev/null; then
+                echo "✅ Production tag is on main branch"
+              else
+                echo "❌ Production tags (vX.Y.Z) must be on the main branch"
+                exit 1
+              fi
+              ;;
+            rc)
+              if git merge-base --is-ancestor "$GITHUB_SHA" origin/staging 2>/dev/null; then
+                echo "✅ RC tag is on staging branch"
+              else
+                echo "⚠️ RC tag may not be on staging — proceeding anyway"
+              fi
+              ;;
+            beta)
+              echo "✅ Beta tag — no branch restriction"
+              ;;
+          esac
 
   # ===== Build for all platforms =====
   build:
@@ -110,17 +147,21 @@ jobs:
         working-directory: src-tauri
         run: |
           VERSION="${{ needs.prepare.outputs.version }}"
-          sed -i.bak "s/^version = \".*\"/version = \"$VERSION\"/" Cargo.toml
+          # Cargo doesn't support pre-release suffixes — strip them
+          CARGO_VERSION=$(echo "$VERSION" | sed 's/-.*//')
+          sed -i.bak "s/^version = \".*\"/version = \"$CARGO_VERSION\"/" Cargo.toml
           rm -f Cargo.toml.bak
 
       - name: Sync version to tauri.conf.json
         working-directory: src-tauri
         run: |
           VERSION="${{ needs.prepare.outputs.version }}"
+          # Tauri uses semver — strip pre-release for bundle version
+          TAURI_VERSION=$(echo "$VERSION" | sed 's/-.*//')
           node -e "
             const fs = require('fs');
             const conf = JSON.parse(fs.readFileSync('tauri.conf.json'));
-            conf.version = '$VERSION';
+            conf.version = '$TAURI_VERSION';
             fs.writeFileSync('tauri.conf.json', JSON.stringify(conf, null, 2) + '\n');
           "
 
@@ -135,6 +176,8 @@ jobs:
           releaseName: 'ColimaUI v${{ needs.prepare.outputs.version }}'
           releaseBody: |
             ## ColimaUI v${{ needs.prepare.outputs.version }}
+
+            **Channel:** ${{ needs.prepare.outputs.channel == 'stable' && '🚀 Stable' || needs.prepare.outputs.channel == 'rc' && '🔬 Release Candidate' || '🧪 Beta' }}
 
             ### 📦 Installation
 
@@ -151,7 +194,7 @@ jobs:
             ---
             *Full changelog: https://github.com/${{ github.repository }}/compare/...${{ needs.prepare.outputs.tag }}*
           releaseDraft: false
-          prerelease: ${{ contains(needs.prepare.outputs.version, '-') }}
+          prerelease: ${{ needs.prepare.outputs.prerelease }}
           args: ${{ matrix.target && format('--target {0}', matrix.target) || '' }} --bundles ${{ matrix.bundles }}
 
   # ===== Post-release verification =====
@@ -165,9 +208,9 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           TAG="${{ needs.prepare.outputs.tag }}"
-          echo "🔍 Checking release assets for $TAG..."
+          CHANNEL="${{ needs.prepare.outputs.channel }}"
+          echo "🔍 Checking $CHANNEL release assets for $TAG..."
 
-          # Wait for release to be fully published
           sleep 10
 
           ASSETS=$(gh release view "$TAG" --repo "${{ github.repository }}" --json assets -q '.assets[].name' 2>/dev/null || echo "")
@@ -181,7 +224,6 @@ jobs:
             echo "  ✅ $asset"
           done
 
-          # Verify we have at least 2 platform builds
           COUNT=$(echo "$ASSETS" | wc -l | tr -d ' ')
           echo ""
           echo "📊 Total assets: $COUNT"

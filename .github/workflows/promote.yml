@@ -1,0 +1,96 @@
+name: Promote
+
+# Manually promote between environments:
+#   dev → staging (create PR)
+#   staging → main (create PR)
+on:
+  workflow_dispatch:
+    inputs:
+      promotion:
+        description: 'Promotion path'
+        required: true
+        type: choice
+        options:
+          - 'dev → staging'
+          - 'staging → main'
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  promote:
+    name: Promote ${{ inputs.promotion }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set promotion variables
+        id: vars
+        run: |
+          case "${{ inputs.promotion }}" in
+            "dev → staging")
+              echo "source=dev" >> "$GITHUB_OUTPUT"
+              echo "target=staging" >> "$GITHUB_OUTPUT"
+              echo "title=🔬 Promote dev → staging" >> "$GITHUB_OUTPUT"
+              ;;
+            "staging → main")
+              echo "source=staging" >> "$GITHUB_OUTPUT"
+              echo "target=main" >> "$GITHUB_OUTPUT"
+              echo "title=🚀 Promote staging → main" >> "$GITHUB_OUTPUT"
+              ;;
+          esac
+
+      - name: Check for differences
+        run: |
+          git fetch origin ${{ steps.vars.outputs.source }} ${{ steps.vars.outputs.target }}
+          DIFF=$(git log origin/${{ steps.vars.outputs.target }}..origin/${{ steps.vars.outputs.source }} --oneline)
+          if [ -z "$DIFF" ]; then
+            echo "❌ No new commits to promote"
+            exit 1
+          fi
+          echo "📦 Commits to promote:"
+          echo "$DIFF"
+
+      - name: Create promotion PR
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          SOURCE="${{ steps.vars.outputs.source }}"
+          TARGET="${{ steps.vars.outputs.target }}"
+          TITLE="${{ steps.vars.outputs.title }}"
+
+          # Check if PR already exists
+          EXISTING=$(gh pr list --base "$TARGET" --head "$SOURCE" --json number -q '.[0].number' 2>/dev/null || echo "")
+          if [ -n "$EXISTING" ]; then
+            echo "⚠️ PR #$EXISTING already exists for $SOURCE → $TARGET"
+            echo "   https://github.com/${{ github.repository }}/pull/$EXISTING"
+            exit 0
+          fi
+
+          # Generate changelog
+          BODY=$(cat <<EOF
+          ## $TITLE
+
+          ### Changes
+          $(git log origin/$TARGET..origin/$SOURCE --pretty="- %s (%h)" | head -30)
+
+          ### Checklist
+          - [ ] CI passes on source branch
+          - [ ] Manual testing completed
+          - [ ] No breaking changes (or documented)
+          EOF
+          )
+
+          gh pr create \
+            --base "$TARGET" \
+            --head "$SOURCE" \
+            --title "$TITLE" \
+            --body "$BODY"
+
+          echo "✅ Promotion PR created!"
