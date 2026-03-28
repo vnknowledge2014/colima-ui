@@ -411,6 +411,8 @@ body {
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.03em;
+  max-width: 100%;
+  overflow: hidden;
 }
 
 .badge-running {
@@ -451,6 +453,21 @@ body {
 
 .badge-stopped .badge-dot {
   animation: none;
+}
+
+.badge-label {
+  text-transform: capitalize;
+  flex-shrink: 0;
+}
+
+.badge-detail {
+  opacity: 0.7;
+  font-weight: 400;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-transform: none;
+  letter-spacing: 0;
 }
 
 @keyframes pulse {

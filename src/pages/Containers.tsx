@@ -529,7 +529,8 @@ function VirtualContainerRows({
                 <span className={`badge badge-${isPaused ? 'stopped' : isRunning ? 'running' : 'stopped'}`}
                   title={c.Status}>
                   <span className="badge-dot" />
-                  {c.Status}
+                  <span className="badge-label">{isPaused ? 'Paused' : c.State}</span>
+                  <span className="badge-detail">{c.Status.replace(/^\S+\s*/, '')}</span>
                 </span>
               </div>
               <div className="vtable-cell" style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)', color: 'var(--text-muted)' }}
@@ -809,7 +810,7 @@ export default function Containers() {
 
         {filtered.length > 0 ? (() => {
           const ROW_H = 48;
-          const COL_W = { check: 44, name: 'minmax(160px,1.5fr)', image: 'minmax(140px,1fr)', status: '140px', ports: 'minmax(120px,1fr)', actions: '180px' };
+          const COL_W = { check: 44, name: 'minmax(160px,1.5fr)', image: 'minmax(140px,1fr)', status: 'minmax(160px,200px)', ports: 'minmax(120px,1fr)', actions: '180px' };
           const gridCols = `${COL_W.check}px ${COL_W.name} ${COL_W.image} ${COL_W.status} ${COL_W.ports} ${COL_W.actions}`;
           return (
           <div className="vtable">
