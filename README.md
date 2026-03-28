@@ -9,12 +9,30 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-0.3.0-blue" alt="version" />
-  <img src="https://img.shields.io/badge/Tauri-v2-orange" alt="Tauri v2" />
-  <img src="https://img.shields.io/badge/React-19-61dafb" alt="React 19" />
-  <img src="https://img.shields.io/badge/Rust-Edition%202021-dea584" alt="Rust" />
-  <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey" alt="Cross-platform" />
+  <a href="https://github.com/vnknowledge2014/colima-ui/releases/latest"><img src="https://img.shields.io/github/v/release/vnknowledge2014/colima-ui?style=flat-square&color=blue" alt="Latest Release" /></a>
+  <a href="https://github.com/vnknowledge2014/colima-ui/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/vnknowledge2014/colima-ui/ci.yml?branch=main&style=flat-square&label=CI" alt="CI" /></a>
+  <a href="https://github.com/vnknowledge2014/colima-ui/actions/workflows/release.yml"><img src="https://img.shields.io/github/actions/workflow/status/vnknowledge2014/colima-ui/release.yml?style=flat-square&label=Release" alt="Release" /></a>
+  <img src="https://img.shields.io/badge/Tauri-v2-orange?style=flat-square" alt="Tauri v2" />
+  <img src="https://img.shields.io/badge/React-19-61dafb?style=flat-square" alt="React 19" />
+  <img src="https://img.shields.io/badge/Rust-2021-dea584?style=flat-square" alt="Rust" />
+  <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Linux-lightgrey?style=flat-square" alt="macOS & Linux" />
+  <a href="https://github.com/vnknowledge2014/colima-ui/blob/main/LICENSE"><img src="https://img.shields.io/github/license/vnknowledge2014/colima-ui?style=flat-square" alt="License" /></a>
 </p>
+
+---
+
+## 📥 Download
+
+Grab the latest release for your platform from [**GitHub Releases**](https://github.com/vnknowledge2014/colima-ui/releases/latest):
+
+| Platform | File | Architecture |
+|----------|------|--------------|
+| **macOS** (Apple Silicon) | `ColimaUI_*_aarch64.dmg` | M1 / M2 / M3 / M4 |
+| **macOS** (Intel) | `ColimaUI_*_x64.dmg` | x86_64 |
+| **Linux** (Debian/Ubuntu) | `ColimaUI_*_amd64.deb` | x86_64 |
+| **Linux** (Universal) | `ColimaUI_*_amd64.AppImage` | x86_64 |
+
+> **Browser mode:** After launching the app, access the full web UI at `http://127.0.0.1:11420` from any browser.
 
 ---
 
@@ -179,7 +197,7 @@ ColimaUI uses a **push-first architecture** for real-time state synchronization:
 - **[Kind](https://kind.sigs.k8s.io/)** *(optional)* — For Kind cluster management
 - **[Ollama](https://ollama.ai/)** *(optional)* — For local AI model management
 
-> **Note:** The desktop app (Tauri) runs on **macOS, Linux, and Windows**. The web mode runs on any platform with a modern browser.
+> **Note:** The desktop app (Tauri) runs on **macOS and Linux**. The web mode runs on any platform with a modern browser.
 
 ---
 
@@ -362,6 +380,39 @@ ColimaUI features a premium **dark theme** with:
 | `npm run preview` | Preview production build |
 | `npm run tauri dev` | Start Tauri desktop app in dev mode |
 | `npm run tauri build` | Build Tauri desktop app for production |
+
+---
+
+## 🔄 CI/CD & Releases
+
+This project uses **GitHub Actions** for automated CI and releases:
+
+- **CI** (`.github/workflows/ci.yml`) — Runs on every push/PR:
+  - TypeScript type checking
+  - Rust `cargo check` + `cargo clippy` (macOS ARM64, macOS x86, Linux)
+  - Frontend build validation
+
+- **Release** (`.github/workflows/release.yml`) — Triggered by version tags (`v*`):
+  - Builds DMG for macOS (ARM64 + x86)
+  - Builds `.deb` + `.AppImage` for Linux
+  - Auto-creates GitHub Release with all assets
+  - Auto-syncs version across `package.json`, `Cargo.toml`, `tauri.conf.json`
+
+### Creating a Release
+
+```bash
+# Bump version, commit, tag, and push (triggers CI + Release build)
+./scripts/release.sh patch   # 0.1.1 → 0.1.2
+./scripts/release.sh minor   # 0.1.1 → 0.2.0
+./scripts/release.sh major   # 0.1.1 → 1.0.0
+./scripts/release.sh 2.0.0   # explicit version
+```
+
+The script automatically:
+1. Updates version in all 3 config files
+2. Creates an atomic commit + signed tag
+3. Pushes to GitHub → triggers release workflow
+4. GitHub Actions builds all platforms and creates a GitHub Release
 
 ---
 
