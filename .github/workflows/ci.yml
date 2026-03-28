@@ -1,0 +1,103 @@
+name: CI
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ===== Lint & Type Check (fast — runs first) =====
+  lint:
+    name: Lint & Type Check
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: TypeScript type check
+        run: npx tsc --noEmit
+
+  # ===== Rust Check (all platforms) =====
+  rust-check:
+    name: Rust Check (${{ matrix.name }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS ARM64
+            runner: macos-latest
+            target: aarch64-apple-darwin
+          - name: macOS x86
+            runner: macos-latest
+            target: x86_64-apple-darwin
+          - name: Linux x86
+            runner: ubuntu-22.04
+            target: ""
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+          cache-on-failure: true
+
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+
+      - name: cargo check
+        working-directory: src-tauri
+        run: |
+          if [ -n "${{ matrix.target }}" ]; then
+            cargo check --target ${{ matrix.target }}
+          else
+            cargo check
+          fi
+
+      - name: cargo clippy
+        working-directory: src-tauri
+        run: |
+          if [ -n "${{ matrix.target }}" ]; then
+            cargo clippy --target ${{ matrix.target }} -- -W warnings
+          else
+            cargo clippy -- -W warnings
+          fi
+
+  # ===== Frontend Build =====
+  frontend-build:
+    name: Frontend Build
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+      - run: npm run build
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: frontend-dist
+          path: dist/
+          retention-days: 1
