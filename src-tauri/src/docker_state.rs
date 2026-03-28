@@ -50,6 +50,7 @@ impl DockerState {
     }
 
     /// Returns a reference to the Docker client, or an error if not connected.
+    #[allow(dead_code)]
     pub fn docker(&self) -> Result<&Docker, String> {
         self.docker.as_ref().ok_or_else(|| "Docker daemon is not connected".to_string())
     }

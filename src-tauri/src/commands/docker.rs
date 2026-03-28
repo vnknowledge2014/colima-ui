@@ -59,7 +59,6 @@ pub async fn list_containers(
 ) -> Result<Vec<serde_json::Value>, String> {
     // Try Bollard SDK first (faster — uses Docker socket directly)
     let mut bollard_error: Option<String> = None;
-    let mut mapped = Vec::new();
     {
         let lock = state.read().await;
         if let Some(docker) = &lock.docker {
@@ -71,9 +70,7 @@ pub async fn list_containers(
                 .await
             {
                 Ok(containers) => {
-                    mapped = crate::docker_state::map_containers(&containers);
-                    // Bollard succeeded — return data (even if empty = no containers)
-                    return Ok(mapped);
+                    return Ok(crate::docker_state::map_containers(&containers));
                 }
                 Err(e) => {
                     bollard_error = Some(format!("{}", e));
@@ -88,7 +85,7 @@ pub async fn list_containers(
         Ok(output) => {
             if output.status.success() {
                 let stdout = String::from_utf8_lossy(&output.stdout);
-                mapped = stdout
+                let mapped: Vec<serde_json::Value> = stdout
                     .lines()
                     .filter(|l| !l.trim().is_empty())
                     .filter_map(|l| serde_json::from_str(l).ok())
