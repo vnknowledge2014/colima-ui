@@ -112,7 +112,7 @@ fn read_instance(colima_home: &Path, profile: &str) -> Option<ColimaInstance> {
             "Stopped".to_string()
         },
         arch: if config.arch.is_empty() {
-            "x86_64".to_string()
+            std::env::consts::ARCH.to_string()
         } else {
             config.arch
         },

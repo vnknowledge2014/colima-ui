@@ -27,6 +27,10 @@ pub struct DockerState {
     pub docker: Option<Docker>,
     pub containers_cache: Vec<serde_json::Value>,
     pub images_cache: Vec<serde_json::Value>,
+    /// When true, the watcher must NOT reconnect or push data.
+    /// Set by stop_instance/delete_instance before running the colima command.
+    /// The watcher auto-clears this when the socket is truly gone (detect_docker_host() returns None).
+    pub suppressed: bool,
 }
 
 impl DockerState {
@@ -41,6 +45,7 @@ impl DockerState {
             docker,
             containers_cache: vec![],
             images_cache: vec![],
+            suppressed: false,
         }
     }
 
@@ -55,6 +60,20 @@ impl DockerState {
 /// Push-based (no polling) — same approach as OrbStack.
 pub async fn start_docker_watcher(app: AppHandle, state: Arc<RwLock<DockerState>>) {
     loop {
+        // Check suppression flag — stop/delete in progress, don't reconnect
+        {
+            let is_suppressed = state.read().await.suppressed;
+            if is_suppressed {
+                // Socket might still exist during shutdown — check if it's truly gone
+                if crate::path_util::detect_docker_host().is_none() {
+                    // Socket gone → clear suppression so watcher can reconnect when instance starts again
+                    state.write().await.suppressed = false;
+                }
+                tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                continue;
+            }
+        }
+
         // Try to connect (or reconnect) to Docker daemon via Colima socket
         let docker = match connect_bollard() {
             Some(d) => {
@@ -75,6 +94,10 @@ pub async fn start_docker_watcher(app: AppHandle, state: Arc<RwLock<DockerState>
         // Update DockerState with fresh connection (so list_containers/list_images use it)
         {
             let mut lock = state.write().await;
+            // Double-check suppression in case stop was called between connect and here
+            if lock.suppressed {
+                continue;
+            }
             lock.docker = Some(docker.clone());
         }
 
@@ -84,13 +107,24 @@ pub async fn start_docker_watcher(app: AppHandle, state: Arc<RwLock<DockerState>
         }
 
         // Stream Docker events until connection drops
+        // Debounce: coalesce rapid event bursts (e.g., docker compose up fires 40+ events)
+        // into a single update. Max 4 updates/second.
         let mut stream = docker.events(Some(EventsOptions::<String>::default()));
+        let mut last_update = tokio::time::Instant::now();
+        let debounce_interval = std::time::Duration::from_millis(250);
+
         while let Some(event) = stream.next().await {
             match event {
                 Ok(_) => {
-                    if let Ok(data) = update_cache(&docker, &state).await {
-                        let _ = app.emit("docker-state-updated", data);
+                    let now = tokio::time::Instant::now();
+                    if now.duration_since(last_update) >= debounce_interval {
+                        last_update = now;
+                        if let Ok(data) = update_cache(&docker, &state).await {
+                            let _ = app.emit("docker-state-updated", data);
+                        }
                     }
+                    // Events arriving within the debounce window are silently
+                    // dropped — the next event after the window will trigger update
                 }
                 Err(_) => {
                     // Connection error — break to reconnect

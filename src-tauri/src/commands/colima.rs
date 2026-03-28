@@ -79,84 +79,111 @@ pub async fn list_instances() -> Result<Vec<ColimaInstance>, String> {
 /// Start a Colima instance with given configuration
 #[tauri::command]
 pub async fn start_instance(config: StartConfig) -> Result<String, String> {
-    let mut args = vec!["start".to_string()];
+    // `colima start` blocks for 60-120s — run on thread pool to avoid starving tokio
+    tokio::task::spawn_blocking(move || {
+        let mut args = vec!["start".to_string()];
 
-    if config.profile != "default" && !config.profile.is_empty() {
-        args.push("--profile".to_string());
-        args.push(config.profile.clone());
-    }
-
-    args.push("--runtime".to_string());
-    args.push(config.runtime);
-
-    args.push("--cpu".to_string());
-    args.push(config.cpus.to_string());
-
-    args.push("--memory".to_string());
-    args.push(config.memory.to_string());
-
-    args.push("--disk".to_string());
-    args.push(config.disk.to_string());
-
-    if !config.vm_type.is_empty() {
-        args.push("--vm-type".to_string());
-        args.push(config.vm_type);
-    }
-
-    if !config.arch.is_empty() {
-        args.push("--arch".to_string());
-        args.push(config.arch);
-    }
-
-    if !config.mount_type.is_empty() {
-        args.push("--mount-type".to_string());
-        args.push(config.mount_type);
-    }
-
-    for mount in &config.mounts {
-        args.push("--mount".to_string());
-        args.push(mount.clone());
-    }
-
-    for dns in &config.dns {
-        args.push("--dns".to_string());
-        args.push(dns.clone());
-    }
-
-    if config.network_address {
-        args.push("--network-address".to_string());
-    }
-
-    if config.kubernetes {
-        args.push("--kubernetes".to_string());
-        if !config.kubernetes_version.is_empty() {
-            args.push("--kubernetes-version".to_string());
-            args.push(config.kubernetes_version);
+        if config.profile != "default" && !config.profile.is_empty() {
+            args.push("--profile".to_string());
+            args.push(config.profile.clone());
         }
-    }
 
-    let args_ref: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
-    let output = colima_cmd()
-        .args(&args_ref)
-        .output()
-        .map_err(|e| format!("Failed to start colima: {}", e))?;
+        args.push("--runtime".to_string());
+        args.push(config.runtime);
 
-    if !output.status.success() {
-        return Err(format!(
-            "colima start failed: {}",
-            String::from_utf8_lossy(&output.stderr)
-        ));
-    }
+        args.push("--cpu".to_string());
+        args.push(config.cpus.to_string());
 
-    Ok(format!(
-        "Instance '{}' started successfully",
-        config.profile
-    ))
+        args.push("--memory".to_string());
+        args.push(config.memory.to_string());
+
+        args.push("--disk".to_string());
+        args.push(config.disk.to_string());
+
+        if !config.vm_type.is_empty() {
+            args.push("--vm-type".to_string());
+            args.push(config.vm_type);
+        }
+
+        if !config.arch.is_empty() {
+            args.push("--arch".to_string());
+            args.push(config.arch);
+        }
+
+        if !config.mount_type.is_empty() {
+            args.push("--mount-type".to_string());
+            args.push(config.mount_type);
+        }
+
+        for mount in &config.mounts {
+            args.push("--mount".to_string());
+            args.push(mount.clone());
+        }
+
+        for dns in &config.dns {
+            args.push("--dns".to_string());
+            args.push(dns.clone());
+        }
+
+        if config.network_address {
+            args.push("--network-address".to_string());
+        }
+
+        if config.kubernetes {
+            args.push("--kubernetes".to_string());
+            if !config.kubernetes_version.is_empty() {
+                args.push("--kubernetes-version".to_string());
+                args.push(config.kubernetes_version);
+            }
+        }
+
+        let args_ref: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
+        let output = colima_cmd()
+            .args(&args_ref)
+            .output()
+            .map_err(|e| format!("Failed to start colima: {}", e))?;
+
+        if !output.status.success() {
+            return Err(format!(
+                "colima start failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            ));
+        }
+
+        Ok(format!(
+            "Instance '{}' started successfully",
+            config.profile
+        ))
+    })
+    .await
+    .map_err(|e| format!("Task join error: {}", e))?
 }
 
 /// Stop a Colima instance
 #[tauri::command]
-pub async fn stop_instance(profile: String, force: bool) -> Result<String, String> {
+pub async fn stop_instance(
+    app: tauri::AppHandle,
+    docker_state: tauri::State<'_, std::sync::Arc<tokio::sync::RwLock<crate::docker_state::DockerState>>>,
+    profile: String,
+    force: bool,
+) -> Result<String, String> {
+    // Proactively clear Docker state BEFORE stopping — user may navigate to Docker
+    // tabs while colima stop is still running (fire-and-forget pattern in the UI).
+    // If we clear after, Bollard queries succeed during the shutdown window.
+    {
+        let mut lock = docker_state.write().await;
+        lock.docker = None;
+        lock.containers_cache = vec![];
+        lock.images_cache = vec![];
+        lock.suppressed = true;
+    }
+    use tauri::Emitter;
+    let _ = app.emit("docker-connection-lost", serde_json::json!({}));
+    let _ = app.emit("docker-state-updated", serde_json::json!({
+        "containers": [],
+        "images": []
+    }));
+
     let mut args = vec!["stop"];
 
     let profile_flag;
@@ -187,7 +214,26 @@ pub async fn stop_instance(profile: String, force: bool) -> Result<String, Strin
 
 /// Delete a Colima instance
 #[tauri::command]
-pub async fn delete_instance(profile: String, force: bool) -> Result<String, String> {
+pub async fn delete_instance(
+    app: tauri::AppHandle,
+    docker_state: tauri::State<'_, std::sync::Arc<tokio::sync::RwLock<crate::docker_state::DockerState>>>,
+    profile: String,
+    force: bool,
+) -> Result<String, String> {
+    {
+        let mut lock = docker_state.write().await;
+        lock.docker = None;
+        lock.containers_cache = vec![];
+        lock.images_cache = vec![];
+        lock.suppressed = true;
+    }
+    use tauri::Emitter;
+    let _ = app.emit("docker-connection-lost", serde_json::json!({}));
+    let _ = app.emit("docker-state-updated", serde_json::json!({
+        "containers": [],
+        "images": []
+    }));
+
     let mut args = vec!["delete"];
 
     let profile_flag;

@@ -103,60 +103,13 @@ where
 
 // ===== Helper to run a command and return stdout =====
 
-/// Find the docker socket from the first running Colima instance.
-/// Checks all profile dirs under ~/.colima/ for an active lima instance,
-/// then returns the socket path for that profile.
-fn detect_docker_host() -> Option<String> {
-    let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
-    let colima_home = std::env::var("COLIMA_HOME").unwrap_or_else(|_| format!("{}/.colima", home));
-    let colima_path = std::path::Path::new(&colima_home);
-
-    if !colima_path.exists() {
-        return None;
-    }
-
-    // Scan profiles for a running instance (has ha.sock in _lima dir)
-    if let Ok(entries) = std::fs::read_dir(colima_path) {
-        for entry in entries.flatten() {
-            let name = entry.file_name().to_string_lossy().to_string();
-            if name.starts_with('_') || name.starts_with('.') || !entry.path().is_dir() {
-                continue;
-            }
-
-            // Map profile to lima instance name
-            let lima_name = if name == "default" {
-                "colima".to_string()
-            } else {
-                format!("colima-{}", name)
-            };
-            let lima_dir = colima_path.join("_lima").join(&lima_name);
-
-            if lima_dir.join("ha.sock").exists() || lima_dir.join("ha.pid").exists() {
-                // Found running instance — return its docker socket
-                let sock = colima_path.join(&name).join("docker.sock");
-                if sock.exists() {
-                    return Some(format!("unix://{}", sock.display()));
-                }
-            }
-        }
-    }
-
-    // Fallback: check the colima-level docker.sock symlink
-    let fallback = colima_path.join("docker.sock");
-    if fallback.exists() {
-        return Some(format!("unix://{}", fallback.display()));
-    }
-
-    None
-}
-
 fn run_cmd(program: &str, args: &[&str]) -> Result<String, String> {
     let mut cmd = Command::new(program);
     cmd.args(args);
 
     // Auto-set DOCKER_HOST for docker/docker-compose/kind commands
     if program == "docker" || program == "docker-compose" || program == "kind" {
-        if let Some(host) = detect_docker_host() {
+        if let Some(host) = crate::path_util::detect_docker_host() {
             cmd.env("DOCKER_HOST", host);
         }
     }
@@ -187,9 +140,10 @@ fn run_cmd(program: &str, args: &[&str]) -> Result<String, String> {
 }
 
 /// Create a docker Command with DOCKER_HOST auto-detected from running Colima instance.
+/// Delegates to `crate::path_util::detect_docker_host()` — single source of truth.
 fn docker_cmd() -> Command {
     let mut cmd = Command::new("docker");
-    if let Some(host) = detect_docker_host() {
+    if let Some(host) = crate::path_util::detect_docker_host() {
         cmd.env("DOCKER_HOST", host);
     }
     cmd
@@ -3550,7 +3504,7 @@ async fn sse_docker_watcher() {
     use bollard::system::EventsOptions;
 
     // Connect to Docker using detected socket
-    let docker = match detect_docker_host() {
+    let docker: Option<bollard::Docker> = match crate::path_util::detect_docker_host() {
         Some(host) => {
             bollard::Docker::connect_with_local(
                 host.trim_start_matches("unix://"),

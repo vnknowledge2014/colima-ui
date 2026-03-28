@@ -65,7 +65,7 @@ pub async fn list_containers(
         if let Some(docker) = &lock.docker {
             match docker
                 .list_containers(Some(bollard::container::ListContainersOptions::<String> {
-                    all: true,
+                    all,
                     ..Default::default()
                 }))
                 .await
@@ -73,11 +73,7 @@ pub async fn list_containers(
                 Ok(containers) => {
                     mapped = crate::docker_state::map_containers(&containers);
                     // Bollard succeeded — return data (even if empty = no containers)
-                    return if all {
-                        Ok(mapped)
-                    } else {
-                        Ok(mapped.iter().filter(|c| c["State"] == "running").cloned().collect())
-                    };
+                    return Ok(mapped);
                 }
                 Err(e) => {
                     bollard_error = Some(format!("{}", e));

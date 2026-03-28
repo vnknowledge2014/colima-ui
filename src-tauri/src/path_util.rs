@@ -26,8 +26,17 @@ const NIX_USER_PATHS: &[&str] = &[
     ".nix-defexpr/channels/bin",
 ];
 
+/// The computed PATH, stored for use by `apply_path_to_cmd()` in late-spawned contexts.
+static COMPUTED_PATH: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+
 /// Ensure common binary paths are in the PATH environment variable.
-/// Call this once at app startup to fix the PATH for all subsequent Command calls.
+/// Call this once at app startup **before any threads are spawned** to fix
+/// the PATH for all subsequent Command calls.
+///
+/// # Safety
+/// This function calls `env::set_var` which is unsound in multi-threaded contexts.
+/// It MUST be called from `main()` before `tauri::Builder::default()` (which spawns
+/// the tokio runtime and other threads).
 pub fn fix_path_env() {
     let current_path = env::var("PATH").unwrap_or_default();
     let mut paths: Vec<String> = current_path.split(':').map(|s| s.to_string()).collect();
@@ -68,7 +77,22 @@ pub fn fix_path_env() {
     }
 
     let new_path = paths.join(":");
-    env::set_var("PATH", &new_path);
+
+    // Store for per-Command application in late-spawned threads
+    let _ = COMPUTED_PATH.set(new_path.clone());
+
+    // SAFETY: Called from main() before any threads are spawned (before tauri::Builder).
+    // No concurrent readers/writers of the environment exist at this point.
+    unsafe { env::set_var("PATH", &new_path) };
+}
+
+/// Apply the computed PATH to a Command. Use this in contexts where the global
+/// env may not have been inherited (e.g., spawned after fix_path_env).
+#[allow(dead_code)]
+pub fn apply_path_to_cmd(cmd: &mut Command) {
+    if let Some(path) = COMPUTED_PATH.get() {
+        cmd.env("PATH", path);
+    }
 }
 
 /// Resolve the full path for a binary by checking PATH
