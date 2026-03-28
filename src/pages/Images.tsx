@@ -413,7 +413,7 @@ export default function Images() {
 
         {filteredImages.length > 0 ? (() => {
           const ROW_H = 48;
-          const gridCols = '44px minmax(160px,1.5fr) 100px 120px minmax(100px,0.8fr) 80px 160px';
+          const gridCols = '44px minmax(160px,1.5fr) 100px 120px minmax(100px,0.8fr) 120px 160px';
           return (
           <div className="vtable">
             <div className="vtable-header" style={{ display: 'grid', gridTemplateColumns: gridCols }}>
