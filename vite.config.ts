@@ -10,10 +10,16 @@ export default defineConfig(async () => ({
   build: {
     rollupOptions: {
       output: {
-        manualChunks: {
-          'vendor-react': ['react', 'react-dom', 'jotai'],
-          'vendor-xterm': ['@xterm/xterm', '@xterm/addon-fit', '@xterm/addon-web-links'],
-          'vendor-tauri': ['@tauri-apps/api', '@tauri-apps/plugin-shell'],
+        manualChunks(id: string) {
+          if (id.includes('node_modules/react/') || id.includes('node_modules/react-dom/') || id.includes('node_modules/jotai/')) {
+            return 'vendor-react';
+          }
+          if (id.includes('node_modules/@xterm/')) {
+            return 'vendor-xterm';
+          }
+          if (id.includes('node_modules/@tauri-apps/')) {
+            return 'vendor-tauri';
+          }
         },
       },
     },
