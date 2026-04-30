@@ -72,6 +72,16 @@ Grab the latest release for your platform from [**GitHub Releases**](https://git
   - OpenRouter, Groq, Together AI, Mistral, DeepSeek, and more
 - **AI Models** — Pull, delete, and serve Ollama models directly
 
+### 🔬 AI Diagnostic Agent
+- **Self-learning diagnostic AI** — Expert-level troubleshooting for Colima/Lima/Docker/Kubernetes errors
+- **5-tool agent loop** — Web search, page fetch, diagnostic log collection, safe command execution, and user-approved command execution
+- **Knowledge Bank (SQLite)** — 22+ builtin solutions for common Colima/Lima errors, user-contributed fixes via like/dislike feedback
+- **Like/Dislike feedback** — 👍 saves a working fix to the knowledge bank for future reuse; 👎 marks it as an anti-pattern so the AI avoids it
+- **Command Sandbox** — AI can execute safe read-only diagnostic commands (e.g., `ps`, `docker ps`, `cat logs`) automatically, and request user approval for state-changing commands (e.g., `colima stop --force`, `pkill`)
+- **3-tier safety system** — Safe (auto-run), Approve (user click), Banned (rejected at Rust level). Prevents destructive commands (`rm`, `sudo`, `eval`, etc.) even if AI hallucinates
+- **SearXNG / DuckDuckGo integration** — Multi-engine web search fallback for researching unknown errors
+- **Deep diagnostics** — Reads Lima VM logs (`ha.stderr.log`, `serial.log`), detects zombie processes, inspects stale lock/PID/socket files
+
 ### 📊 Dashboard
 - System overview with running/stopped instance counts, total CPU/memory allocation
 - Docker resource counts (containers, images, volumes, networks, compose projects)
@@ -88,6 +98,7 @@ Grab the latest release for your platform from [**GitHub Releases**](https://git
 - **System Settings** — View installed dependencies, disk usage, system prune
 - **Context Menus** — Right-click context menus on containers, images, volumes, and networks
 - **Keyboard Shortcuts** — Hotkeys for common actions (search, refresh, navigation)
+- **Persistent AI Memory** — SQLite-backed knowledge bank at `~/.colima-ui/knowledge.db` that learns from user feedback across sessions
 
 ---
 
@@ -165,7 +176,7 @@ ColimaUI uses a **push-first architecture** for real-time state synchronization:
 | Directory | Contents |
 |-----------|----------|
 | `pages/` | 13 lazy-loaded page components (Dashboard, Instances, Containers, Images, Volumes, Networks, Compose, Kubernetes, LinuxVMs, Models, DockerfileGen, Terminal, Settings) |
-| `components/` | Shared components (ConfirmDialog, ContextMenu, SetupWizard, GettingStartedTour, Icons) |
+| `components/` | Shared components (ConfirmDialog, ContextMenu, SetupWizard, GettingStartedTour, AiChatBubble, Icons) |
 | `store/` | Jotai atomic state — `dockerAtom.ts`, `resourceAtom.ts`, `dashboardAtom.ts`, `k8sAtom.ts` |
 | `hooks/` | Custom hooks — `useHotkeys.ts` |
 | `lib/` | API layer (`api.ts`) with dual-mode Tauri/HTTP support, global toast (`globalToast.ts`), display formatters (`formatters.ts`) |
@@ -178,11 +189,12 @@ ColimaUI uses a **push-first architecture** for real-time state synchronization:
 | `lib.rs` | Tauri app setup, plugin registration, IPC command handlers |
 | `api_server.rs` | Axum HTTP API server (port 11420) with SSE `/api/events` endpoint and Docker event watcher |
 | `docker_state.rs` | Bollard Docker event stream for real-time push updates (container/image state changes) |
-| `commands/` | Modular CLI-based command handlers: `colima`, `docker` (all operations via Docker CLI), `volumes`, `networks`, `compose`, `kubernetes`, `lima`, `models`, `ai_chat`, `system` |
+| `commands/` | Modular CLI-based command handlers: `colima`, `docker`, `volumes`, `networks`, `compose`, `kubernetes`, `lima`, `models`, `ai_chat`, `searxng`, `knowledge_bank`, `shell_sandbox`, `system` |
+| `knowledge_bank.rs` | SQLite knowledge bank — builtin solutions, user feedback, anti-pattern tracking |
+| `path_util.rs` | macOS PATH fixup for Finder/Dock launches |
 | `instance_reader.rs` | Colima instance YAML config parser |
 | `terminal_session.rs` | PTY-based terminal session management for xterm.js |
 | `poller.rs` | Background instance status poller |
-| `path_util.rs` | PATH fixup for macOS Finder/Dock launches |
 
 ---
 
@@ -285,7 +297,10 @@ Output goes to `dist/`.
 - `bollard` — Native Docker API client for event streaming
 - `tokio` (broadcast channels) — Async runtime with pub/sub for SSE
 - `async-stream` — Async stream helpers for SSE log streaming
-- `reqwest` — HTTP client for benchmark tool
+- `reqwest` — HTTP client for benchmark tool and web search
+- `rusqlite` (bundled) — SQLite knowledge bank for AI diagnostic memory
+- `regex-lite` — Lightweight regex for error pattern matching
+- `scraper` + `html2md` — HTML parsing and markdown conversion for web search
 - `serde` + `serde_json` + `serde_yaml` — Serialization
 - `tauri-plugin-shell` — Shell command execution from Tauri
 
@@ -325,6 +340,7 @@ colima-ui/
 │   │   ├── ContextMenu.tsx     # Right-click context menus
 │   │   ├── SetupWizard.tsx     # First-run setup wizard
 │   │   ├── GettingStartedTour.tsx  # Interactive tour
+│   │   ├── AiChatBubble.tsx    # AI diagnostic agent (chat, tools, feedback)
 │   │   └── Icons.tsx           # SVG icon components
 │   └── lib/                    # Utilities
 │       ├── api.ts              # Dual-mode API layer (Tauri IPC / HTTP)
@@ -335,6 +351,13 @@ colima-ui/
 │   │   ├── main.rs             # Entry point
 │   │   ├── api_server.rs       # Axum HTTP API (port 11420)
 │   │   ├── commands/           # Modular command handlers
+│   │   │   ├── colima.rs       # Colima instance management + diagnostics
+│   │   │   ├── docker.rs       # Docker operations (all via Docker CLI)
+│   │   │   ├── kubernetes.rs   # Kubernetes resource management
+│   │   │   ├── knowledge_bank.rs  # SQLite AI knowledge bank
+│   │   │   ├── shell_sandbox.rs   # 3-tier command execution sandbox
+│   │   │   ├── searxng.rs      # SearXNG/DuckDuckGo web search
+│   │   │   └── ...             # volumes, networks, compose, lima, models, ai_chat, system
 │   │   ├── instance_reader.rs  # Colima config parser
 │   │   ├── terminal_session.rs # PTY terminal management
 │   │   ├── poller.rs           # Background status polling

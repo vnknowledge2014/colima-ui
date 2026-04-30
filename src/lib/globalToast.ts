@@ -29,10 +29,25 @@ export function globalToast(type: ToastType, text: string): void {
     timestamp: Date.now(),
   };
   _listeners.forEach((fn) => fn(toast));
+  // Notify error listeners (used by AI diagnostics bubble for auto-trigger)
+  if (type === "error") {
+    _errorListeners.forEach((fn) => fn(text));
+  }
 }
 
 /** Subscribe to toast events (used by App.tsx) */
 export function onToast(fn: ToastListener): () => void {
   _listeners.add(fn);
   return () => _listeners.delete(fn);
+}
+
+// ===== Error-specific listener for AI Diagnostics =====
+
+type ErrorListener = (error: string) => void;
+const _errorListeners: Set<ErrorListener> = new Set();
+
+/** Subscribe to error-only events (used by AiChatBubble for auto-trigger) */
+export function onError(fn: ErrorListener): () => void {
+  _errorListeners.add(fn);
+  return () => _errorListeners.delete(fn);
 }

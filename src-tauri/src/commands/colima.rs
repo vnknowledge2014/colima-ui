@@ -342,3 +342,105 @@ pub async fn kubernetes_action(profile: String, action: String) -> Result<String
 
     Ok(format!("Kubernetes {} completed", action))
 }
+
+// ===== Diagnostic Log Collection for AI Agent =====
+// Reads Colima/Lima log files, checks for zombie processes,
+// and inspects lock/pid/socket files to enable deep diagnostics.
+
+#[tauri::command]
+pub async fn collect_diagnostic_logs(profile: String) -> Result<String, String> {
+    tokio::task::spawn_blocking(move || {
+        let home = std::env::var("HOME").unwrap_or_else(|_| "/Users/unknown".to_string());
+        let profile_dir = if profile.is_empty() || profile == "default" {
+            "colima".to_string()
+        } else {
+            format!("colima-{}", profile)
+        };
+        let lima_dir = format!("{}/.colima/_lima/{}", home, profile_dir);
+        let mut report = String::new();
+
+        // Section 1: Lima VM log files
+        report.push_str("## Lima VM Logs\n\n");
+        for log_file in &["ha.stderr.log", "ha.stdout.log", "serial.log", "serialv.log"] {
+            let path = format!("{}/{}", lima_dir, log_file);
+            match std::fs::read_to_string(&path) {
+                Ok(content) => {
+                    // Take last 30 lines (most recent errors)
+                    let lines: Vec<&str> = content.lines().collect();
+                    let start = lines.len().saturating_sub(30);
+                    let tail: String = lines[start..].join("\n");
+                    if !tail.trim().is_empty() {
+                        report.push_str(&format!("### {}\n```\n{}\n```\n\n", log_file, tail));
+                    }
+                }
+                Err(_) => {}
+            }
+        }
+
+        // Section 2: Check for zombie/stale processes
+        report.push_str("## Running Processes\n\n");
+        if let Ok(output) = std::process::Command::new("ps")
+            .args(["aux"])
+            .output()
+        {
+            let ps_output = String::from_utf8_lossy(&output.stdout);
+            let relevant: Vec<&str> = ps_output
+                .lines()
+                .filter(|line| {
+                    (line.contains("lima") || line.contains("colima") || line.contains("qemu") || line.contains("vz"))
+                        && !line.contains("grep")
+                        && !line.contains("ColimaUI")
+                })
+                .collect();
+            if relevant.is_empty() {
+                report.push_str("No Colima/Lima processes running.\n\n");
+            } else {
+                report.push_str(&format!("```\n{}\n```\n\n", relevant.join("\n")));
+            }
+        }
+
+        // Section 3: Check for lock/pid/socket files
+        report.push_str("## Lock/PID/Socket Files\n\n");
+        if let Ok(entries) = std::fs::read_dir(&lima_dir) {
+            let lock_files: Vec<String> = entries
+                .filter_map(|e| e.ok())
+                .filter(|e| {
+                    let name = e.file_name().to_string_lossy().to_string();
+                    name.ends_with(".pid") || name.ends_with(".sock") || name.ends_with(".lock")
+                })
+                .map(|e| {
+                    let name = e.file_name().to_string_lossy().to_string();
+                    let meta = e.metadata().ok();
+                    let size = meta.as_ref().map(|m| m.len()).unwrap_or(0);
+                    // For .pid files, read the content (it's a process ID)
+                    let content = if name.ends_with(".pid") {
+                        std::fs::read_to_string(e.path()).unwrap_or_default().trim().to_string()
+                    } else {
+                        String::new()
+                    };
+                    if content.is_empty() {
+                        format!("  {} ({}B)", name, size)
+                    } else {
+                        format!("  {} (PID: {})", name, content)
+                    }
+                })
+                .collect();
+            if lock_files.is_empty() {
+                report.push_str("No lock/pid/socket files found.\n\n");
+            } else {
+                report.push_str(&format!("{}\n\n", lock_files.join("\n")));
+            }
+        }
+
+        // Section 4: Colima version info
+        report.push_str("## System Info\n\n");
+        if let Ok(output) = std::process::Command::new("colima").args(["version"]).output() {
+            let ver = String::from_utf8_lossy(&output.stdout);
+            report.push_str(&format!("```\n{}\n```\n", ver.trim()));
+        }
+
+        Ok(report)
+    })
+    .await
+    .map_err(|e| format!("Task join error: {}", e))?
+}
