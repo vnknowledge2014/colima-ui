@@ -1,6 +1,5 @@
 mod api_server;
 mod commands;
-mod docker_state;
 mod instance_reader;
 mod path_util;
 mod poller;
@@ -10,13 +9,10 @@ use commands::ai_chat;
 use commands::colima;
 use commands::compose;
 use commands::docker;
-use commands::knowledge_bank;
 use commands::kubernetes;
 use commands::lima;
 use commands::models;
 use commands::networks;
-use commands::searxng;
-use commands::shell_sandbox;
 use commands::system;
 use commands::volumes;
 use poller::PollerState;
@@ -32,26 +28,10 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .manage(PollerState::default())
         .setup(|app| {
-            // Initialize Knowledge Bank (SQLite)
-            knowledge_bank::init_knowledge_bank();
-
             // Start HTTP API server for browser-mode access
             api_server::start_api_server();
             // Start background instance poller
             poller::start_instance_poller(app.handle());
-
-            // Setup DockerState
-            use std::sync::Arc;
-            use tauri::Manager;
-            use tokio::sync::RwLock;
-            let docker_state = Arc::new(RwLock::new(docker_state::DockerState::new()));
-            app.manage(docker_state.clone());
-
-            // Start Docker state watcher
-            let app_handle = app.handle().clone();
-            tauri::async_runtime::spawn(async move {
-                docker_state::start_docker_watcher(app_handle, docker_state).await;
-            });
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -63,7 +43,6 @@ pub fn run() {
             colima::instance_status,
             colima::get_ssh_command,
             colima::kubernetes_action,
-            colima::collect_diagnostic_logs,
             // Docker commands
             docker::list_containers,
             docker::start_container,
@@ -108,7 +87,6 @@ pub fn run() {
             // System commands
             system::check_system,
             system::get_colima_version,
-            system::check_tool,
             // Compose commands
             compose::list_compose_projects,
             compose::compose_up,
@@ -139,19 +117,8 @@ pub fn run() {
             // AI Chat
             ai_chat::ai_chat,
             ai_chat::ai_list_models,
-            // AI Diagnostics — SearXNG + HTML→MD
-            searxng::searxng_search,
-            searxng::fetch_page_as_markdown,
-            // Knowledge Bank
-            knowledge_bank::kb_query,
-            knowledge_bank::kb_feedback,
-            knowledge_bank::kb_save_solution,
-            knowledge_bank::kb_save_anti_pattern,
-            // Shell Sandbox
-            shell_sandbox::sandbox_classify,
-            shell_sandbox::sandbox_execute,
-            shell_sandbox::sandbox_execute_approved,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
+

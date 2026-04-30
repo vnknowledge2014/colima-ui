@@ -1,7 +1,5 @@
 import { useState, useCallback, useRef, useEffect } from "react";
 import { aiApi, ChatMessage } from "../lib/api";
-import { globalToast } from "../lib/globalToast";
-import { CheckIcon, GearIcon, RobotIcon, PackageIcon, LockIcon, ClipboardIcon, TagIcon, BoltIcon, BroomIcon } from "../components/Icons";
 
 const TEMPLATES: Record<string, { label: string; base: string; dockerfile: string }> = {
   node: {
@@ -84,21 +82,9 @@ const PROVIDERS = [
   { id: "ollama-cloud", label: "Ollama Cloud" },
 ];
 
-const SYSTEM_PROMPT = `You are a Dockerfile expert. Generate production-ready Dockerfiles.
-
-RULES:
-1. Output ONLY the raw Dockerfile content. No markdown code fences, no explanations, no commentary — unless the user explicitly asks for an explanation.
-2. Every Dockerfile you generate MUST follow ALL of these best practices:
-   - Use multi-stage builds to separate build dependencies from runtime
-   - Use minimal base images (alpine, slim, distroless) — never use :latest tag, always pin specific versions
-   - Optimize layer caching: COPY dependency files (package.json, go.mod, requirements.txt) BEFORE copying source code
-   - Run as non-root user: add USER directive with a dedicated app user
-   - Combine RUN commands with && to reduce layers, and clean up caches in the same layer (apt-get clean, rm -rf /var/lib/apt/lists/*, pip --no-cache-dir)
-   - Use COPY instead of ADD (ADD has implicit tar extraction and URL fetching which is rarely needed)
-   - Include HEALTHCHECK instruction when applicable
-   - Use .dockerignore to exclude node_modules, .git, build artifacts, etc.
-3. If the user's existing Dockerfile violates any of these practices, fix them automatically.
-4. Keep Dockerfiles minimal and production-focused.`;
+const SYSTEM_PROMPT = `You are a Dockerfile expert. Help users create, improve, and debug Dockerfiles.
+When generating a Dockerfile, output ONLY the Dockerfile content without any markdown code fences or explanations unless the user asks for explanations.
+Follow Docker best practices: multi-stage builds, minimal base images, proper layer caching, non-root users, and .dockerignore.`;
 
 interface UiMessage {
   role: "user" | "assistant";
@@ -108,7 +94,7 @@ interface UiMessage {
 export default function DockerfileGen() {
   const [selectedTemplate, setSelectedTemplate] = useState("node");
   const [dockerfile, setDockerfile] = useState(TEMPLATES.node.dockerfile);
-  const [bpOpen, setBpOpen] = useState(false);
+  const [notification, setNotification] = useState<{ type: "success" | "error"; text: string } | null>(null);
 
   // AI Chat state
   const [chatOpen, setChatOpen] = useState(false);
@@ -150,6 +136,10 @@ export default function DockerfileGen() {
     if (showConfig) fetchModels(provider);
   }, [provider, showConfig, fetchModels]);
 
+  const notify = useCallback((type: "success" | "error", text: string) => {
+    setNotification({ type, text });
+    setTimeout(() => setNotification(null), 3000);
+  }, []);
 
   const handleTemplateChange = (key: string) => {
     setSelectedTemplate(key);
@@ -157,7 +147,7 @@ export default function DockerfileGen() {
   };
 
   const handleCopy = () => {
-    navigator.clipboard.writeText(dockerfile).then(() => globalToast("success", "Copied to clipboard!"));
+    navigator.clipboard.writeText(dockerfile).then(() => notify("success", "Copied to clipboard!"));
   };
 
   const handleDownload = () => {
@@ -168,7 +158,7 @@ export default function DockerfileGen() {
     a.download = "Dockerfile";
     a.click();
     URL.revokeObjectURL(url);
-    globalToast("success", "Dockerfile downloaded!");
+    notify("success", "Dockerfile downloaded!");
   };
 
   const handleProviderChange = (pid: string) => {
@@ -181,7 +171,7 @@ export default function DockerfileGen() {
     const text = userInput.trim();
     if (!text || aiLoading) return;
     if (!apiKey && provider !== "ollama-local") {
-      globalToast("error", "Please configure your API key first");
+      notify("error", "Please configure your API key first");
       setShowConfig(true);
       return;
     }
@@ -220,9 +210,9 @@ export default function DockerfileGen() {
     // If content looks like a Dockerfile (starts with FROM), use it directly
     if (df.trim().startsWith("FROM") || df.trim().startsWith("#")) {
       setDockerfile(df.trim());
-      globalToast("success", "Applied to editor!");
+      notify("success", "Applied to editor!");
     } else {
-      globalToast("error", "Could not extract Dockerfile from response");
+      notify("error", "Could not extract Dockerfile from response");
     }
   };
 
@@ -258,7 +248,18 @@ export default function DockerfileGen() {
       </div>
 
       <div className="content-body">
-
+        {notification && (
+          <div style={{
+            position: "fixed", top: 16, right: 16, padding: "10px 16px",
+            borderRadius: "var(--radius-md)",
+            background: notification.type === "success" ? "rgba(63,185,80,0.15)" : "rgba(248,81,73,0.15)",
+            border: `1px solid ${notification.type === "success" ? "var(--accent-green)" : "var(--accent-red)"}`,
+            color: notification.type === "success" ? "var(--accent-green)" : "var(--accent-red)",
+            fontSize: "var(--text-sm)", zIndex: 200, boxShadow: "var(--shadow-lg)",
+          }}>
+            {notification.type === "success" ? "✓" : "✕"} {notification.text}
+          </div>
+        )}
 
         {/* Template Selector */}
         <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap" }}>
@@ -316,51 +317,31 @@ export default function DockerfileGen() {
               </div>
             </div>
 
-            {/* Best Practices (collapsible) */}
-            <div className="card" style={{ marginTop: 16, padding: 0, overflow: "hidden" }}>
-              <button onClick={() => setBpOpen(!bpOpen)} style={{
-                width: "100%", display: "flex", justifyContent: "space-between", alignItems: "center",
-                padding: "10px 16px", background: "transparent", border: "none", cursor: "pointer",
-                color: "var(--text-primary)", fontSize: "var(--text-sm)", fontWeight: 600,
-              }}>
-                <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                  <BoltIcon size={14} />
-                  Best Practices
-                  <span style={{ fontSize: "var(--text-xs)", color: "var(--text-muted)", fontWeight: 400 }}>— AI follows these automatically</span>
-                </span>
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
-                  style={{ transform: bpOpen ? "rotate(180deg)" : "rotate(0deg)", transition: "transform 200ms" }}>
-                  <polyline points="6 9 12 15 18 9"/>
-                </svg>
-              </button>
-              {bpOpen && (
-                <div style={{ padding: "0 16px 16px" }}>
-                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))", gap: 10 }}>
-                    {[
-                      { icon: <PackageIcon size={14} />, title: "Multi-stage builds", desc: "Separate build deps from runtime" },
-                      { icon: <LockIcon size={14} />, title: "Non-root user", desc: "USER directive for security" },
-                      { icon: <ClipboardIcon size={14} />, title: ".dockerignore", desc: "Exclude node_modules, .git" },
-                      { icon: <TagIcon size={14} />, title: "Pin versions", desc: "Never use :latest" },
-                      { icon: <BoltIcon size={14} />, title: "Layer caching", desc: "COPY deps before source" },
-                      { icon: <BroomIcon size={14} />, title: "Cleanup in-layer", desc: "apt clean + rm in same RUN" },
-                      { icon: <PackageIcon size={14} />, title: "COPY over ADD", desc: "ADD has implicit side effects" },
-                      { icon: <CheckIcon size={14} />, title: "HEALTHCHECK", desc: "Container health monitoring" },
-                    ].map(tip => (
-                      <div key={tip.title} style={{
-                        padding: 8, background: "var(--bg-primary)", borderRadius: 6,
-                        border: "1px solid var(--border-subtle)",
-                      }}>
-                        <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 2 }}>
-                          <span style={{ color: "var(--accent-blue)" }}>{tip.icon}</span>
-                          <span style={{ fontSize: "var(--text-xs)", fontWeight: 600 }}>{tip.title}</span>
-                        </div>
-                        <div style={{ fontSize: "11px", color: "var(--text-muted)", paddingLeft: 20 }}>{tip.desc}</div>
-                      </div>
-                    ))}
-                  </div>
+            {/* Best Practices */}
+            {!chatOpen && (
+              <div className="card" style={{ marginTop: 16 }}>
+                <h3 style={{ fontSize: "var(--text-md)", fontWeight: 600, marginBottom: 12 }}>Best Practices</h3>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 12 }}>
+                  {[
+                    { icon: "📦", title: "Multi-stage builds", desc: "Smaller final images" },
+                    { icon: "🔒", title: "Non-root user", desc: "Security hardening" },
+                    { icon: "📋", title: ".dockerignore", desc: "Skip unnecessary files" },
+                    { icon: "🏷️", title: "Specific tags", desc: "Avoid :latest" },
+                    { icon: "⚡", title: "Layer caching", desc: "COPY deps first" },
+                    { icon: "🧹", title: "Cleanup", desc: "Remove temp files" },
+                  ].map(tip => (
+                    <div key={tip.title} style={{
+                      padding: 10, background: "var(--bg-primary)", borderRadius: 8,
+                      border: "1px solid var(--border-subtle)",
+                    }}>
+                      <div style={{ fontSize: "16px", marginBottom: 4 }}>{tip.icon}</div>
+                      <div style={{ fontSize: "var(--text-xs)", fontWeight: 600 }}>{tip.title}</div>
+                      <div style={{ fontSize: "11px", color: "var(--text-muted)" }}>{tip.desc}</div>
+                    </div>
+                  ))}
                 </div>
-              )}
-            </div>
+              </div>
+            )}
           </div>
 
           {/* AI Chat Panel */}
@@ -381,7 +362,7 @@ export default function DockerfileGen() {
                   </div>
                   <div style={{ display: "flex", gap: 4 }}>
                     <button className="btn btn-ghost" style={{ fontSize: "var(--text-xs)", padding: "2px 6px" }}
-                      onClick={() => setShowConfig(!showConfig)}><GearIcon size={14} /></button>
+                      onClick={() => setShowConfig(!showConfig)}>⚙</button>
                     <button className="btn btn-ghost" style={{ fontSize: "var(--text-xs)", padding: "2px 6px" }}
                       onClick={() => setChatMessages([])}>Clear</button>
                   </div>
@@ -475,7 +456,7 @@ export default function DockerfileGen() {
                 }}>
                   {chatMessages.length === 0 && (
                     <div style={{ textAlign: "center", color: "var(--text-muted)", marginTop: 40, fontSize: "var(--text-sm)" }}>
-                      <div style={{ fontSize: 24, marginBottom: 8 }}><RobotIcon size={24} /></div>
+                      <div style={{ fontSize: 24, marginBottom: 8 }}>🤖</div>
                       <div style={{ fontWeight: 500 }}>AI Dockerfile Assistant</div>
                       <div style={{ fontSize: "var(--text-xs)", marginTop: 4 }}>
                         Describe what you need and I'll generate a Dockerfile
@@ -490,7 +471,7 @@ export default function DockerfileGen() {
                             fontSize: "var(--text-xs)", textAlign: "left", padding: "6px 10px",
                             border: "1px solid var(--border-subtle)", borderRadius: 6,
                           }} onClick={() => { setUserInput(s); }}>
-                            → {s}
+                            💬 {s}
                           </button>
                         ))}
                       </div>
@@ -518,7 +499,7 @@ export default function DockerfileGen() {
                           fontSize: "11px", marginTop: 4, color: "var(--accent-green)",
                           padding: "2px 8px",
                         }} onClick={() => applyToEditor(msg.content)}>
-                          <CheckIcon size={12} style={{ display: "inline", verticalAlign: "middle" }} /> Apply to Editor
+                          ✓ Apply to Editor
                         </button>
                       )}
                     </div>

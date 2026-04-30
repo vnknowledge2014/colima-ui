@@ -3,22 +3,20 @@ use std::process::Command;
 
 /// Docker volume info
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "PascalCase")]
 pub struct DockerVolume {
     #[serde(alias = "Name")]
     pub name: String,
-    #[serde(alias = "Driver")]
     pub driver: String,
-    #[serde(default, alias = "Mountpoint")]
+    #[serde(default)]
     pub mountpoint: String,
-    #[serde(default, alias = "Scope")]
+    #[serde(default)]
     pub scope: String,
-    #[serde(default, alias = "Labels")]
+    #[serde(default)]
     pub labels: String,
 }
 
 /// Volume inspect info (raw JSON)
-#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VolumeInspect {
     pub name: String,
@@ -34,11 +32,7 @@ pub struct VolumeInspect {
 }
 
 fn docker_cmd() -> Command {
-    let mut cmd = Command::new("docker");
-    if let Some(host) = crate::path_util::detect_docker_host() {
-        cmd.env("DOCKER_HOST", host);
-    }
-    cmd
+    Command::new("docker")
 }
 
 /// List all Docker volumes
@@ -74,7 +68,7 @@ pub async fn list_volumes() -> Result<Vec<DockerVolume>, String> {
 #[tauri::command]
 pub async fn create_volume(name: String, driver: String) -> Result<String, String> {
     let mut args = vec!["volume", "create"];
-
+    
     let driver_flag;
     if !driver.is_empty() && driver != "local" {
         driver_flag = driver.clone();

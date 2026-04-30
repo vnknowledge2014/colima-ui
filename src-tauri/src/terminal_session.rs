@@ -4,7 +4,7 @@
 //! avoiding the fragile non-blocking fd manipulation approach.
 
 use std::collections::HashMap;
-use std::io::{BufReader, Write};
+use std::io::{BufRead, BufReader, Write};
 use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -32,31 +32,19 @@ impl SessionManager {
     }
 
     /// Create a new terminal session by connecting via SSH.
-    /// `vm_type` can be "colima" (default) or "lima" for standalone Lima VMs.
-    pub fn create(&mut self, session_id: &str, profile: &str, vm_type: &str) -> Result<(), String> {
+    pub fn create(&mut self, session_id: &str, profile: &str) -> Result<(), String> {
         // Idempotent: close existing session if any (handles React StrictMode double-mount)
         if self.sessions.contains_key(session_id) {
             let _ = self.close(session_id);
         }
 
         let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
-
-        let (ssh_config, host) = if vm_type == "lima" {
-            // Standalone Lima VM: ~/.lima/<name>/ssh.config, host = lima-<name>
-            let config = format!("{}/.lima/{}/ssh.config", home, profile);
-            let h = format!("lima-{}", profile);
-            (config, h)
+        let lima_name = if profile == "default" {
+            "colima".to_string()
         } else {
-            // Colima instance: ~/.colima/_lima/<name>/ssh.config
-            let lima_name = if profile == "default" {
-                "colima".to_string()
-            } else {
-                format!("colima-{}", profile)
-            };
-            let config = format!("{}/.colima/_lima/{}/ssh.config", home, lima_name);
-            let h = format!("lima-{}", lima_name);
-            (config, h)
+            format!("colima-{}", profile)
         };
+        let ssh_config = format!("{}/.colima/_lima/{}/ssh.config", home, lima_name);
 
         if !std::path::Path::new(&ssh_config).exists() {
             return Err(format!(
@@ -65,6 +53,7 @@ impl SessionManager {
             ));
         }
 
+        let host = format!("lima-{}", lima_name);
         // Use `script` to create a real PTY wrapper around SSH.
         // Without this, SSH's stdout is a pipe, causing character echo to be
         // buffered until newline. With `script`, SSH sees a real terminal and

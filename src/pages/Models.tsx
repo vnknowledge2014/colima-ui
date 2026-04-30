@@ -1,24 +1,27 @@
 import { useState, useEffect, useCallback } from "react";
 import { modelsApi, colimaApi, AiModel, ColimaInstance } from "../lib/api";
-import { globalToast } from "../lib/globalToast";
-import { WarningIcon, CloseIcon } from "../components/Icons";
 
 export default function Models() {
   const [models, setModels] = useState<AiModel[]>([]);
   const [instances, setInstances] = useState<ColimaInstance[]>([]);
   const [selectedProfile, setSelectedProfile] = useState("default");
-  const [selectedRunner, setSelectedRunner] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [showPull, setShowPull] = useState(false);
   const [pullName, setPullName] = useState("");
+  const [pulling, setPulling] = useState(false);
+  const [notification, setNotification] = useState<{ type: "success" | "error"; text: string } | null>(null);
 
+  const showNotification = useCallback((type: "success" | "error", text: string) => {
+    setNotification({ type, text });
+    setTimeout(() => setNotification(null), 4000);
+  }, []);
 
   const fetchModels = useCallback(async () => {
     try {
       setError(null);
-      const list = await modelsApi.listModels(selectedProfile, selectedRunner);
+      const list = await modelsApi.listModels(selectedProfile);
       setModels(list);
     } catch (e) {
       setError(String(e));
@@ -26,7 +29,7 @@ export default function Models() {
     } finally {
       setLoading(false);
     }
-  }, [selectedProfile, selectedRunner]);
+  }, [selectedProfile]);
 
   const fetchInstances = useCallback(async () => {
     try {
@@ -52,24 +55,28 @@ export default function Models() {
 
   const handlePull = async () => {
     if (!pullName.trim()) return;
-    const name = pullName.trim();
-    // Fire-and-forget: close dialog, long operation runs in background
-    globalToast("success", `Pulling model '${name}'... This may take a while.`);
-    setPullName("");
-    setShowPull(false);
-    modelsApi.pullModel(selectedProfile, name, selectedRunner)
-      .then(() => { globalToast("success", `Model '${name}' pulled successfully`); fetchModels(); })
-      .catch((e) => globalToast("error", `Pull failed: ${e}`));
+    setPulling(true);
+    try {
+      await modelsApi.pullModel(selectedProfile, pullName.trim());
+      showNotification("success", `Model '${pullName}' pulled successfully`);
+      setPullName("");
+      setShowPull(false);
+      fetchModels();
+    } catch (e) {
+      showNotification("error", String(e));
+    } finally {
+      setPulling(false);
+    }
   };
 
   const handleDelete = async (name: string) => {
     setActionLoading(`${name}-delete`);
     try {
-      await modelsApi.deleteModel(selectedProfile, name, selectedRunner);
-      globalToast("success", `Model '${name}' deleted`);
+      await modelsApi.deleteModel(selectedProfile, name);
+      showNotification("success", `Model '${name}' deleted`);
       fetchModels();
     } catch (e) {
-      globalToast("error", String(e));
+      showNotification("error", String(e));
     } finally {
       setActionLoading(null);
     }
@@ -78,25 +85,16 @@ export default function Models() {
   const handleServe = async (name: string) => {
     setActionLoading(`${name}-serve`);
     try {
-      await modelsApi.serveModel(selectedProfile, name, 11434, selectedRunner);
-      globalToast("success", `Model '${name}' serving on port 11434`);
+      await modelsApi.serveModel(selectedProfile, name, 11434);
+      showNotification("success", `Model '${name}' serving on port 11434`);
     } catch (e) {
-      globalToast("error", String(e));
+      showNotification("error", String(e));
     } finally {
       setActionLoading(null);
     }
   };
 
-  const dockerModels = [
-    { name: "ai/smollm2", desc: "Small Language Model 2", size: "~1.7 GB" },
-    { name: "ai/gemma3", desc: "Google Gemma 3", size: "~5.4 GB" },
-    { name: "ai/llama3.2", desc: "Meta Llama 3.2", size: "~2.0 GB" },
-    { name: "ai/phi4-mini", desc: "Microsoft Phi-4 Mini", size: "~2.4 GB" },
-    { name: "ai/deepseek-r1", desc: "DeepSeek R1 (distill)", size: "~4.7 GB" },
-    { name: "ai/mistral-small", desc: "Mistral Small 3.1", size: "~15 GB" },
-  ];
-
-  const ramalamaModels = [
+  const popularModels = [
     { name: "llama3.3", desc: "Meta's latest Llama 3.3", size: "~4.7 GB" },
     { name: "gemma2", desc: "Google Gemma 2", size: "~5.4 GB" },
     { name: "qwen2.5", desc: "Alibaba Qwen 2.5", size: "~4.7 GB" },
@@ -104,8 +102,6 @@ export default function Models() {
     { name: "deepseek-r1", desc: "DeepSeek R1", size: "~4.7 GB" },
     { name: "mistral", desc: "Mistral 7B", size: "~4.1 GB" },
   ];
-
-  const popularModels = selectedRunner === "ramalama" ? ramalamaModels : dockerModels;
 
   return (
     <>
@@ -130,15 +126,6 @@ export default function Models() {
               })}
             </select>
           )}
-          <select
-            className="input select"
-            style={{ width: 180 }}
-            value={selectedRunner}
-            onChange={(e) => setSelectedRunner(e.target.value)}
-          >
-            <option value="">Docker Model Runner</option>
-            <option value="ramalama">Ramalama</option>
-          </select>
           <button className="btn btn-ghost" onClick={fetchModels}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.3"/>
@@ -154,28 +141,27 @@ export default function Models() {
       </div>
 
       <div className="content-body">
-
+        {/* Toast */}
+        {notification && (
+          <div style={{
+            position: "fixed", top: 16, right: 16, padding: "10px 16px",
+            borderRadius: "var(--radius-md)",
+            background: notification.type === "success" ? "rgba(63, 185, 80, 0.15)" : "rgba(248, 81, 73, 0.15)",
+            border: `1px solid ${notification.type === "success" ? "var(--accent-green)" : "var(--accent-red)"}`,
+            color: notification.type === "success" ? "var(--accent-green)" : "var(--accent-red)",
+            fontSize: "var(--text-sm)", zIndex: 200, animation: "slideUp 250ms ease", boxShadow: "var(--shadow-lg)",
+          }}>
+            {notification.type === "success" ? "✓" : "✕"} {notification.text}
+          </div>
+        )}
 
         {error && (
           <div className="card" style={{ borderColor: "var(--accent-yellow)", marginBottom: 16 }}>
             <p style={{ color: "var(--accent-yellow)", fontSize: "var(--text-sm)" }}>
-              <WarningIcon size={14} style={{ display: "inline", verticalAlign: "middle", marginRight: 4 }} /> AI model support not available
+              ⚠ AI model support not available: {error}
             </p>
             <p style={{ color: "var(--text-muted)", fontSize: "var(--text-xs)", marginTop: 4 }}>
-              {error.includes("krunkit") || error.includes("vm-type") ? (
-                <>
-                  GPU support requires krunkit. Install it first:
-                  <code style={{ display: "block", margin: "8px 0", padding: "6px 10px", background: "var(--bg-primary)", borderRadius: 6, fontFamily: "var(--font-mono)" }}>
-                    brew tap slp/krunkit && brew install krunkit
-                  </code>
-                  Then restart Colima:
-                  <code style={{ display: "block", margin: "8px 0", padding: "6px 10px", background: "var(--bg-primary)", borderRadius: 6, fontFamily: "var(--font-mono)" }}>
-                    colima start --runtime docker --vm-type krunkit
-                  </code>
-                </>
-              ) : error.includes("not installed")
-                ? "Required tools are not installed. Make sure Colima is available."
-                : "Model management requires Colima started with krunkit VM type for GPU access."}
+              Model management is available when Colima is started with AI features enabled.
             </p>
           </div>
         )}
@@ -264,7 +250,7 @@ export default function Models() {
           <div className="modal" onClick={(e) => e.stopPropagation()} style={{ width: "min(450px, 90vw)" }}>
             <div className="modal-header">
               <h2 className="modal-title">Pull Model</h2>
-              <button className="btn btn-icon btn-ghost" onClick={() => setShowPull(false)}><CloseIcon size={16} /></button>
+              <button className="btn btn-icon btn-ghost" onClick={() => setShowPull(false)}>✕</button>
             </div>
             <div className="form-group">
               <label className="form-label">Model Name</label>
@@ -282,8 +268,8 @@ export default function Models() {
             </div>
             <div className="modal-footer">
               <button className="btn btn-ghost" onClick={() => setShowPull(false)}>Cancel</button>
-              <button className="btn btn-primary" onClick={handlePull} disabled={!pullName.trim()}>
-                Pull
+              <button className="btn btn-primary" onClick={handlePull} disabled={pulling || !pullName.trim()}>
+                {pulling ? <><div className="spinner" style={{ width: 14, height: 14 }}/> Pulling...</> : "Pull"}
               </button>
             </div>
           </div>

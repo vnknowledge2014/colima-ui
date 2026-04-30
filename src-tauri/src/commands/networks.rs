@@ -3,30 +3,23 @@ use std::process::Command;
 
 /// Docker network info
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "PascalCase")]
 pub struct DockerNetwork {
-    #[serde(alias = "ID", alias = "Id")]
+    #[serde(alias = "ID")]
     pub id: String,
-    #[serde(alias = "Name")]
     pub name: String,
-    #[serde(alias = "Driver")]
     pub driver: String,
-    #[serde(alias = "Scope")]
     pub scope: String,
     #[serde(default, alias = "IPv6")]
     pub ipv6: String,
-    #[serde(default, alias = "Internal")]
+    #[serde(default)]
     pub internal: String,
-    #[serde(default, alias = "Labels")]
+    #[serde(default)]
     pub labels: String,
 }
 
 fn docker_cmd() -> Command {
-    let mut cmd = Command::new("docker");
-    if let Some(host) = crate::path_util::detect_docker_host() {
-        cmd.env("DOCKER_HOST", host);
-    }
-    cmd
+    Command::new("docker")
 }
 
 /// List all Docker networks
@@ -60,11 +53,7 @@ pub async fn list_networks() -> Result<Vec<DockerNetwork>, String> {
 
 /// Create a Docker network
 #[tauri::command]
-pub async fn create_network(
-    name: String,
-    driver: String,
-    subnet: String,
-) -> Result<String, String> {
+pub async fn create_network(name: String, driver: String, subnet: String) -> Result<String, String> {
     let mut args = vec!["network", "create"];
 
     let driver_flag;

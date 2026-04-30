@@ -1,19 +1,19 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { Terminal as XTerm } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
-import { CloseIcon } from "../components/Icons";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import "@xterm/xterm/css/xterm.css";
-import { colimaApi, ColimaInstance, limaApi, LimaInstance } from "../lib/api";
+import { colimaApi, ColimaInstance } from "../lib/api";
 
 const API_BASE = "http://127.0.0.1:11420";
 
+// ===== Runtime Detection =====
+const isTauri = (): boolean => !!(window as any).__TAURI_INTERNALS__;
 
 interface TerminalTab {
   id: string;
   label: string;
   profile: string;
-  vmType: "colima" | "lima";
 }
 
 /* ===== Terminal Theme (shared) ===== */
@@ -45,12 +45,10 @@ function BrowserTerminalInstance({
   profile,
   active,
   sessionId,
-  vmType = "colima",
 }: {
   profile: string;
   active: boolean;
   sessionId: string;
-  vmType?: "colima" | "lima";
 }) {
   const termRef = useRef<HTMLDivElement>(null);
   const xtermRef = useRef<XTerm | null>(null);
@@ -106,7 +104,7 @@ function BrowserTerminalInstance({
         const res = await fetch(`${API_BASE}/api/terminal/create`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ session_id: actualSessionId, profile, vm_type: vmType }),
+          body: JSON.stringify({ session_id: actualSessionId, profile }),
         });
         const data = await res.json();
 
@@ -171,7 +169,7 @@ function BrowserTerminalInstance({
         xtermRef.current = null;
       }
     };
-  }, [sessionId, profile, vmType]); // Only re-run on session/profile/vmType change
+  }, [sessionId, profile]); // Only re-run on session/profile change, NOT on active change
 
   // Re-fit when tab becomes active
   useEffect(() => {
@@ -199,14 +197,128 @@ function BrowserTerminalInstance({
   );
 }
 
+/* ===== Tauri Mode Terminal (Shell Plugin) ===== */
+function TauriTerminalInstance({
+  profile,
+  active,
+}: {
+  profile: string;
+  active: boolean;
+}) {
+  const termRef = useRef<HTMLDivElement>(null);
+  const xtermRef = useRef<XTerm | null>(null);
+  const fitRef = useRef<FitAddon | null>(null);
+  const childRef = useRef<any>(null);
+  const [connected, setConnected] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
+  const initTerminal = useCallback(async () => {
+    if (!termRef.current || xtermRef.current) return;
+
+    const xterm = new XTerm({
+      cursorBlink: true,
+      fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
+      fontSize: 13,
+      lineHeight: 1.4,
+      theme: termTheme,
+    });
+
+    const fit = new FitAddon();
+    fitRef.current = fit;
+    xterm.loadAddon(fit);
+    xterm.loadAddon(new WebLinksAddon());
+
+    xterm.open(termRef.current);
+    fit.fit();
+    xtermRef.current = xterm;
+
+    const resizeObserver = new ResizeObserver(() => {
+      if (fitRef.current && active) {
+        try { fitRef.current.fit(); } catch (_) { /* ignore */ }
+      }
+    });
+    resizeObserver.observe(termRef.current);
+
+    try {
+      xterm.writeln("\x1b[36m● Connecting to " + profile + "...\x1b[0m\r\n");
+
+      const { Command } = await import("@tauri-apps/plugin-shell");
+      const args = profile === "default" ? ["ssh"] : ["ssh", "--profile", profile];
+      const cmd = Command.create("colima", args);
+
+      cmd.on("close", (data: { code: number | null }) => {
+        xterm.writeln(`\r\n\x1b[33m● Session ended (exit code: ${data.code})\x1b[0m`);
+        setConnected(false);
+      });
+
+      cmd.on("error", (err: string) => {
+        xterm.writeln(`\r\n\x1b[31m● Error: ${err}\x1b[0m`);
+        setError(String(err));
+      });
+
+      cmd.stdout.on("data", (data: string) => xterm.write(data));
+      cmd.stderr.on("data", (data: string) => xterm.write(data));
+
+      const child = await cmd.spawn();
+      childRef.current = child;
+      setConnected(true);
+
+      xterm.onData((data) => {
+        if (childRef.current) childRef.current.write(data);
+      });
+    } catch (e) {
+      xterm.writeln(`\r\n\x1b[31m● Failed to connect: ${e}\x1b[0m`);
+      xterm.writeln("\x1b[33m  Make sure the instance is running.\x1b[0m");
+      setError(String(e));
+    }
+
+    return () => resizeObserver.disconnect();
+  }, [profile, active]);
+
+  useEffect(() => {
+    initTerminal();
+    return () => {
+      if (childRef.current) {
+        childRef.current.kill();
+        childRef.current = null;
+      }
+      if (xtermRef.current) {
+        xtermRef.current.dispose();
+        xtermRef.current = null;
+      }
+    };
+  }, [initTerminal]);
+
+  useEffect(() => {
+    if (active && fitRef.current) {
+      setTimeout(() => {
+        try { fitRef.current?.fit(); } catch (_) { /* ignore */ }
+      }, 100);
+    }
+  }, [active]);
+
+  return (
+    <div style={{ position: "relative", height: "100%", display: active ? "block" : "none" }}>
+      {error && !connected && (
+        <div style={{
+          position: "absolute", top: 12, right: 12, zIndex: 10,
+          padding: "6px 12px", borderRadius: "var(--radius-md)",
+          background: "rgba(248, 81, 73, 0.15)", border: "1px solid var(--accent-red)",
+          color: "var(--accent-red)", fontSize: "var(--text-xs)",
+        }}>
+          Connection failed
+        </div>
+      )}
+      <div ref={termRef} style={{ height: "100%", padding: 4 }} />
+    </div>
+  );
+}
 
 /* ===== Main Terminal Page ===== */
 export default function TerminalPage() {
   const [tabs, setTabs] = useState<TerminalTab[]>([]);
   const [activeTab, setActiveTab] = useState<string | null>(null);
   const [instances, setInstances] = useState<ColimaInstance[]>([]);
-  const [limaVMs, setLimaVMs] = useState<LimaInstance[]>([]);
   const [showPicker, setShowPicker] = useState(false);
 
   useEffect(() => {
@@ -215,20 +327,16 @@ export default function TerminalPage() {
         const list = await colimaApi.listInstances();
         setInstances(list.filter((i) => i.status === "Running"));
       } catch (_) { /* ignore */ }
-      try {
-        const vms = await limaApi.list();
-        setLimaVMs(vms.filter((v) => v.status === "Running"));
-      } catch (_) { /* ignore */ }
     };
     load();
     const interval = setInterval(load, 10000);
     return () => clearInterval(interval);
   }, []);
 
-  const addTab = (profile: string, vmType: "colima" | "lima" = "colima") => {
+  const addTab = (profile: string) => {
     const id = `term-${Date.now()}`;
-    const label = vmType === "lima" ? `🐧 ${profile}` : (profile === "default" ? "colima" : profile);
-    setTabs((prev) => [...prev, { id, label, profile, vmType }]);
+    const label = profile === "default" ? "colima" : profile;
+    setTabs((prev) => [...prev, { id, label, profile }]);
     setActiveTab(id);
     setShowPicker(false);
   };
@@ -244,8 +352,6 @@ export default function TerminalPage() {
   };
 
   const runningInstances = instances.filter((i) => i.status === "Running");
-  const runningLimaVMs = limaVMs.filter((v) => v.status === "Running");
-  const hasRunning = runningInstances.length > 0 || runningLimaVMs.length > 0;
 
   return (
     <>
@@ -253,13 +359,9 @@ export default function TerminalPage() {
         <h1>Terminal</h1>
         <div className="content-header-actions">
           <button className="btn btn-primary" onClick={() => {
-            if (runningInstances.length + runningLimaVMs.length === 1) {
-              if (runningInstances.length === 1) {
-                const name = runningInstances[0].name;
-                addTab(name === "colima" ? "default" : name.replace("colima-", ""), "colima");
-              } else {
-                addTab(runningLimaVMs[0].name, "lima");
-              }
+            if (runningInstances.length === 1) {
+              const name = runningInstances[0].name;
+              addTab(name === "colima" ? "default" : name.replace("colima-", ""));
             } else {
               setShowPicker(true);
             }
@@ -302,7 +404,7 @@ export default function TerminalPage() {
                 style={{ marginLeft: 4, opacity: 0.5, cursor: "pointer", fontSize: "var(--text-xs)" }}
                 onClick={(e) => { e.stopPropagation(); removeTab(tab.id); }}
               >
-                <CloseIcon size={10} />
+                ✕
               </span>
             </div>
           ))}
@@ -320,17 +422,13 @@ export default function TerminalPage() {
             </div>
             <div className="empty-state-title">No terminal sessions</div>
             <div className="empty-state-text">
-              Open a new SSH session to a running instance.
+              Open a new SSH session to a running Colima instance.
             </div>
-            {hasRunning ? (
+            {runningInstances.length > 0 ? (
               <button className="btn btn-primary" onClick={() => {
-                if (runningInstances.length + runningLimaVMs.length === 1) {
-                  if (runningInstances.length === 1) {
-                    const name = runningInstances[0].name;
-                    addTab(name === "colima" ? "default" : name.replace("colima-", ""), "colima");
-                  } else {
-                    addTab(runningLimaVMs[0].name, "lima");
-                  }
+                if (runningInstances.length === 1) {
+                  const name = runningInstances[0].name;
+                  addTab(name === "colima" ? "default" : name.replace("colima-", ""));
                 } else {
                   setShowPicker(true);
                 }
@@ -348,7 +446,11 @@ export default function TerminalPage() {
           </div>
         ) : (
           tabs.map((tab) =>
-              <BrowserTerminalInstance key={tab.id} profile={tab.profile} active={activeTab === tab.id} sessionId={tab.id} vmType={tab.vmType} />
+            isTauri() ? (
+              <TauriTerminalInstance key={tab.id} profile={tab.profile} active={activeTab === tab.id} />
+            ) : (
+              <BrowserTerminalInstance key={tab.id} profile={tab.profile} active={activeTab === tab.id} sessionId={tab.id} />
+            )
           )
         )}
       </div>
@@ -359,22 +461,17 @@ export default function TerminalPage() {
           <div className="modal" onClick={(e) => e.stopPropagation()} style={{ width: "min(400px, 90vw)" }}>
             <div className="modal-header">
               <h2 className="modal-title">Select Instance</h2>
-              <button className="btn btn-icon btn-ghost" onClick={() => setShowPicker(false)}><CloseIcon size={16} /></button>
+              <button className="btn btn-icon btn-ghost" onClick={() => setShowPicker(false)}>✕</button>
             </div>
             <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-              {runningInstances.length > 0 && (
-                <div style={{ fontSize: "var(--text-xs)", color: "var(--text-muted)", padding: "8px 16px 4px", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em" }}>
-                  Colima Instances
-                </div>
-              )}
               {runningInstances.map((inst) => {
                 const instProfile = inst.name === "colima" ? "default" : inst.name.replace("colima-", "");
                 return (
                   <div
-                    key={`colima-${inst.name}`}
+                    key={inst.name}
                     className="nav-item"
                     style={{ padding: "12px 16px", borderRadius: "var(--radius-md)" }}
-                    onClick={() => addTab(instProfile, "colima")}
+                    onClick={() => addTab(instProfile)}
                   >
                     <div style={{ width: 8, height: 8, borderRadius: "50%", background: "var(--status-running)", boxShadow: "0 0 6px var(--status-running)" }} />
                     <div>
@@ -386,28 +483,7 @@ export default function TerminalPage() {
                   </div>
                 );
               })}
-              {runningLimaVMs.length > 0 && (
-                <div style={{ fontSize: "var(--text-xs)", color: "var(--text-muted)", padding: "8px 16px 4px", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em", borderTop: runningInstances.length > 0 ? "1px solid var(--border-primary)" : "none", marginTop: runningInstances.length > 0 ? 4 : 0 }}>
-                  Linux VMs (Lima)
-                </div>
-              )}
-              {runningLimaVMs.map((vm) => (
-                <div
-                  key={`lima-${vm.name}`}
-                  className="nav-item"
-                  style={{ padding: "12px 16px", borderRadius: "var(--radius-md)" }}
-                  onClick={() => addTab(vm.name, "lima")}
-                >
-                  <div style={{ width: 8, height: 8, borderRadius: "50%", background: "var(--status-running)", boxShadow: "0 0 6px var(--status-running)" }} />
-                  <div>
-                    <div style={{ fontWeight: 500 }}>🐧 {vm.name}</div>
-                    <div style={{ fontSize: "var(--text-xs)", color: "var(--text-muted)" }}>
-                      {vm.arch} · {vm.cpus} CPU · {vm.memory}
-                    </div>
-                  </div>
-                </div>
-              ))}
-              {!hasRunning && (
+              {runningInstances.length === 0 && (
                 <p style={{ textAlign: "center", color: "var(--text-muted)", padding: 20, fontSize: "var(--text-sm)" }}>
                   No running instances available.
                 </p>

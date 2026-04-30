@@ -13,11 +13,7 @@ pub struct ComposeProject {
 }
 
 fn docker_cmd() -> Command {
-    let mut cmd = Command::new("docker");
-    if let Some(host) = crate::path_util::detect_docker_host() {
-        cmd.env("DOCKER_HOST", host);
-    }
-    cmd
+    Command::new("docker")
 }
 
 /// List Docker Compose projects
@@ -41,14 +37,15 @@ pub async fn list_compose_projects() -> Result<Vec<ComposeProject>, String> {
     }
 
     // docker compose ls --format json returns a JSON array
-    let projects: Vec<ComposeProject> = serde_json::from_str(stdout.trim()).unwrap_or_else(|_| {
-        // Fallback: try line-by-line JSON
-        stdout
-            .lines()
-            .filter(|l| !l.trim().is_empty())
-            .filter_map(|l| serde_json::from_str(l).ok())
-            .collect()
-    });
+    let projects: Vec<ComposeProject> = serde_json::from_str(stdout.trim())
+        .unwrap_or_else(|_| {
+            // Fallback: try line-by-line JSON
+            stdout
+                .lines()
+                .filter(|l| !l.trim().is_empty())
+                .filter_map(|l| serde_json::from_str(l).ok())
+                .collect()
+        });
 
     Ok(projects)
 }
@@ -122,15 +119,7 @@ pub async fn compose_restart(project_name: String) -> Result<String, String> {
 pub async fn compose_logs(project_name: String, lines: u32) -> Result<String, String> {
     let tail = lines.to_string();
     let output = docker_cmd()
-        .args([
-            "compose",
-            "-p",
-            &project_name,
-            "logs",
-            "--tail",
-            &tail,
-            "--no-color",
-        ])
+        .args(["compose", "-p", &project_name, "logs", "--tail", &tail, "--no-color"])
         .output()
         .map_err(|e| format!("Failed to get compose logs: {}", e))?;
 

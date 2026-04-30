@@ -1,13 +1,5 @@
-import { useState, useEffect, useRef, useCallback, useDeferredValue } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { dockerApi, DockerContainer } from "../lib/api";
-import { globalToast } from "../lib/globalToast";
-import { ConfirmDialog, useConfirm } from "../components/ConfirmDialog";
-import { useAtom, useAtomValue } from "jotai";
-import { containersAtom, dockerLoadingAtom } from "../store/dockerAtom";
-import { StopIcon, PlayIcon, PauseIcon, RestartIcon, CloseIcon, WarningIcon } from "../components/Icons";
-import { useVirtualizer } from "@tanstack/react-virtual";
-import ContextMenu, { ContextMenuItem } from "../components/ContextMenu";
-import { useHotkeys } from "../hooks/useHotkeys";
 
 /* ===== Container Detail Panel ===== */
 function ContainerDetail({
@@ -108,7 +100,7 @@ function ContainerDetail({
     if (!execCmd.trim()) return;
     setExecLoading(true);
     const cmd = execCmd;
-    setExecOutput(prev => [...prev, `${container.Names}$ ${cmd}`]);
+    setExecOutput(prev => [...prev, `$ ${cmd}`]);
     setExecCmd("");
     try {
       const result = await dockerApi.containerExec(container.Id, cmd);
@@ -163,14 +155,14 @@ function ContainerDetail({
           <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
             {isRunning ? (
               <>
-                <button className="btn btn-ghost" style={{ fontSize: "var(--text-xs)", display: "flex", alignItems: "center", gap: 4 }} onClick={() => onAction(container.Id, container.Names, "stop")}><StopIcon size={12} /> Stop</button>
-                <button className="btn btn-ghost" style={{ fontSize: "var(--text-xs)", display: "flex", alignItems: "center", gap: 4 }} onClick={() => onAction(container.Id, container.Names, "restart")}><RestartIcon size={12} /> Restart</button>
-                <button className="btn btn-ghost" style={{ fontSize: "var(--text-xs)", display: "flex", alignItems: "center", gap: 4 }} onClick={() => onAction(container.Id, container.Names, "pause")}><PauseIcon size={12} /> Pause</button>
+                <button className="btn btn-ghost" style={{ fontSize: "var(--text-xs)" }} onClick={() => onAction(container.Id, container.Names, "stop")}>⏹ Stop</button>
+                <button className="btn btn-ghost" style={{ fontSize: "var(--text-xs)" }} onClick={() => onAction(container.Id, container.Names, "restart")}>↻ Restart</button>
+                <button className="btn btn-ghost" style={{ fontSize: "var(--text-xs)" }} onClick={() => onAction(container.Id, container.Names, "pause")}>⏸ Pause</button>
               </>
             ) : (
-              <button className="btn btn-primary" style={{ fontSize: "var(--text-xs)", display: "flex", alignItems: "center", gap: 4 }} onClick={() => onAction(container.Id, container.Names, "start")}><PlayIcon size={12} /> Start</button>
+              <button className="btn btn-primary" style={{ fontSize: "var(--text-xs)" }} onClick={() => onAction(container.Id, container.Names, "start")}>▶ Start</button>
             )}
-            <button className="btn btn-icon btn-ghost" onClick={onClose}><CloseIcon size={16} /></button>
+            <button className="btn btn-icon btn-ghost" onClick={onClose}>✕</button>
           </div>
         </div>
 
@@ -282,11 +274,11 @@ function ContainerDetail({
                 <div ref={execRef} style={{ background: "var(--bg-primary)", borderRadius: 8, padding: 12, maxHeight: "40vh", overflow: "auto", marginBottom: 12, minHeight: 120 }}>
                   {execOutput.length === 0 ? (
                     <div style={{ color: "var(--text-muted)", fontSize: "var(--text-sm)" }}>
-                      Run commands inside '{container.Names}'. Output will appear here.
+                      Run commands inside the container. Output will appear here.
                     </div>
                   ) : (
                     execOutput.map((line, i) => (
-                      <div key={i} style={{ fontFamily: "var(--font-mono)", fontSize: "var(--text-xs)", color: line.startsWith(container.Names + "$") ? "var(--accent-green)" : line.startsWith("Error") ? "var(--accent-red)" : "var(--text-secondary)", whiteSpace: "pre-wrap", padding: "1px 0" }}>
+                      <div key={i} style={{ fontFamily: "var(--font-mono)", fontSize: "var(--text-xs)", color: line.startsWith("$") ? "var(--accent-green)" : line.startsWith("Error") ? "var(--accent-red)" : "var(--text-secondary)", whiteSpace: "pre-wrap", padding: "1px 0" }}>
                         {line}
                       </div>
                     ))
@@ -297,7 +289,7 @@ function ContainerDetail({
                     className="input"
                     value={execCmd}
                     onChange={e => setExecCmd(e.target.value)}
-                    placeholder={`${container.Names}$ Enter command...`}
+                    placeholder="ls -la, cat /etc/hostname, env..."
                     style={{ flex: 1, fontFamily: "var(--font-mono)" }}
                     onKeyDown={e => e.key === "Enter" && handleExec()}
                     autoFocus
@@ -395,12 +387,12 @@ function RunContainerModal({ onClose, onSuccess }: { onClose: () => void; onSucc
       <div className="modal" onClick={e => e.stopPropagation()} style={{ width: "min(600px, 95vw)" }}>
         <div className="modal-header">
           <h2 className="modal-title">Run Container</h2>
-          <button className="btn btn-icon btn-ghost" onClick={onClose}><CloseIcon size={16} /></button>
+          <button className="btn btn-icon btn-ghost" onClick={onClose}>✕</button>
         </div>
 
         {error && (
           <div style={{ padding: 12, background: "rgba(248,81,73,0.1)", color: "var(--accent-red)", borderRadius: 8, marginBottom: 12, fontSize: "var(--text-sm)" }}>
-            <WarningIcon size={14} style={{ display: "inline", verticalAlign: "middle", marginRight: 4 }} /> {error}
+            ⚠ {error}
           </div>
         )}
 
@@ -440,7 +432,7 @@ function RunContainerModal({ onClose, onSuccess }: { onClose: () => void; onSucc
         <div className="modal-footer">
           <button className="btn btn-ghost" onClick={onClose}>Cancel</button>
           <button className="btn btn-primary" onClick={handleRun} disabled={loading || !image.trim()}>
-            {loading ? "Starting..." : <><PlayIcon size={12} style={{ display: "inline", verticalAlign: "middle" }} /> Run Container</>}
+            {loading ? "Starting..." : "▶ Run Container"}
           </button>
         </div>
       </div>
@@ -448,197 +440,40 @@ function RunContainerModal({ onClose, onSuccess }: { onClose: () => void; onSucc
   );
 }
 
-/* ===== Virtualized Container Rows ===== */
-function VirtualContainerRows({
-  filtered,
-  selected,
-  actionLoading,
-  gridCols,
-  rowHeight,
-  toggleSelect,
-  setSelectedContainer,
-  handleAction,
-  onContextMenu,
-}: {
-  filtered: DockerContainer[];
-  selected: Set<string>;
-  actionLoading: string | null;
-  gridCols: string;
-  rowHeight: number;
-  toggleSelect: (id: string) => void;
-  setSelectedContainer: (c: DockerContainer) => void;
-  handleAction: (id: string, name: string, action: string) => void;
-  onContextMenu: (e: React.MouseEvent, c: DockerContainer) => void;
-}) {
-  const scrollRef = useRef<HTMLDivElement>(null);
-  const virtualizer = useVirtualizer({
-    count: filtered.length,
-    getScrollElement: () => scrollRef.current,
-    estimateSize: () => rowHeight,
-    overscan: 8,
-  });
-
-  return (
-    <div ref={scrollRef} className="vtable-scroll">
-      <div style={{ height: virtualizer.getTotalSize(), position: 'relative' }}>
-        {virtualizer.getVirtualItems().map((vRow) => {
-          const c = filtered[vRow.index];
-          const isRunning = c.State === 'running';
-          const isPaused = c.Status.toLowerCase().includes('paused');
-          const isLoading = actionLoading?.startsWith(c.Id);
-          return (
-            <div
-              key={c.Id}
-              className={`vtable-row${selected.has(c.Id) ? ' selected' : ''}`}
-              style={{
-                position: 'absolute',
-                top: 0,
-                left: 0,
-                width: '100%',
-                height: vRow.size,
-                transform: `translateY(${vRow.start}px)`,
-                display: 'grid',
-                gridTemplateColumns: gridCols,
-                opacity: isLoading ? 0.6 : 1,
-              }}
-              onClick={() => setSelectedContainer(c)}
-              onContextMenu={(e) => onContextMenu(e, c)}
-            >
-              <div className="vtable-cell" style={{ textAlign: 'center' }} onClick={(e) => e.stopPropagation()}>
-                <input type="checkbox" checked={selected.has(c.Id)} onChange={() => toggleSelect(c.Id)}
-                  style={{ accentColor: 'var(--accent-blue)', cursor: 'pointer' }} />
-              </div>
-              <div className="vtable-cell">
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <div style={{
-                    width: 8, height: 8, borderRadius: '50%',
-                    background: isPaused ? 'var(--accent-yellow)' : isRunning ? 'var(--status-running)' : 'var(--status-stopped)',
-                    boxShadow: isRunning && !isPaused ? '0 0 6px var(--status-running)' : 'none',
-                    flexShrink: 0,
-                  }} />
-                  <span style={{ fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
-                    title={c.Names}>
-                    {c.Names}
-                  </span>
-                </div>
-              </div>
-              <div className="vtable-cell" style={{ color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)' }}>
-                {c.Image}
-              </div>
-              <div className="vtable-cell">
-                <span className={`badge badge-${isPaused ? 'stopped' : isRunning ? 'running' : 'stopped'}`}
-                  title={c.Status}>
-                  <span className="badge-dot" />
-                  <span className="badge-label">{isPaused ? 'Paused' : c.State}</span>
-                  <span className="badge-detail">{c.Status.replace(/^\S+\s*/, '')}</span>
-                </span>
-              </div>
-              <div className="vtable-cell" style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)', color: 'var(--text-muted)' }}
-                title={c.Ports || ''}>
-                {c.Ports || '—'}
-              </div>
-              <div className="vtable-cell" onClick={(e) => e.stopPropagation()}>
-                <div className="table-actions" style={{ justifyContent: 'flex-end' }}>
-                  {isPaused ? (
-                    <button className="btn btn-ghost btn-icon" data-tooltip="Unpause" disabled={!!isLoading} onClick={() => handleAction(c.Id, c.Names, 'unpause')}>
-                      <PlayIcon size={14} />
-                    </button>
-                  ) : isRunning ? (
-                    <button className="btn btn-ghost btn-icon" data-tooltip="Stop" disabled={!!isLoading} onClick={() => handleAction(c.Id, c.Names, 'stop')}>
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="1" /></svg>
-                    </button>
-                  ) : (
-                    <button className="btn btn-ghost btn-icon" data-tooltip="Start" disabled={!!isLoading} onClick={() => handleAction(c.Id, c.Names, 'start')}>
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><polygon points="6,4 20,12 6,20" /></svg>
-                    </button>
-                  )}
-                  <button className="btn btn-ghost btn-icon" data-tooltip="Restart" disabled={!!isLoading} onClick={() => handleAction(c.Id, c.Names, 'restart')}>
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                      <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.3" />
-                    </svg>
-                  </button>
-                  <button className="btn btn-ghost btn-icon" data-tooltip="View Details" onClick={() => setSelectedContainer(c)}>
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                      <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" /><circle cx="12" cy="12" r="3" />
-                    </svg>
-                  </button>
-                  <button className="btn btn-ghost btn-icon" data-tooltip="Remove" disabled={!!isLoading}
-                    onClick={() => handleAction(c.Id, c.Names, 'remove')} style={{ color: 'var(--accent-red)' }}>
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                      <polyline points="3 6 5 6 21 6" /><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-                    </svg>
-                  </button>
-                </div>
-              </div>
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
 /* ===== Main Containers Page ===== */
 export default function Containers() {
-  const [containers, setContainers] = useAtom(containersAtom);
-  const loading = useAtomValue(dockerLoadingAtom);
+  const [containers, setContainers] = useState<DockerContainer[]>([]);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [filter, setFilter] = useState<"all" | "running" | "stopped">("all");
+  const [searchTerm, setSearchTerm] = useState("");
+  const [actionLoading, setActionLoading] = useState<string | null>(null);
+  const [selectedContainer, setSelectedContainer] = useState<DockerContainer | null>(null);
+  const [showRunModal, setShowRunModal] = useState(false);
+  const [notification, setNotification] = useState<{ type: "success" | "error"; text: string } | null>(null);
 
-  const refreshContainers = useCallback(async () => {
+  const showNotification = useCallback((type: "success" | "error", text: string) => {
+    setNotification({ type, text });
+    setTimeout(() => setNotification(null), 4000);
+  }, []);
+
+  const fetchContainers = useCallback(async () => {
     try {
       setError(null);
       const list = await dockerApi.listContainers(true);
       setContainers(list);
     } catch (e) {
       setError(String(e));
-      setContainers([]);
+    } finally {
+      setLoading(false);
     }
-  }, [setContainers]);
+  }, []);
 
-  // Fetch fresh data on mount (same pattern as Volumes/Networks)
-  useEffect(() => { refreshContainers(); }, [refreshContainers]);
-  const [filter, setFilter] = useState<"all" | "running" | "stopped">("all");
-  const [searchTerm, setSearchTerm] = useState("");
-  const deferredSearch = useDeferredValue(searchTerm);
-  const [actionLoading, setActionLoading] = useState<string | null>(null);
-  const [selectedContainer, setSelectedContainer] = useState<DockerContainer | null>(null);
-  const [showRunModal, setShowRunModal] = useState(false);
-  const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [batchLoading, setBatchLoading] = useState(false);
-  const { confirm, ConfirmDialogProps } = useConfirm();
-  const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; container: DockerContainer } | null>(null);
-  const searchRef = useRef<HTMLInputElement>(null);
-
-  // Hotkeys
-  useHotkeys({
-    "mod+k": () => searchRef.current?.focus(),
-    "escape": () => { setSelectedContainer(null); setCtxMenu(null); },
-    "delete": () => { if (selected.size > 0) handleBatchRemove(); },
-    "backspace": () => { if (selected.size > 0) handleBatchRemove(); },
-  });
-
-  const openCtxMenu = (e: React.MouseEvent, c: DockerContainer) => {
-    e.preventDefault();
-    setCtxMenu({ x: e.clientX, y: e.clientY, container: c });
-  };
-
-  const getCtxItems = (c: DockerContainer): ContextMenuItem[] => {
-    const isRunning = c.State === "running";
-    const isPaused = c.Status.toLowerCase().includes("paused");
-    return [
-      ...(isPaused
-        ? [{ label: "Unpause", icon: <PlayIcon size={14} />, action: () => handleAction(c.Id, c.Names, "unpause") }]
-        : isRunning
-        ? [{ label: "Stop", icon: <StopIcon size={14} />, action: () => handleAction(c.Id, c.Names, "stop") }]
-        : [{ label: "Start", icon: <PlayIcon size={14} />, action: () => handleAction(c.Id, c.Names, "start") }]),
-      { label: "Restart", icon: <RestartIcon size={14} />, action: () => handleAction(c.Id, c.Names, "restart") },
-      { label: "View Details", action: () => setSelectedContainer(c) },
-      { divider: true, label: "", action: () => {} },
-      { label: "Copy ID", action: () => { navigator.clipboard.writeText(c.Id); globalToast("success", "Container ID copied"); } },
-      { divider: true, label: "", action: () => {} },
-      { label: "Remove", danger: true, action: () => handleAction(c.Id, c.Names, "remove") },
-    ];
-  };
+  useEffect(() => {
+    fetchContainers();
+    const interval = setInterval(fetchContainers, 5000);
+    return () => clearInterval(interval);
+  }, [fetchContainers]);
 
   const handleAction = async (id: string, name: string, action: string) => {
     setActionLoading(`${id}-${action}`);
@@ -647,59 +482,22 @@ export default function Containers() {
         case "start": await dockerApi.startContainer(id); break;
         case "stop": await dockerApi.stopContainer(id); break;
         case "restart": await dockerApi.restartContainer(id); break;
-        case "remove": {
-          const ok = await confirm({ title: "Remove Container", message: `Remove container "${name}"?\n\nThis will permanently delete the container and its data.`, confirmText: "Remove", variant: "danger" });
-          if (!ok) { setActionLoading(null); return; }
-          await dockerApi.removeContainer(id, true);
-          setSelected(new Set());
-          break;
-        }
+        case "remove":
+          if (!confirm(`Remove container "${name}"?`)) { setActionLoading(null); return; }
+          await dockerApi.removeContainer(id, true); break;
         case "pause": await dockerApi.pauseContainer(id); break;
         case "unpause": await dockerApi.unpauseContainer(id); break;
       }
       const pastTense: Record<string, string> = {
         start: "started", stop: "stopped", restart: "restarted", remove: "removed", pause: "paused", unpause: "unpaused",
       };
-      globalToast("success", `Container '${name}' ${pastTense[action] || action}`);
-      await refreshContainers();
+      showNotification("success", `Container '${name}' ${pastTense[action] || action}`);
+      fetchContainers();
     } catch (e) {
-      globalToast("error", String(e));
+      showNotification("error", String(e));
     } finally {
       setActionLoading(null);
     }
-  };
-
-  // Batch actions
-  const handleBatchStop = async () => {
-    const names = filtered.filter(c => selected.has(c.Id) && c.State === "running").map(c => c.Names);
-    if (names.length === 0) return;
-    const ok = await confirm({ title: "Stop Selected", message: `Stop ${names.length} container${names.length > 1 ? "s" : ""}?\n\n${names.join(", ")}`, confirmText: "Stop All", variant: "warning" });
-    if (!ok) return;
-    setBatchLoading(true);
-    let ok_count = 0;
-    for (const c of filtered.filter(c => selected.has(c.Id) && c.State === "running")) {
-      try { await dockerApi.stopContainer(c.Id); ok_count++; } catch { /* continue */ }
-    }
-    globalToast("success", `Stopped ${ok_count} container${ok_count > 1 ? "s" : ""}`);
-    setSelected(new Set());
-    setBatchLoading(false);
-    await refreshContainers();
-  };
-
-  const handleBatchRemove = async () => {
-    const names = filtered.filter(c => selected.has(c.Id)).map(c => c.Names);
-    if (names.length === 0) return;
-    const ok = await confirm({ title: "Remove Selected", message: `Remove ${names.length} container${names.length > 1 ? "s" : ""}?\n\n${names.join(", ")}\n\nThis cannot be undone.`, confirmText: `Remove ${names.length}`, variant: "danger" });
-    if (!ok) return;
-    setBatchLoading(true);
-    let ok_count = 0;
-    for (const c of filtered.filter(c => selected.has(c.Id))) {
-      try { await dockerApi.removeContainer(c.Id, true); ok_count++; } catch { /* continue */ }
-    }
-    globalToast("success", `Removed ${ok_count} container${ok_count > 1 ? "s" : ""}`);
-    setSelected(new Set());
-    setBatchLoading(false);
-    await refreshContainers();
   };
 
   const filtered = containers.filter((c) => {
@@ -708,31 +506,9 @@ export default function Containers() {
     return true;
   }).filter((c) => {
     if (!searchTerm) return true;
-    const term = deferredSearch.toLowerCase();
+    const term = searchTerm.toLowerCase();
     return c.Names.toLowerCase().includes(term) || c.Image.toLowerCase().includes(term) || c.Id.toLowerCase().includes(term);
   });
-
-  // Clear selection when filter changes
-  useEffect(() => { setSelected(new Set()); }, [filter, searchTerm]);
-
-  // Auto-cleanup: remove stale selections when data changes
-  useEffect(() => {
-    setSelected(prev => {
-      const validIds = new Set(containers.map(c => c.Id));
-      const next = new Set([...prev].filter(id => validIds.has(id)));
-      return next.size !== prev.size ? next : prev;
-    });
-  }, [containers]);
-
-  const toggleSelect = (id: string) => setSelected(prev => {
-    const next = new Set(prev);
-    next.has(id) ? next.delete(id) : next.add(id);
-    return next;
-  });
-  const toggleAll = () => {
-    if (selected.size === filtered.length) setSelected(new Set());
-    else setSelected(new Set(filtered.map(c => c.Id)));
-  };
 
   const runningCount = containers.filter((c) => c.State === "running").length;
 
@@ -755,7 +531,7 @@ export default function Containers() {
           </span>
         </h1>
         <div className="content-header-actions">
-          <input ref={searchRef} className="input" placeholder="Search containers..." value={searchTerm}
+          <input className="input" placeholder="Search containers..." value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)} style={{ width: 180 }} />
           <div style={{ display: "flex", gap: 2, background: "var(--bg-card)", borderRadius: "var(--radius-md)", padding: 2 }}>
             {(["all", "running", "stopped"] as const).map((f) => (
@@ -768,79 +544,120 @@ export default function Containers() {
               </button>
             ))}
           </div>
-          <button className="btn btn-primary" style={{ display: "flex", alignItems: "center", gap: 4 }} onClick={() => setShowRunModal(true)}><PlayIcon size={12} /> Run</button>
+          <button className="btn btn-primary" onClick={() => setShowRunModal(true)}>▶ Run</button>
+          <button className="btn btn-ghost" onClick={fetchContainers}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.3"/>
+            </svg>
+          </button>
         </div>
       </div>
 
       <div className="content-body">
-
-        {/* Batch action bar */}
-        {selected.size > 0 && (
+        {/* Toast */}
+        {notification && (
           <div style={{
-            display: "flex", alignItems: "center", gap: 12, padding: "10px 16px", marginBottom: 12,
-            background: "rgba(88,166,255,0.08)", border: "1px solid rgba(88,166,255,0.25)",
-            borderRadius: "var(--radius-md)", animation: "slideUp 200ms ease",
+            position: "fixed", top: 16, right: 16, padding: "10px 16px",
+            borderRadius: "var(--radius-md)",
+            background: notification.type === "success" ? "rgba(63, 185, 80, 0.15)" : "rgba(248, 81, 73, 0.15)",
+            border: `1px solid ${notification.type === "success" ? "var(--accent-green)" : "var(--accent-red)"}`,
+            color: notification.type === "success" ? "var(--accent-green)" : "var(--accent-red)",
+            fontSize: "var(--text-sm)", zIndex: 200, animation: "slideUp 250ms ease", boxShadow: "var(--shadow-lg)",
           }}>
-            <span style={{ fontSize: "var(--text-sm)", color: "var(--accent-blue)", fontWeight: 600 }}>
-              {selected.size} selected
-            </span>
-            <div style={{ flex: 1 }} />
-            <button className="btn btn-ghost" style={{ fontSize: "var(--text-xs)", color: "var(--accent-yellow)" }}
-              onClick={handleBatchStop} disabled={batchLoading}>
-              <StopIcon size={12} /> Stop Selected
-            </button>
-            <button className="btn btn-ghost" style={{ fontSize: "var(--text-xs)", color: "var(--accent-red)" }}
-              onClick={handleBatchRemove} disabled={batchLoading}>
-              {batchLoading ? "Removing..." : <><CloseIcon size={12} /> Remove Selected</>}
-            </button>
-            <button className="btn btn-ghost" style={{ fontSize: "var(--text-xs)" }}
-              onClick={() => setSelected(new Set())}>
-              Clear
-            </button>
+            {notification.type === "success" ? "✓" : "✕"} {notification.text}
           </div>
         )}
 
-        {/* Error */}
         {error && (
-          <div style={{ padding: "12px", background: "rgba(248,81,73,0.1)", color: "var(--accent-red)", borderRadius: "8px", marginBottom: "16px", fontSize: "var(--text-sm)" }}>
-            <WarningIcon size={14} style={{ display: "inline", verticalAlign: "middle", marginRight: 4 }} /> {error}
-            <button className="btn btn-ghost" style={{ marginLeft: "8px", fontSize: "var(--text-xs)" }} onClick={() => setError(null)}>Dismiss</button>
+          <div className="card" style={{ borderColor: "var(--accent-yellow)", marginBottom: 16 }}>
+            <p style={{ color: "var(--accent-yellow)", fontSize: "var(--text-sm)" }}>⚠ Could not connect to Docker: {error}</p>
+            <p style={{ color: "var(--text-muted)", fontSize: "var(--text-xs)", marginTop: 4 }}>Make sure a Colima instance with Docker runtime is running.</p>
           </div>
         )}
 
-        {filtered.length > 0 ? (() => {
-          const ROW_H = 48;
-          const COL_W = { check: 44, name: 'minmax(160px,1.5fr)', image: 'minmax(140px,1fr)', status: 'minmax(160px,200px)', ports: 'minmax(120px,1fr)', actions: '180px' };
-          const gridCols = `${COL_W.check}px ${COL_W.name} ${COL_W.image} ${COL_W.status} ${COL_W.ports} ${COL_W.actions}`;
-          return (
-          <div className="vtable">
-            {/* Header */}
-            <div className="vtable-header" style={{ display: 'grid', gridTemplateColumns: gridCols }}>
-              <div className="vtable-header-cell" style={{ textAlign: 'center' }}>
-                <input type="checkbox" checked={filtered.length > 0 && selected.size === filtered.length}
-                  onChange={toggleAll} style={{ accentColor: 'var(--accent-blue)', cursor: 'pointer' }} />
-              </div>
-              <div className="vtable-header-cell">Name</div>
-              <div className="vtable-header-cell">Image</div>
-              <div className="vtable-header-cell">Status</div>
-              <div className="vtable-header-cell">Ports</div>
-              <div className="vtable-header-cell" style={{ textAlign: 'right' }}>Actions</div>
-            </div>
-            {/* Virtual Body */}
-            <VirtualContainerRows
-              filtered={filtered}
-              selected={selected}
-              actionLoading={actionLoading}
-              gridCols={gridCols}
-              rowHeight={ROW_H}
-              toggleSelect={toggleSelect}
-              setSelectedContainer={setSelectedContainer}
-              handleAction={handleAction}
-              onContextMenu={openCtxMenu}
-            />
-          </div>
-          );
-        })() : (
+        {filtered.length > 0 ? (
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Image</th>
+                <th>Status</th>
+                <th>Ports</th>
+                <th style={{ textAlign: "right" }}>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map((c) => {
+                const isRunning = c.State === "running";
+                const isPaused = c.Status.toLowerCase().includes("paused");
+                const isLoading = actionLoading?.startsWith(c.Id);
+                return (
+                  <tr key={c.Id} style={{ opacity: isLoading ? 0.6 : 1, cursor: "pointer", transition: "opacity 200ms" }}
+                    onClick={() => setSelectedContainer(c)}>
+                    <td>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                        <div style={{
+                          width: 8, height: 8, borderRadius: "50%",
+                          background: isPaused ? "var(--accent-yellow)" : isRunning ? "var(--status-running)" : "var(--status-stopped)",
+                          boxShadow: isRunning && !isPaused ? "0 0 6px var(--status-running)" : "none",
+                          flexShrink: 0,
+                        }}/>
+                        <span style={{ fontWeight: 500, maxWidth: 200, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                          {c.Names}
+                        </span>
+                      </div>
+                    </td>
+                    <td style={{ color: "var(--text-secondary)", fontFamily: "var(--font-mono)", fontSize: "var(--text-xs)", maxWidth: 250, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {c.Image}
+                    </td>
+                    <td>
+                      <span className={`badge badge-${isPaused ? "stopped" : isRunning ? "running" : "stopped"}`}>
+                        <span className="badge-dot" />
+                        {c.Status}
+                      </span>
+                    </td>
+                    <td style={{ fontFamily: "var(--font-mono)", fontSize: "var(--text-xs)", color: "var(--text-muted)", maxWidth: 200, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {c.Ports || "—"}
+                    </td>
+                    <td onClick={(e) => e.stopPropagation()}>
+                      <div className="table-actions" style={{ justifyContent: "flex-end" }}>
+                        {isPaused ? (
+                          <button className="btn btn-ghost btn-icon" data-tooltip="Unpause" disabled={!!isLoading} onClick={() => handleAction(c.Id, c.Names, "unpause")}>
+                            ▶
+                          </button>
+                        ) : isRunning ? (
+                          <button className="btn btn-ghost btn-icon" data-tooltip="Stop" disabled={!!isLoading} onClick={() => handleAction(c.Id, c.Names, "stop")}>
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="1"/></svg>
+                          </button>
+                        ) : (
+                          <button className="btn btn-ghost btn-icon" data-tooltip="Start" disabled={!!isLoading} onClick={() => handleAction(c.Id, c.Names, "start")}>
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><polygon points="6,4 20,12 6,20"/></svg>
+                          </button>
+                        )}
+                        <button className="btn btn-ghost btn-icon" data-tooltip="Restart" disabled={!!isLoading} onClick={() => handleAction(c.Id, c.Names, "restart")}>
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.3"/>
+                          </svg>
+                        </button>
+                        <button className="btn btn-ghost btn-icon" data-tooltip="View Details" onClick={() => setSelectedContainer(c)}>
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>
+                          </svg>
+                        </button>
+                        <button className="btn btn-ghost btn-icon" data-tooltip="Remove" disabled={!!isLoading}
+                          onClick={() => handleAction(c.Id, c.Names, "remove")} style={{ color: "var(--accent-red)" }}>
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+                          </svg>
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        ) : (
           <div className="empty-state">
             <div className="empty-state-icon">
               <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" style={{ color: "var(--text-muted)" }}>
@@ -849,7 +666,7 @@ export default function Containers() {
             </div>
             <div className="empty-state-title">{filter === "all" && !searchTerm ? "No containers" : "No matching containers"}</div>
             <div className="empty-state-text">
-              {searchTerm ? "Try a different search term." : "Click \"Run\" to start a container from an image."}
+              {error ? "Start a Colima instance with Docker runtime first." : searchTerm ? "Try a different search term." : "Click \"Run\" to start a container from an image."}
             </div>
           </div>
         )}
@@ -860,10 +677,8 @@ export default function Containers() {
       )}
 
       {showRunModal && (
-        <RunContainerModal onClose={() => setShowRunModal(false)} onSuccess={() => { globalToast("success", "Container started!"); }} />
+        <RunContainerModal onClose={() => setShowRunModal(false)} onSuccess={() => { fetchContainers(); showNotification("success", "Container started!"); }} />
       )}
-      <ConfirmDialog {...ConfirmDialogProps} />
-      {ctxMenu && <ContextMenu x={ctxMenu.x} y={ctxMenu.y} items={getCtxItems(ctxMenu.container)} onClose={() => setCtxMenu(null)} />}
     </>
   );
 }

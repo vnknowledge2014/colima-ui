@@ -1,16 +1,11 @@
-import { useState, useEffect, useCallback, useDeferredValue } from "react";
-import { volumesApi } from "../lib/api";
-import { ConfirmDialog, useConfirm } from "../components/ConfirmDialog";
-import { BroomIcon, WarningIcon } from "../components/Icons";
-import { formatVolumeName } from "../lib/formatters";
-import { useAtom } from "jotai";
-import { volumesAtom, volumesLoadingAtom } from "../store/resourceAtom";
+import { useState, useEffect, useCallback } from "react";
+import { volumesApi, DockerVolume } from "../lib/api";
 
 interface VolumesProps {}
 
 export default function Volumes(_props: VolumesProps) {
-  const [volumes, setVolumes] = useAtom(volumesAtom);
-  const [loading, setLoading] = useAtom(volumesLoadingAtom);
+  const [volumes, setVolumes] = useState<DockerVolume[]>([]);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showCreate, setShowCreate] = useState(false);
   const [newName, setNewName] = useState("");
@@ -19,10 +14,6 @@ export default function Volumes(_props: VolumesProps) {
   const [inspectData, setInspectData] = useState<string>("");
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [search, setSearch] = useState("");
-  const deferredSearch = useDeferredValue(search);
-  const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [batchLoading, setBatchLoading] = useState(false);
-  const { confirm, ConfirmDialogProps } = useConfirm();
 
   const refresh = useCallback(async () => {
     try {
@@ -31,7 +22,6 @@ export default function Volumes(_props: VolumesProps) {
       setVolumes(list);
     } catch (e) {
       setError(String(e));
-      setVolumes([]);
     } finally {
       setLoading(false);
     }
@@ -55,12 +45,10 @@ export default function Volumes(_props: VolumesProps) {
   };
 
   const handleRemove = async (name: string) => {
-    const ok = await confirm({ title: "Remove Volume", message: `Remove volume "${name}"?`, confirmText: "Remove", variant: "danger" });
-    if (!ok) return;
+    if (!confirm(`Remove volume "${name}"?`)) return;
     setActionLoading(name);
     try {
       await volumesApi.removeVolume(name, true);
-      setSelected(new Set());
       await refresh();
     } catch (e) {
       setError(String(e));
@@ -70,12 +58,10 @@ export default function Volumes(_props: VolumesProps) {
   };
 
   const handlePrune = async () => {
-    const ok = await confirm({ title: "Prune Volumes", message: "Remove all unused volumes? This cannot be undone.", confirmText: "Prune All", variant: "warning" });
-    if (!ok) return;
+    if (!confirm("Remove all unused volumes? This cannot be undone.")) return;
     setActionLoading("prune");
     try {
       await volumesApi.pruneVolumes();
-      setSelected(new Set());
       await refresh();
     } catch (e) {
       setError(String(e));
@@ -96,42 +82,9 @@ export default function Volumes(_props: VolumesProps) {
   };
 
   const filtered = volumes.filter(v =>
-    v.Name.toLowerCase().includes(deferredSearch.toLowerCase()) ||
-    v.Driver.toLowerCase().includes(deferredSearch.toLowerCase())
+    v.Name.toLowerCase().includes(search.toLowerCase()) ||
+    v.Driver.toLowerCase().includes(search.toLowerCase())
   );
-
-  useEffect(() => { setSelected(new Set()); }, [search]);
-
-  // Auto-cleanup: remove stale selections when data changes
-  useEffect(() => {
-    setSelected(prev => {
-      const validNames = new Set(volumes.map(v => v.Name));
-      const next = new Set([...prev].filter(name => validNames.has(name)));
-      return next.size !== prev.size ? next : prev;
-    });
-  }, [volumes]);
-
-  const toggleSelect = (name: string) => setSelected(prev => {
-    const next = new Set(prev);
-    next.has(name) ? next.delete(name) : next.add(name);
-    return next;
-  });
-
-
-  const handleBatchRemove = async () => {
-    const names = filtered.filter(v => selected.has(v.Name)).map(v => v.Name);
-    if (names.length === 0) return;
-    const ok = await confirm({ title: "Remove Selected Volumes", message: `Remove ${names.length} volume${names.length > 1 ? "s" : ""}?\n\n${names.join(", ")}\n\nThis cannot be undone.`, confirmText: `Remove ${names.length}`, variant: "danger" });
-    if (!ok) return;
-    setBatchLoading(true);
-    let ok_count = 0;
-    for (const name of names) {
-      try { await volumesApi.removeVolume(name, true); ok_count++; } catch { /* continue */ }
-    }
-    setSelected(new Set());
-    setBatchLoading(false);
-    refresh();
-  };
 
   return (
     <div style={{ padding: "24px" }}>
@@ -143,16 +96,9 @@ export default function Volumes(_props: VolumesProps) {
             {volumes.length} volume{volumes.length !== 1 ? "s" : ""}
           </p>
         </div>
-        <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
-          {selected.size > 0 && (
-            <button className="btn btn-ghost" style={{ color: "var(--accent-red)", fontSize: "var(--text-sm)" }}
-              onClick={handleBatchRemove} disabled={batchLoading}>
-              {batchLoading ? "Removing..." : `Remove ${selected.size} Selected`}
-            </button>
-          )}
-          <button className="btn btn-ghost" onClick={handlePrune} disabled={actionLoading === "prune"}
-            style={{ display: "flex", alignItems: "center", gap: 4 }}>
-            {actionLoading === "prune" ? "Pruning..." : <><BroomIcon size={12} style={{ display: "inline", verticalAlign: "middle" }} /> Prune</>}
+        <div style={{ display: "flex", gap: "8px" }}>
+          <button className="btn btn-ghost" onClick={handlePrune} disabled={actionLoading === "prune"}>
+            {actionLoading === "prune" ? "Pruning..." : "🗑 Prune"}
           </button>
           <button className="btn btn-primary" onClick={() => setShowCreate(!showCreate)}>
             + Create Volume
@@ -164,7 +110,7 @@ export default function Volumes(_props: VolumesProps) {
       {/* Error */}
       {error && (
         <div style={{ padding: "12px", background: "rgba(248,81,73,0.1)", color: "var(--accent-red)", borderRadius: "8px", marginBottom: "16px", fontSize: "var(--text-sm)" }}>
-          <WarningIcon size={14} style={{ display: "inline", verticalAlign: "middle", marginRight: 4 }} /> {error}
+          ⚠ {error}
           <button className="btn btn-ghost" style={{ marginLeft: "8px", fontSize: "var(--text-xs)" }} onClick={() => setError(null)}>Dismiss</button>
         </div>
       )}
@@ -209,7 +155,7 @@ export default function Volumes(_props: VolumesProps) {
           type="text"
           value={search}
           onChange={e => setSearch(e.target.value)}
-          placeholder="Search volumes..."
+          placeholder="🔍 Search volumes..."
           style={{ width: "100%", padding: "8px 12px", background: "var(--bg-secondary)", border: "1px solid var(--border-primary)", borderRadius: "8px", color: "var(--text-primary)", fontSize: "var(--text-sm)" }}
         />
       </div>
@@ -224,24 +170,11 @@ export default function Volumes(_props: VolumesProps) {
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
           {filtered.map(vol => (
-            <div key={vol.Name} style={{ padding: "16px", background: selected.has(vol.Name) ? "rgba(88,166,255,0.06)" : "var(--bg-secondary)", borderRadius: "12px", border: selected.has(vol.Name) ? "1px solid rgba(88,166,255,0.25)" : "1px solid var(--border-primary)", transition: "all 150ms" }}>
+            <div key={vol.Name} style={{ padding: "16px", background: "var(--bg-secondary)", borderRadius: "12px", border: "1px solid var(--border-primary)" }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                  <input type="checkbox" checked={selected.has(vol.Name)} onChange={() => toggleSelect(vol.Name)}
-                    style={{ accentColor: "var(--accent-blue)", cursor: "pointer" }} />
-                  <div>
-                    {(() => {
-                      const { display, isHash } = formatVolumeName(vol.Name);
-                      return (
-                        <div style={{ fontWeight: 600, fontSize: "var(--text-base)", maxWidth: '500px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={vol.Name}>
-                          {isHash ? (
-                            <span style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-sm)', color: 'var(--text-secondary)' }}>{display}</span>
-                          ) : display}
-                        </div>
-                      );
-                    })()}
-                  <div style={{ color: "var(--text-muted)", fontSize: "var(--text-sm)", marginTop: "4px", maxWidth: '600px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
-                    title={`Driver: ${vol.Driver}${vol.Scope ? ` · Scope: ${vol.Scope}` : ''}${vol.Mountpoint ? ` · ${vol.Mountpoint}` : ''}`}>
+                <div>
+                  <div style={{ fontWeight: 600, fontSize: "var(--text-base)" }}>{vol.Name}</div>
+                  <div style={{ color: "var(--text-muted)", fontSize: "var(--text-sm)", marginTop: "4px" }}>
                     Driver: <span style={{ color: "var(--accent-blue)" }}>{vol.Driver}</span>
                     {vol.Scope && <> · Scope: {vol.Scope}</>}
                     {vol.Mountpoint && <> · {vol.Mountpoint}</>}
@@ -261,7 +194,6 @@ export default function Volumes(_props: VolumesProps) {
                   </button>
                 </div>
               </div>
-              </div>
               {inspecting === vol.Name && (
                 <pre style={{ marginTop: "12px", padding: "12px", background: "var(--bg-primary)", borderRadius: "8px", fontSize: "var(--text-xs)", overflow: "auto", maxHeight: "300px", color: "var(--text-secondary)" }}>
                   {inspectData}
@@ -271,7 +203,6 @@ export default function Volumes(_props: VolumesProps) {
           ))}
         </div>
       )}
-      <ConfirmDialog {...ConfirmDialogProps} />
     </div>
   );
 }

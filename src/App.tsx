@@ -1,29 +1,19 @@
-import React, { useState, useEffect, useCallback, Suspense } from "react";
-import { colimaApi, dockerApi, systemApi, ColimaInstance, SystemInfo } from "./lib/api";
-import { onToast, ToastMessage } from "./lib/globalToast";
-import { WarningIcon } from "./components/Icons";
-import { useSetAtom } from "jotai";
-import { containersAtom, imagesAtom, dockerLoadingAtom } from "./store/dockerAtom";
-import { volumesAtom, networksAtom } from "./store/resourceAtom";
+import { useState, useEffect, useCallback } from "react";
+import { colimaApi, systemApi, ColimaInstance, SystemInfo } from "./lib/api";
+import Dashboard from "./pages/Dashboard";
+import Instances from "./pages/Instances";
+import Containers from "./pages/Containers";
+import TerminalPage from "./pages/Terminal";
+import Models from "./pages/Models";
+import Images from "./pages/Images";
+import Volumes from "./pages/Volumes";
+import Networks from "./pages/Networks";
+import Compose from "./pages/Compose";
+import Kubernetes from "./pages/Kubernetes";
+import LinuxVMs from "./pages/LinuxVMs";
+import DockerfileGen from "./pages/DockerfileGen";
+import Settings from "./pages/Settings";
 import "./index.css";
-
-// Lazy-loaded pages — each becomes a separate chunk
-const Dashboard = React.lazy(() => import("./pages/Dashboard"));
-const Instances = React.lazy(() => import("./pages/Instances"));
-const Containers = React.lazy(() => import("./pages/Containers"));
-const TerminalPage = React.lazy(() => import("./pages/Terminal"));
-const Models = React.lazy(() => import("./pages/Models"));
-const Images = React.lazy(() => import("./pages/Images"));
-const Volumes = React.lazy(() => import("./pages/Volumes"));
-const Networks = React.lazy(() => import("./pages/Networks"));
-const Compose = React.lazy(() => import("./pages/Compose"));
-const Kubernetes = React.lazy(() => import("./pages/Kubernetes"));
-const LinuxVMs = React.lazy(() => import("./pages/LinuxVMs"));
-const DockerfileGen = React.lazy(() => import("./pages/DockerfileGen"));
-const Settings = React.lazy(() => import("./pages/Settings"));
-const SetupWizard = React.lazy(() => import("./components/SetupWizard"));
-const GettingStartedTour = React.lazy(() => import("./components/GettingStartedTour"));
-const AiChatBubble = React.lazy(() => import("./components/AiChatBubble"));
 
 type Page = "dashboard" | "instances" | "containers" | "images" | "volumes" | "networks" | "compose" | "kubernetes" | "linux-vms" | "dockerfile" | "terminal" | "models" | "settings";
 
@@ -110,24 +100,6 @@ function App() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [currentTime, setCurrentTime] = useState(new Date());
-  const [toasts, setToasts] = useState<ToastMessage[]>([]);
-
-  // Global toast listener — persists across tab switches
-  useEffect(() => {
-    return onToast((toast) => {
-      setToasts((prev) => [...prev, toast]);
-      // Auto-dismiss after 5 seconds
-      setTimeout(() => {
-        setToasts((prev) => prev.filter((t) => t.id !== toast.id));
-      }, 5000);
-    });
-  }, []);
-
-  // Onboarding state
-  const [showWizard, setShowWizard] = useState(() => {
-    return localStorage.getItem("colimaui_setup_complete") !== "true";
-  });
-  const [showTour, setShowTour] = useState(false);
 
   const refreshManual = useCallback(async () => {
     try {
@@ -151,7 +123,7 @@ function App() {
   }, [refreshManual]);
 
   // Tauri: listen to Rust poller events for real-time updates
-  // Browser: connect to SSE stream for real-time updates (no polling!)
+  // Browser: fall back to polling every 5 seconds
   useEffect(() => {
     if (isTauri) {
       let cleanup: (() => void) | undefined;
@@ -167,137 +139,11 @@ function App() {
       });
       return () => { if (cleanup) cleanup(); };
     } else {
-      // Browser mode: try SSE, fall back to HTTP polling if unavailable
-      let sseWorking = false;
-      let pollInterval: ReturnType<typeof setInterval> | null = null;
-      const es = new EventSource("http://127.0.0.1:11420/api/events");
-      es.addEventListener("instances-update", (e) => {
-        try {
-          sseWorking = true;
-          const data = JSON.parse((e as MessageEvent).data);
-          setInstances(data.instances);
-          setLoading(false);
-        } catch { /* ignore parse errors */ }
-      });
-      es.onerror = () => {
-        if (!sseWorking && !pollInterval) {
-          es.close();
-          // Fall back to polling
-          pollInterval = setInterval(refreshManual, 5000);
-        }
-      };
-      // Also refresh manually on first mount
-      refreshManual();
-      return () => {
-        es.close();
-        if (pollInterval) clearInterval(pollInterval);
-      };
+      // Browser mode: poll every 2 seconds (instant reads via filesystem)
+      const interval = setInterval(refreshManual, 2000);
+      return () => clearInterval(interval);
     }
   }, [refreshManual]);
-
-  const setContainers = useSetAtom(containersAtom);
-  const setImages = useSetAtom(imagesAtom);
-  const setDockerLoading = useSetAtom(dockerLoadingAtom);
-  const setVolumes = useSetAtom(volumesAtom);
-  const setNetworks = useSetAtom(networksAtom);
-
-  // Global Docker State Effect
-  useEffect(() => {
-    if (isTauri) {
-      let unlisten: (() => void) | undefined;
-      let unlisten2: (() => void) | undefined;
-
-      // Immediate fetch via normalized API (handles field-name mapping)
-      Promise.all([
-        dockerApi.listContainers(true),
-        dockerApi.listImages(),
-      ]).then(([c, i]) => {
-        setContainers(c);
-        setImages(i);
-        setDockerLoading(false);
-      }).catch(() => {
-        // Docker not available yet — atoms stay empty
-        setDockerLoading(false);
-      });
-
-      // Also subscribe to push updates for real-time sync
-      import("@tauri-apps/api/event").then((mod) => {
-        mod.listen<{ containers: any[], images: any[] }>("docker-state-updated", (event) => {
-          // Normalize field names from bollard format
-          const containers = (event.payload.containers || []).map((v: any) => ({
-            Id: v.Id || v.id || v.ID || "",
-            Names: v.Names || v.names || "",
-            Image: v.Image || v.image || "",
-            Status: v.Status || v.status || "",
-            State: v.State || v.state || "",
-            Ports: v.Ports || v.ports || "",
-            CreatedAt: v.CreatedAt || v.created_at || v.createdAt || "",
-            Size: v.Size || v.size || "",
-            Command: v.Command || v.command || "",
-          }));
-          const images = (event.payload.images || []).map((v: any) => ({
-            Id: v.Id || v.id || v.ID || "",
-            Repository: v.Repository || v.repository || "",
-            Tag: v.Tag || v.tag || "",
-            Size: v.Size || v.size || "",
-            CreatedAt: v.CreatedAt || v.created_at || v.createdAt || "",
-          }));
-          setContainers(containers);
-          setImages(images);
-          setDockerLoading(false);
-        }).then((fn) => { unlisten = fn; });
-
-        // Listen for connection-lost event to clear ALL Docker state
-        mod.listen("docker-connection-lost", () => {
-          setContainers([]);
-          setImages([]);
-          setVolumes([]);
-          setNetworks([]);
-          setDockerLoading(false);
-        }).then((fn) => { unlisten2 = fn; });
-      });
-      return () => { if (unlisten) unlisten(); if (unlisten2) unlisten2(); };
-    } else {
-      // Browser mode: immediate fetch + SSE for real-time updates
-      let pollInterval: ReturnType<typeof setInterval> | null = null;
-
-      // Immediate HTTP fetch — don't wait for SSE push
-      const fetchDocker = async () => {
-        try {
-          const [containers, images] = await Promise.all([
-            dockerApi.listContainers(true),
-            dockerApi.listImages(),
-          ]);
-          setContainers(containers);
-          setImages(images);
-          setDockerLoading(false);
-        } catch { /* ignore */ }
-      };
-      fetchDocker();
-
-      // SSE for real-time push updates (container start/stop/etc.)
-      const es = new EventSource("http://127.0.0.1:11420/api/events");
-      es.addEventListener("docker-state-updated", (e) => {
-        try {
-          const data = JSON.parse((e as MessageEvent).data);
-          setContainers(data.containers);
-          setImages(data.images);
-          setDockerLoading(false);
-        } catch { /* ignore parse errors */ }
-      });
-      es.onerror = () => {
-        // SSE unavailable — fall back to periodic polling
-        if (!pollInterval) {
-          es.close();
-          pollInterval = setInterval(fetchDocker, 3000);
-        }
-      };
-      return () => {
-        es.close();
-        if (pollInterval) clearInterval(pollInterval);
-      };
-    }
-  }, [setContainers, setImages, setDockerLoading]);
 
   // Smooth 1-second clock
   useEffect(() => {
@@ -388,15 +234,15 @@ function App() {
   const formatTime = () => currentTime.toLocaleTimeString();
 
   return (
-    <div className={`app-layout${isTauri ? " tauri-app" : ""}`}>
+    <div className="app-layout">
       {/* Sidebar */}
       <aside className="sidebar">
         <div className="sidebar-header">
-          <img src="/colima_icon.png" alt="ColimaUI" className="sidebar-logo" />
-          <h1 className="sidebar-title">ColimaUI</h1>
+          <div className="sidebar-logo">C</div>
+          <span className="sidebar-title">ColimaUI</span>
         </div>
 
-        <nav className="sidebar-nav" data-tour-id="sidebar-nav">
+        <nav className="sidebar-nav">
           {navGroups.map((group) => (
             <div key={group.label} className="nav-section">
               <div className="nav-section-label">{group.label}</div>
@@ -405,7 +251,6 @@ function App() {
                   key={item.id}
                   className={`nav-item ${page === item.id ? "active" : ""}`}
                   onClick={() => setPage(item.id)}
-                  data-tour-id={`nav-${item.id}`}
                 >
                   <item.icon />
                   <span>{item.label}</span>
@@ -416,22 +261,6 @@ function App() {
         </nav>
 
         <div className="sidebar-footer">
-          <div
-            className="nav-item"
-            style={{ fontSize: "var(--text-xs)", color: "var(--text-muted)", cursor: "pointer" }}
-            onClick={() => {
-              setShowTour(true);
-              localStorage.removeItem("colimaui_tour_complete");
-            }}
-            data-tooltip="Restart tour"
-          >
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M2 3h6a4 4 0 0 1 4 4v14"/>
-              <path d="M22 3h-6a4 4 0 0 0-4 4v14"/>
-              <polyline points="6 7 2 3 6 -1"/>
-            </svg>
-            <span>Tour Guide</span>
-          </div>
           <div
             className="nav-item"
             style={{ fontSize: "var(--text-xs)", color: "var(--text-muted)", cursor: "default" }}
@@ -467,7 +296,7 @@ function App() {
               justifyContent: "space-between",
             }}
           >
-            <span style={{ display: "flex", alignItems: "center", gap: 6 }}><WarningIcon size={14} /> {error}</span>
+            <span>⚠ {error}</span>
             <button
               className="btn btn-ghost"
               style={{ fontSize: "var(--text-xs)", padding: "2px 8px" }}
@@ -477,70 +306,8 @@ function App() {
             </button>
           </div>
         )}
-        <Suspense fallback={<div style={{ display: "flex", justifyContent: "center", alignItems: "center", height: "50vh" }}><div className="spinner" /></div>}>
-          {renderPage()}
-        </Suspense>
+        {renderPage()}
       </main>
-
-      {/* Global Toast Notifications */}
-      {toasts.length > 0 && (
-        <div style={{ position: "fixed", top: 16, right: 16, zIndex: 99999, display: "flex", flexDirection: "column", gap: 8, maxWidth: 420 }}>
-          {toasts.map((toast) => (
-            <div key={toast.id} style={{
-              padding: "12px 20px",
-              borderRadius: "var(--radius-md)",
-              background: toast.type === "success" ? "#1a2e1a" : toast.type === "error" ? "#2e1a1a" : "#1a1a2e",
-              border: `1px solid ${toast.type === "success" ? "var(--accent-green)" : toast.type === "error" ? "var(--accent-red)" : "var(--accent-blue)"}`,
-              color: toast.type === "success" ? "var(--accent-green)" : toast.type === "error" ? "var(--accent-red)" : "var(--accent-blue)",
-              fontSize: "var(--text-sm)", fontWeight: 500,
-              boxShadow: "0 8px 32px rgba(0,0,0,0.6)",
-              backdropFilter: "blur(12px)",
-              display: "flex", alignItems: "center", gap: 8,
-              animation: "fadeInSlide 0.3s ease",
-              cursor: "pointer",
-            }} onClick={() => setToasts((prev) => prev.filter((t) => t.id !== toast.id))}>
-              {toast.type === "success" ? "✓" : toast.type === "error" ? "✕" : "ℹ"} {toast.text}
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* Setup Wizard — shows on first launch */}
-      {showWizard && (
-        <SetupWizard
-          systemInfo={systemInfo}
-          onComplete={() => {
-            setShowWizard(false);
-            localStorage.setItem("colimaui_setup_complete", "true");
-            // Start tour after wizard
-            if (localStorage.getItem("colimaui_tour_complete") !== "true") {
-              setTimeout(() => setShowTour(true), 300);
-            }
-          }}
-          onSkip={() => {
-            setShowWizard(false);
-            localStorage.setItem("colimaui_setup_complete", "true");
-            if (localStorage.getItem("colimaui_tour_complete") !== "true") {
-              setTimeout(() => setShowTour(true), 300);
-            }
-          }}
-        />
-      )}
-
-      {/* Getting Started Tour — shows after wizard */}
-      {showTour && (
-        <GettingStartedTour
-          onComplete={() => {
-            setShowTour(false);
-            localStorage.setItem("colimaui_tour_complete", "true");
-          }}
-        />
-      )}
-
-      {/* AI Diagnostics Bubble — global floating overlay */}
-      <Suspense fallback={null}>
-        <AiChatBubble onNavigate={(target) => setPage(target as Page)} />
-      </Suspense>
     </div>
   );
 }

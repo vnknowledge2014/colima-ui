@@ -7,7 +7,7 @@ fn kubectl_cmd() -> Command {
 
 /// Kubernetes Namespace
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "PascalCase")]
 pub struct K8sNamespace {
     pub name: String,
     pub status: String,
@@ -16,7 +16,7 @@ pub struct K8sNamespace {
 
 /// Kubernetes Pod
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "PascalCase")]
 pub struct K8sPod {
     pub name: String,
     pub namespace: String,
@@ -29,11 +29,11 @@ pub struct K8sPod {
 
 /// Kubernetes Service
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "PascalCase")]
 pub struct K8sService {
     pub name: String,
     pub namespace: String,
-    #[serde(rename = "type")]
+    #[serde(rename = "Type")]
     pub svc_type: String,
     pub cluster_ip: String,
     pub ports: String,
@@ -42,7 +42,7 @@ pub struct K8sService {
 
 /// Kubernetes Deployment
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "PascalCase")]
 pub struct K8sDeployment {
     pub name: String,
     pub namespace: String,
@@ -85,8 +85,8 @@ pub async fn k8s_namespaces() -> Result<Vec<K8sNamespace>, String> {
     }
 
     let stdout = String::from_utf8_lossy(&output.stdout);
-    let parsed: serde_json::Value =
-        serde_json::from_str(&stdout).map_err(|e| format!("Failed to parse namespaces: {}", e))?;
+    let parsed: serde_json::Value = serde_json::from_str(&stdout)
+        .map_err(|e| format!("Failed to parse namespaces: {}", e))?;
 
     let empty = vec![];
     let items = parsed["items"].as_array().unwrap_or(&empty);
@@ -94,10 +94,7 @@ pub async fn k8s_namespaces() -> Result<Vec<K8sNamespace>, String> {
         .iter()
         .map(|item| {
             let name = item["metadata"]["name"].as_str().unwrap_or("").to_string();
-            let status = item["status"]["phase"]
-                .as_str()
-                .unwrap_or("Unknown")
-                .to_string();
+            let status = item["status"]["phase"].as_str().unwrap_or("Unknown").to_string();
             let creation = item["metadata"]["creationTimestamp"].as_str().unwrap_or("");
             K8sNamespace {
                 name,
@@ -134,8 +131,8 @@ pub async fn k8s_pods(namespace: String) -> Result<Vec<K8sPod>, String> {
     }
 
     let stdout = String::from_utf8_lossy(&output.stdout);
-    let parsed: serde_json::Value =
-        serde_json::from_str(&stdout).map_err(|e| format!("Failed to parse pods: {}", e))?;
+    let parsed: serde_json::Value = serde_json::from_str(&stdout)
+        .map_err(|e| format!("Failed to parse pods: {}", e))?;
 
     let empty = vec![];
     let items = parsed["items"].as_array().unwrap_or(&empty);
@@ -143,23 +140,14 @@ pub async fn k8s_pods(namespace: String) -> Result<Vec<K8sPod>, String> {
         .iter()
         .map(|item| {
             let name = item["metadata"]["name"].as_str().unwrap_or("").to_string();
-            let ns = item["metadata"]["namespace"]
-                .as_str()
-                .unwrap_or("")
-                .to_string();
-            let phase = item["status"]["phase"]
-                .as_str()
-                .unwrap_or("Unknown")
-                .to_string();
+            let ns = item["metadata"]["namespace"].as_str().unwrap_or("").to_string();
+            let phase = item["status"]["phase"].as_str().unwrap_or("Unknown").to_string();
             let node = item["spec"]["nodeName"].as_str().unwrap_or("").to_string();
 
             // Calculate ready containers
             let container_statuses = item["status"]["containerStatuses"].as_array();
             let (ready_count, total_count) = if let Some(statuses) = container_statuses {
-                let ready = statuses
-                    .iter()
-                    .filter(|s| s["ready"].as_bool().unwrap_or(false))
-                    .count();
+                let ready = statuses.iter().filter(|s| s["ready"].as_bool().unwrap_or(false)).count();
                 (ready, statuses.len())
             } else {
                 (0, 0)
@@ -167,11 +155,7 @@ pub async fn k8s_pods(namespace: String) -> Result<Vec<K8sPod>, String> {
 
             // Calculate restarts
             let restarts: i64 = container_statuses
-                .map(|s| {
-                    s.iter()
-                        .map(|c| c["restartCount"].as_i64().unwrap_or(0))
-                        .sum()
-                })
+                .map(|s| s.iter().map(|c| c["restartCount"].as_i64().unwrap_or(0)).sum())
                 .unwrap_or(0);
 
             let creation = item["metadata"]["creationTimestamp"].as_str().unwrap_or("");
@@ -215,8 +199,8 @@ pub async fn k8s_services(namespace: String) -> Result<Vec<K8sService>, String> 
     }
 
     let stdout = String::from_utf8_lossy(&output.stdout);
-    let parsed: serde_json::Value =
-        serde_json::from_str(&stdout).map_err(|e| format!("Failed to parse services: {}", e))?;
+    let parsed: serde_json::Value = serde_json::from_str(&stdout)
+        .map_err(|e| format!("Failed to parse services: {}", e))?;
 
     let empty = vec![];
     let items = parsed["items"].as_array().unwrap_or(&empty);
@@ -224,18 +208,9 @@ pub async fn k8s_services(namespace: String) -> Result<Vec<K8sService>, String> 
         .iter()
         .map(|item| {
             let name = item["metadata"]["name"].as_str().unwrap_or("").to_string();
-            let ns = item["metadata"]["namespace"]
-                .as_str()
-                .unwrap_or("")
-                .to_string();
-            let svc_type = item["spec"]["type"]
-                .as_str()
-                .unwrap_or("ClusterIP")
-                .to_string();
-            let cluster_ip = item["spec"]["clusterIP"]
-                .as_str()
-                .unwrap_or("None")
-                .to_string();
+            let ns = item["metadata"]["namespace"].as_str().unwrap_or("").to_string();
+            let svc_type = item["spec"]["type"].as_str().unwrap_or("ClusterIP").to_string();
+            let cluster_ip = item["spec"]["clusterIP"].as_str().unwrap_or("None").to_string();
             let creation = item["metadata"]["creationTimestamp"].as_str().unwrap_or("");
 
             // Parse ports
@@ -245,8 +220,7 @@ pub async fn k8s_services(namespace: String) -> Result<Vec<K8sService>, String> 
                     ps.iter()
                         .map(|p| {
                             let port = p["port"].as_i64().unwrap_or(0);
-                            let target = p["targetPort"]
-                                .as_i64()
+                            let target = p["targetPort"].as_i64()
                                 .or_else(|| p["targetPort"].as_str().and_then(|s| s.parse().ok()))
                                 .unwrap_or(port);
                             let protocol = p["protocol"].as_str().unwrap_or("TCP");
@@ -295,8 +269,8 @@ pub async fn k8s_deployments(namespace: String) -> Result<Vec<K8sDeployment>, St
     }
 
     let stdout = String::from_utf8_lossy(&output.stdout);
-    let parsed: serde_json::Value =
-        serde_json::from_str(&stdout).map_err(|e| format!("Failed to parse deployments: {}", e))?;
+    let parsed: serde_json::Value = serde_json::from_str(&stdout)
+        .map_err(|e| format!("Failed to parse deployments: {}", e))?;
 
     let empty = vec![];
     let items = parsed["items"].as_array().unwrap_or(&empty);
@@ -304,10 +278,7 @@ pub async fn k8s_deployments(namespace: String) -> Result<Vec<K8sDeployment>, St
         .iter()
         .map(|item| {
             let name = item["metadata"]["name"].as_str().unwrap_or("").to_string();
-            let ns = item["metadata"]["namespace"]
-                .as_str()
-                .unwrap_or("")
-                .to_string();
+            let ns = item["metadata"]["namespace"].as_str().unwrap_or("").to_string();
             let creation = item["metadata"]["creationTimestamp"].as_str().unwrap_or("");
 
             let replicas = item["spec"]["replicas"].as_i64().unwrap_or(0);
@@ -332,15 +303,7 @@ pub async fn k8s_deployments(namespace: String) -> Result<Vec<K8sDeployment>, St
 pub async fn k8s_pod_logs(namespace: String, pod: String, lines: u32) -> Result<String, String> {
     let tail = lines.to_string();
     let output = kubectl_cmd()
-        .args([
-            "logs",
-            "-n",
-            &namespace,
-            &pod,
-            "--tail",
-            &tail,
-            "--timestamps",
-        ])
+        .args(["logs", "-n", &namespace, &pod, "--tail", &tail, "--timestamps"])
         .output()
         .map_err(|e| format!("Failed to get pod logs: {}", e))?;
 
@@ -374,11 +337,7 @@ pub async fn k8s_delete_pod(namespace: String, pod: String) -> Result<String, St
 
 /// Describe a resource (pod, service, deployment, etc.)
 #[tauri::command]
-pub async fn k8s_describe(
-    namespace: String,
-    resource_type: String,
-    name: String,
-) -> Result<String, String> {
+pub async fn k8s_describe(namespace: String, resource_type: String, name: String) -> Result<String, String> {
     let output = kubectl_cmd()
         .args(["describe", &resource_type, "-n", &namespace, &name])
         .output()
@@ -396,21 +355,10 @@ pub async fn k8s_describe(
 
 /// Scale a deployment
 #[tauri::command]
-pub async fn k8s_scale(
-    namespace: String,
-    deployment: String,
-    replicas: u32,
-) -> Result<String, String> {
+pub async fn k8s_scale(namespace: String, deployment: String, replicas: u32) -> Result<String, String> {
     let replicas_str = format!("--replicas={}", replicas);
     let output = kubectl_cmd()
-        .args([
-            "scale",
-            "deployment",
-            &deployment,
-            "-n",
-            &namespace,
-            &replicas_str,
-        ])
+        .args(["scale", "deployment", &deployment, "-n", &namespace, &replicas_str])
         .output()
         .map_err(|e| format!("Failed to scale: {}", e))?;
 
@@ -421,10 +369,7 @@ pub async fn k8s_scale(
         ));
     }
 
-    Ok(format!(
-        "Deployment {} scaled to {} replicas",
-        deployment, replicas
-    ))
+    Ok(format!("Deployment {} scaled to {} replicas", deployment, replicas))
 }
 
 /// Get cluster nodes

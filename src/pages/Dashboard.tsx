@@ -1,11 +1,7 @@
-import React, { useEffect, useCallback } from "react";
-import { ColimaInstance, SystemInfo, dockerApi, volumesApi, networksApi, composeApi, k8sApi, limaApi, kindApi } from "../lib/api";
-import { useAtom } from "jotai";
-import {
-  dashboardCountsAtom, dashboardK8sAtom, dashboardVMsAtom, dashboardLastFetchAtom,
-} from "../store/dashboardAtom";
+import { useState, useEffect, useCallback } from "react";
+import { ColimaInstance, SystemInfo, dockerApi, volumesApi, networksApi, composeApi } from "../lib/api";
 
-type Page = "dashboard" | "instances" | "containers" | "images" | "volumes" | "networks" | "compose" | "kubernetes" | "linux-vms" | "terminal" | "models" | "settings";
+type Page = "dashboard" | "instances" | "containers" | "images" | "volumes" | "networks" | "compose" | "terminal" | "models" | "settings";
 
 interface DashboardProps {
   instances: ColimaInstance[];
@@ -20,20 +16,13 @@ const formatBytes = (bytes: number): string => {
   return `${bytes} B`;
 };
 
-const STALE_MS = 30_000; // 30 seconds
-
 export default function Dashboard({ instances, systemInfo, loading, onNavigate }: DashboardProps) {
   const runningCount = instances.filter((i) => i.status === "Running").length;
   const stoppedCount = instances.filter((i) => i.status !== "Running").length;
   const totalCpus = instances.filter(i => i.status === "Running").reduce((sum, i) => sum + i.cpus, 0);
 
-  const [dockerCountsRaw, setDockerCounts] = useAtom(dashboardCountsAtom);
-  const [k8sStatusRaw, setK8sStatus] = useAtom(dashboardK8sAtom);
-  const [linuxVMs, setLinuxVMs] = useAtom(dashboardVMsAtom);
-  const [lastFetch, setLastFetch] = useAtom(dashboardLastFetchAtom);
-
-  const dockerCounts = dockerCountsRaw ?? { containers: 0, running: 0, images: 0, volumes: 0, networks: 0, composeProjects: 0 };
-  const k8sStatus = k8sStatusRaw ?? { connected: false, pods: 0, namespaces: 0, kindClusters: 0 };
+  // Docker resource counts
+  const [dockerCounts, setDockerCounts] = useState({ containers: 0, running: 0, images: 0, volumes: 0, networks: 0, composeProjects: 0 });
 
   const fetchDockerCounts = useCallback(async () => {
     try {
@@ -53,55 +42,11 @@ export default function Dashboard({ instances, systemInfo, loading, onNavigate }
         composeProjects: compose.status === "fulfilled" ? compose.value.length : 0,
       });
     } catch { /* ignore */ }
-  }, [setDockerCounts]);
-
-  const fetchK8sStatus = useCallback(async () => {
-    try {
-      const [checkResult, kindRaw] = await Promise.allSettled([
-        k8sApi.check(),
-        kindApi.list(),
-      ]);
-      const connected = checkResult.status === "fulfilled";
-      let pods = 0, namespaces = 0;
-      if (connected) {
-        const [nsRaw, podsRaw] = await Promise.allSettled([
-          k8sApi.namespaces(),
-          k8sApi.pods(""),
-        ]);
-        if (nsRaw.status === "fulfilled") {
-          const ns = nsRaw.value;
-          namespaces = Array.isArray(ns) ? ns.length : (typeof ns === "string" ? (ns.match(/"name"/gi) || []).length : 0);
-        }
-        if (podsRaw.status === "fulfilled") {
-          const p = podsRaw.value;
-          pods = Array.isArray(p) ? p.length : (typeof p === "string" ? (p.match(/"name"/gi) || []).length : 0);
-        }
-      }
-      const kindClusters = kindRaw.status === "fulfilled"
-        ? kindRaw.value.trim().split("\n").filter(Boolean).filter(c => c !== "No kind clusters found.").length
-        : 0;
-      setK8sStatus({ connected, pods, namespaces, kindClusters });
-    } catch { setK8sStatus({ connected: false, pods: 0, namespaces: 0, kindClusters: 0 }); }
-  }, [setK8sStatus]);
-
-  const fetchLinuxVMs = useCallback(async () => {
-    try {
-      const vms = await limaApi.list();
-      setLinuxVMs(vms);
-    } catch { setLinuxVMs([]); }
-  }, [setLinuxVMs]);
+  }, []);
 
   useEffect(() => {
-    if (!loading) {
-      const now = Date.now();
-      if (now - lastFetch > STALE_MS) {
-        fetchDockerCounts();
-        fetchK8sStatus();
-        fetchLinuxVMs();
-        setLastFetch(now);
-      }
-    }
-  }, [loading, lastFetch, setLastFetch, fetchDockerCounts, fetchK8sStatus, fetchLinuxVMs]);
+    if (!loading) { fetchDockerCounts(); }
+  }, [loading, fetchDockerCounts]);
 
   if (loading) {
     return (
@@ -177,33 +122,6 @@ export default function Dashboard({ instances, systemInfo, loading, onNavigate }
           </div>
         </div>
 
-        {/* Kubernetes & Infrastructure */}
-        <div className="card" style={{ marginBottom: 24 }}>
-          <h3 style={{ fontSize: "var(--text-lg)", fontWeight: 600, marginBottom: 16 }}>Infrastructure</h3>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 12 }}>
-            <ResourceCard
-              label="Kubernetes"
-              value={k8sStatus.connected ? k8sStatus.pods : 0}
-              sub={k8sStatus.connected ? `${k8sStatus.namespaces} namespaces` : "Disconnected"}
-              color={k8sStatus.connected ? "var(--accent-green)" : "var(--accent-red)"}
-              onClick={() => onNavigate("kubernetes")}
-            />
-            <ResourceCard
-              label="Kind Clusters"
-              value={k8sStatus.kindClusters}
-              color="var(--accent-purple)"
-              onClick={() => onNavigate("instances")}
-            />
-            <ResourceCard
-              label="Linux VMs"
-              value={linuxVMs.length}
-              sub={`${linuxVMs.filter(v => v.status === "Running").length} running`}
-              color="var(--accent-orange)"
-              onClick={() => onNavigate("linux-vms")}
-            />
-          </div>
-        </div>
-
         {/* System Info */}
         {systemInfo && (
           <div className="card" style={{ marginBottom: 24 }}>
@@ -267,7 +185,7 @@ export default function Dashboard({ instances, systemInfo, loading, onNavigate }
   );
 }
 
-const ResourceCard = React.memo(function ResourceCard({ label, value, sub, color, onClick }: { label: string; value: number; sub?: string; color: string; onClick: () => void }) {
+function ResourceCard({ label, value, sub, color, onClick }: { label: string; value: number; sub?: string; color: string; onClick: () => void }) {
   return (
     <div onClick={onClick} style={{
       padding: 14, background: "var(--bg-primary)", borderRadius: 8, cursor: "pointer",
@@ -278,9 +196,9 @@ const ResourceCard = React.memo(function ResourceCard({ label, value, sub, color
       {sub && <div style={{ fontSize: "var(--text-xs)", color: "var(--text-muted)", marginTop: 2 }}>{sub}</div>}
     </div>
   );
-});
+}
 
-const StatusBadge = React.memo(function StatusBadge({ label, installed }: { label: string; installed: boolean }) {
+function StatusBadge({ label, installed }: { label: string; installed: boolean }) {
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
       <span className={`badge ${installed ? "badge-running" : "badge-stopped"}`}>
@@ -290,4 +208,4 @@ const StatusBadge = React.memo(function StatusBadge({ label, installed }: { labe
       <span style={{ fontSize: "var(--text-sm)", color: "var(--text-secondary)" }}>{label}</span>
     </div>
   );
-});
+}

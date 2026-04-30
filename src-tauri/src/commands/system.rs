@@ -1,6 +1,5 @@
 use serde::Serialize;
 use std::process::Command;
-use crate::path_util;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct SystemInfo {
@@ -13,11 +12,8 @@ pub struct SystemInfo {
 }
 
 fn get_version(cmd: &str, args: &[&str]) -> Option<String> {
-    let resolved = path_util::resolve_binary(cmd);
-    let mut command = Command::new(&resolved);
-    command.args(args);
-    path_util::apply_path_to_cmd(&mut command);
-    command
+    Command::new(cmd)
+        .args(args)
         .output()
         .ok()
         .filter(|o| o.status.success())
@@ -50,20 +46,4 @@ pub async fn get_colima_version() -> Result<String, String> {
         .map_err(|e| format!("Failed to get colima version: {}", e))?;
 
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
-}
-
-/// Check if an optional tool is installed
-#[tauri::command]
-pub async fn check_tool(name: String) -> Result<serde_json::Value, String> {
-    let allowed = ["kubectl", "kind", "helm", "krunkit", "nerdctl"];
-    if !allowed.contains(&name.as_str()) {
-        return Err(format!("Unknown tool: {}", name));
-    }
-    // Try "version" first, then "--version"
-    let version = get_version(&name, &["version"])
-        .or_else(|| get_version(&name, &["--version"]));
-    Ok(serde_json::json!({
-        "installed": version.is_some(),
-        "version": version.unwrap_or_default()
-    }))
 }

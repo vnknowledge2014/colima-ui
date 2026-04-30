@@ -1,4 +1,5 @@
 use serde::Serialize;
+use std::process::Command;
 use std::sync::Arc;
 use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager};
@@ -41,30 +42,40 @@ pub fn start_instance_poller(app: &AppHandle) {
         loop {
             tick.tick().await;
 
-            // Use the fast filesystem reader (shared with Tauri command and API server)
-            let result =
-                tokio::task::spawn_blocking(|| crate::instance_reader::list_instances_fast()).await;
+            // Run colima list --json
+            let result = tokio::task::spawn_blocking(|| {
+                Command::new("colima")
+                    .args(["list", "--json"])
+                    .output()
+            })
+            .await;
 
-            if let Ok(parsed) = result {
-                // Update shared state
-                {
-                    let mut guard = instances.lock().await;
-                    *guard = parsed.clone();
-                }
+            if let Ok(Ok(output)) = result {
+                if output.status.success() {
+                    let stdout = String::from_utf8_lossy(&output.stdout);
+                    let parsed: Vec<ColimaInstance> = stdout
+                        .lines()
+                        .filter(|l| !l.trim().is_empty())
+                        .filter_map(|l| serde_json::from_str(l).ok())
+                        .collect();
 
-                let ts = std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_secs();
+                    // Update shared state
+                    {
+                        let mut guard = instances.lock().await;
+                        *guard = parsed.clone();
+                    }
 
-                // Emit event to frontend
-                let _ = handle.emit(
-                    "instances-update",
-                    InstancesUpdate {
+                    let ts = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_secs();
+
+                    // Emit event to frontend
+                    let _ = handle.emit("instances-update", InstancesUpdate {
                         instances: parsed,
                         timestamp: ts,
-                    },
-                );
+                    });
+                }
             }
         }
     });

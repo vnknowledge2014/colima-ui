@@ -70,120 +70,115 @@ fn colima_cmd() -> Command {
 }
 
 /// List all Colima instances
-/// Uses the fast filesystem reader (shared with API server) for consistency.
 #[tauri::command]
 pub async fn list_instances() -> Result<Vec<ColimaInstance>, String> {
-    Ok(crate::instance_reader::list_instances_fast())
+    let output = colima_cmd()
+        .args(["list", "--json"])
+        .output()
+        .map_err(|e| format!("Failed to execute colima: {}", e))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        // No instances = empty list, not an error
+        if stderr.contains("no instance found") || stderr.contains("no instances") {
+            return Ok(vec![]);
+        }
+        return Err(format!("colima list failed: {}", stderr));
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    if stdout.trim().is_empty() {
+        return Ok(vec![]);
+    }
+
+    // Colima outputs JSON lines (one JSON object per line)
+    let instances: Vec<ColimaInstance> = stdout
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .filter_map(|line| serde_json::from_str(line).ok())
+        .collect();
+
+    Ok(instances)
 }
 
 /// Start a Colima instance with given configuration
 #[tauri::command]
 pub async fn start_instance(config: StartConfig) -> Result<String, String> {
-    // `colima start` blocks for 60-120s — run on thread pool to avoid starving tokio
-    tokio::task::spawn_blocking(move || {
-        let mut args = vec!["start".to_string()];
+    let mut args = vec!["start".to_string()];
 
-        if config.profile != "default" && !config.profile.is_empty() {
-            args.push("--profile".to_string());
-            args.push(config.profile.clone());
+    if config.profile != "default" && !config.profile.is_empty() {
+        args.push("--profile".to_string());
+        args.push(config.profile.clone());
+    }
+
+    args.push("--runtime".to_string());
+    args.push(config.runtime);
+
+    args.push("--cpu".to_string());
+    args.push(config.cpus.to_string());
+
+    args.push("--memory".to_string());
+    args.push(config.memory.to_string());
+
+    args.push("--disk".to_string());
+    args.push(config.disk.to_string());
+
+    if !config.vm_type.is_empty() {
+        args.push("--vm-type".to_string());
+        args.push(config.vm_type);
+    }
+
+    if !config.arch.is_empty() {
+        args.push("--arch".to_string());
+        args.push(config.arch);
+    }
+
+    if !config.mount_type.is_empty() {
+        args.push("--mount-type".to_string());
+        args.push(config.mount_type);
+    }
+
+    for mount in &config.mounts {
+        args.push("--mount".to_string());
+        args.push(mount.clone());
+    }
+
+    for dns in &config.dns {
+        args.push("--dns".to_string());
+        args.push(dns.clone());
+    }
+
+    if config.network_address {
+        args.push("--network-address".to_string());
+    }
+
+    if config.kubernetes {
+        args.push("--kubernetes".to_string());
+        if !config.kubernetes_version.is_empty() {
+            args.push("--kubernetes-version".to_string());
+            args.push(config.kubernetes_version);
         }
+    }
 
-        args.push("--runtime".to_string());
-        args.push(config.runtime);
+    let args_ref: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
+    let output = colima_cmd()
+        .args(&args_ref)
+        .output()
+        .map_err(|e| format!("Failed to start colima: {}", e))?;
 
-        args.push("--cpu".to_string());
-        args.push(config.cpus.to_string());
+    if !output.status.success() {
+        return Err(format!(
+            "colima start failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        ));
+    }
 
-        args.push("--memory".to_string());
-        args.push(config.memory.to_string());
-
-        args.push("--disk".to_string());
-        args.push(config.disk.to_string());
-
-        if !config.vm_type.is_empty() {
-            args.push("--vm-type".to_string());
-            args.push(config.vm_type);
-        }
-
-        if !config.arch.is_empty() {
-            args.push("--arch".to_string());
-            args.push(config.arch);
-        }
-
-        if !config.mount_type.is_empty() {
-            args.push("--mount-type".to_string());
-            args.push(config.mount_type);
-        }
-
-        for mount in &config.mounts {
-            args.push("--mount".to_string());
-            args.push(mount.clone());
-        }
-
-        for dns in &config.dns {
-            args.push("--dns".to_string());
-            args.push(dns.clone());
-        }
-
-        if config.network_address {
-            args.push("--network-address".to_string());
-        }
-
-        if config.kubernetes {
-            args.push("--kubernetes".to_string());
-            if !config.kubernetes_version.is_empty() {
-                args.push("--kubernetes-version".to_string());
-                args.push(config.kubernetes_version);
-            }
-        }
-
-        let args_ref: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
-        let output = colima_cmd()
-            .args(&args_ref)
-            .output()
-            .map_err(|e| format!("Failed to start colima: {}", e))?;
-
-        if !output.status.success() {
-            return Err(format!(
-                "colima start failed: {}",
-                String::from_utf8_lossy(&output.stderr)
-            ));
-        }
-
-        Ok(format!(
-            "Instance '{}' started successfully",
-            config.profile
-        ))
-    })
-    .await
-    .map_err(|e| format!("Task join error: {}", e))?
+    Ok(format!("Instance '{}' started successfully", config.profile))
 }
 
 /// Stop a Colima instance
 #[tauri::command]
-pub async fn stop_instance(
-    app: tauri::AppHandle,
-    docker_state: tauri::State<'_, std::sync::Arc<tokio::sync::RwLock<crate::docker_state::DockerState>>>,
-    profile: String,
-    force: bool,
-) -> Result<String, String> {
-    // Proactively clear Docker state BEFORE stopping — user may navigate to Docker
-    // tabs while colima stop is still running (fire-and-forget pattern in the UI).
-    // If we clear after, Bollard queries succeed during the shutdown window.
-    {
-        let mut lock = docker_state.write().await;
-        lock.docker = None;
-        lock.containers_cache = vec![];
-        lock.images_cache = vec![];
-        lock.suppressed = true;
-    }
-    use tauri::Emitter;
-    let _ = app.emit("docker-connection-lost", serde_json::json!({}));
-    let _ = app.emit("docker-state-updated", serde_json::json!({
-        "containers": [],
-        "images": []
-    }));
-
+pub async fn stop_instance(profile: String, force: bool) -> Result<String, String> {
     let mut args = vec!["stop"];
 
     let profile_flag;
@@ -214,26 +209,7 @@ pub async fn stop_instance(
 
 /// Delete a Colima instance
 #[tauri::command]
-pub async fn delete_instance(
-    app: tauri::AppHandle,
-    docker_state: tauri::State<'_, std::sync::Arc<tokio::sync::RwLock<crate::docker_state::DockerState>>>,
-    profile: String,
-    force: bool,
-) -> Result<String, String> {
-    {
-        let mut lock = docker_state.write().await;
-        lock.docker = None;
-        lock.containers_cache = vec![];
-        lock.images_cache = vec![];
-        lock.suppressed = true;
-    }
-    use tauri::Emitter;
-    let _ = app.emit("docker-connection-lost", serde_json::json!({}));
-    let _ = app.emit("docker-state-updated", serde_json::json!({
-        "containers": [],
-        "images": []
-    }));
-
+pub async fn delete_instance(profile: String, force: bool) -> Result<String, String> {
     let mut args = vec!["delete"];
 
     let profile_flag;
@@ -327,120 +303,12 @@ pub async fn kubernetes_action(profile: String, action: String) -> Result<String
         .map_err(|e| format!("Failed to execute kubernetes {}: {}", action, e))?;
 
     if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-        // Treat "not enabled" / "not running" as success for delete/stop
-        if (action == "delete" || action == "stop")
-            && (stderr.contains("not enabled") || stderr.contains("not running"))
-        {
-            return Ok(format!(
-                "Kubernetes {} completed (already disabled)",
-                action
-            ));
-        }
-        return Err(format!("kubernetes {} failed: {}", action, stderr));
+        return Err(format!(
+            "kubernetes {} failed: {}",
+            action,
+            String::from_utf8_lossy(&output.stderr)
+        ));
     }
 
     Ok(format!("Kubernetes {} completed", action))
-}
-
-// ===== Diagnostic Log Collection for AI Agent =====
-// Reads Colima/Lima log files, checks for zombie processes,
-// and inspects lock/pid/socket files to enable deep diagnostics.
-
-#[tauri::command]
-pub async fn collect_diagnostic_logs(profile: String) -> Result<String, String> {
-    tokio::task::spawn_blocking(move || {
-        let home = std::env::var("HOME").unwrap_or_else(|_| "/Users/unknown".to_string());
-        let profile_dir = if profile.is_empty() || profile == "default" {
-            "colima".to_string()
-        } else {
-            format!("colima-{}", profile)
-        };
-        let lima_dir = format!("{}/.colima/_lima/{}", home, profile_dir);
-        let mut report = String::new();
-
-        // Section 1: Lima VM log files
-        report.push_str("## Lima VM Logs\n\n");
-        for log_file in &["ha.stderr.log", "ha.stdout.log", "serial.log", "serialv.log"] {
-            let path = format!("{}/{}", lima_dir, log_file);
-            match std::fs::read_to_string(&path) {
-                Ok(content) => {
-                    // Take last 30 lines (most recent errors)
-                    let lines: Vec<&str> = content.lines().collect();
-                    let start = lines.len().saturating_sub(30);
-                    let tail: String = lines[start..].join("\n");
-                    if !tail.trim().is_empty() {
-                        report.push_str(&format!("### {}\n```\n{}\n```\n\n", log_file, tail));
-                    }
-                }
-                Err(_) => {}
-            }
-        }
-
-        // Section 2: Check for zombie/stale processes
-        report.push_str("## Running Processes\n\n");
-        if let Ok(output) = std::process::Command::new("ps")
-            .args(["aux"])
-            .output()
-        {
-            let ps_output = String::from_utf8_lossy(&output.stdout);
-            let relevant: Vec<&str> = ps_output
-                .lines()
-                .filter(|line| {
-                    (line.contains("lima") || line.contains("colima") || line.contains("qemu") || line.contains("vz"))
-                        && !line.contains("grep")
-                        && !line.contains("ColimaUI")
-                })
-                .collect();
-            if relevant.is_empty() {
-                report.push_str("No Colima/Lima processes running.\n\n");
-            } else {
-                report.push_str(&format!("```\n{}\n```\n\n", relevant.join("\n")));
-            }
-        }
-
-        // Section 3: Check for lock/pid/socket files
-        report.push_str("## Lock/PID/Socket Files\n\n");
-        if let Ok(entries) = std::fs::read_dir(&lima_dir) {
-            let lock_files: Vec<String> = entries
-                .filter_map(|e| e.ok())
-                .filter(|e| {
-                    let name = e.file_name().to_string_lossy().to_string();
-                    name.ends_with(".pid") || name.ends_with(".sock") || name.ends_with(".lock")
-                })
-                .map(|e| {
-                    let name = e.file_name().to_string_lossy().to_string();
-                    let meta = e.metadata().ok();
-                    let size = meta.as_ref().map(|m| m.len()).unwrap_or(0);
-                    // For .pid files, read the content (it's a process ID)
-                    let content = if name.ends_with(".pid") {
-                        std::fs::read_to_string(e.path()).unwrap_or_default().trim().to_string()
-                    } else {
-                        String::new()
-                    };
-                    if content.is_empty() {
-                        format!("  {} ({}B)", name, size)
-                    } else {
-                        format!("  {} (PID: {})", name, content)
-                    }
-                })
-                .collect();
-            if lock_files.is_empty() {
-                report.push_str("No lock/pid/socket files found.\n\n");
-            } else {
-                report.push_str(&format!("{}\n\n", lock_files.join("\n")));
-            }
-        }
-
-        // Section 4: Colima version info
-        report.push_str("## System Info\n\n");
-        if let Ok(output) = std::process::Command::new("colima").args(["version"]).output() {
-            let ver = String::from_utf8_lossy(&output.stdout);
-            report.push_str(&format!("```\n{}\n```\n", ver.trim()));
-        }
-
-        Ok(report)
-    })
-    .await
-    .map_err(|e| format!("Task join error: {}", e))?
 }

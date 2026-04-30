@@ -1,25 +1,20 @@
 import { useState, useEffect, useCallback } from "react";
 import { limaApi, LimaInstance } from "../lib/api";
-import { globalToast } from "../lib/globalToast";
-import { ConfirmDialog, useConfirm } from "../components/ConfirmDialog";
-import { StopIcon, PlayIcon, TrashIcon, CloseIcon, CheckIcon, ErrorIcon, WarningIcon, StatusDot } from "../components/Icons";
 
 export default function LinuxVMs() {
   const [vms, setVMs] = useState<LimaInstance[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [notification] = useState<{ type: "success" | "error"; text: string } | null>(null);
+  const [notification, setNotification] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [selectedVM, setSelectedVM] = useState<LimaInstance | null>(null);
   const [shellCmd, setShellCmd] = useState("");
   const [shellOutput, setShellOutput] = useState("");
-  const [shellCwd, setShellCwd] = useState("/");
-  const { confirm, ConfirmDialogProps } = useConfirm();
 
-  // Create VM state
-  const [showCreate, setShowCreate] = useState(false);
-  const [templates, setTemplates] = useState<string[]>([]);
-  const [newVM, setNewVM] = useState({ name: "", cpus: 2, memory: 2, disk: 60, template: "" });
+  const notify = useCallback((type: "success" | "error", text: string) => {
+    setNotification({ type, text });
+    setTimeout(() => setNotification(null), 4000);
+  }, []);
 
   const fetchVMs = useCallback(async () => {
     try {
@@ -35,72 +30,30 @@ export default function LinuxVMs() {
 
   useEffect(() => {
     fetchVMs();
-    // Only poll when page is visible to reduce CPU background usage
-    const interval = setInterval(() => {
-      if (document.visibilityState === "visible") fetchVMs();
-    }, 15000);
+    const interval = setInterval(fetchVMs, 8000);
     return () => clearInterval(interval);
   }, [fetchVMs]);
-
-  // Load templates when create modal opens
-  useEffect(() => {
-    if (showCreate && templates.length === 0) {
-      limaApi.templates().then(raw => {
-        try {
-          const lines = raw.split("\n").map(l => l.trim()).filter(l => l && !l.startsWith("-"));
-          setTemplates(lines.length > 0 ? lines : ["default", "docker", "ubuntu", "fedora", "alpine", "debian"]);
-        } catch {
-          setTemplates(["default", "docker", "ubuntu", "fedora", "alpine", "debian"]);
-        }
-      }).catch(() => {
-        setTemplates(["default", "docker", "ubuntu", "fedora", "alpine", "debian"]);
-      });
-    }
-  }, [showCreate, templates.length]);
-
-  const handleCreate = async () => {
-    if (!newVM.name.trim()) return;
-    const name = newVM.name.trim().toLowerCase();
-    // Fire-and-forget: close dialog immediately
-    globalToast("success", `Creating VM '${name}'... This may take a few minutes.`);
-    setShowCreate(false);
-    setNewVM({ name: "", cpus: 2, memory: 2, disk: 60, template: "" });
-    limaApi.create({
-      name,
-      cpus: newVM.cpus,
-      memory: newVM.memory,
-      disk: newVM.disk,
-      template: newVM.template || undefined,
-    })
-      .then(() => { globalToast("success", `VM '${name}' created successfully`); setTimeout(fetchVMs, 2000); })
-      .catch((e) => globalToast("error", `Failed to create VM: ${e}`));
-  };
 
   const handleAction = async (name: string, action: "start" | "stop" | "delete") => {
     setActionLoading(`${name}-${action}`);
     try {
       if (action === "start") {
-        globalToast("success", `Starting VM '${name}'...`);
-        limaApi.start(name)
-          .then(() => { globalToast("success", `VM '${name}' started`); setTimeout(fetchVMs, 1000); })
-          .catch((e) => globalToast("error", String(e)))
-          .finally(() => setActionLoading(null));
-        return;
+        await limaApi.start(name);
+        notify("success", `VM '${name}' starting...`);
       } else if (action === "stop") {
         await limaApi.stop(name);
-        globalToast("success", `VM '${name}' stopped`);
+        notify("success", `VM '${name}' stopped`);
       } else {
-        const ok = await confirm({ title: "Delete VM", message: `Delete VM '${name}'? This cannot be undone.`, confirmText: "Delete", variant: "danger" });
-        if (!ok) {
+        if (!confirm(`Delete VM '${name}'? This cannot be undone.`)) {
           setActionLoading(null);
           return;
         }
         await limaApi.delete(name, true);
-        globalToast("success", `VM '${name}' deleted`);
+        notify("success", `VM '${name}' deleted`);
       }
       setTimeout(fetchVMs, 1000);
     } catch (e) {
-      globalToast("error", String(e));
+      notify("error", String(e));
     } finally {
       setActionLoading(null);
     }
@@ -108,43 +61,12 @@ export default function LinuxVMs() {
 
   const runShell = async () => {
     if (!selectedVM || !shellCmd.trim()) return;
-    const cmd = shellCmd.trim();
-
-    // Handle cd commands locally by tracking CWD
-    if (cmd === "cd" || cmd === "cd ~" || cmd === "cd ~/") {
-      setShellOutput(prev => prev + `${selectedVM.name}:${shellCwd}$ ${cmd}\n`);
-      setShellCwd("/");
-      setShellCmd("");
-      return;
-    }
-    if (cmd.startsWith("cd ")) {
-      const target = cmd.slice(3).trim();
-      // Resolve the new path using shell and pwd
-      try {
-        const cwdCmd = `cd ${shellCwd} && cd ${target} && pwd`;
-        const newPath = await limaApi.shell(selectedVM.name, cwdCmd);
-        const resolved = newPath.trim();
-        if (resolved) {
-          setShellOutput(prev => prev + `${selectedVM.name}:${shellCwd}$ ${cmd}\n`);
-          setShellCwd(resolved);
-        } else {
-          setShellOutput(prev => prev + `${selectedVM.name}:${shellCwd}$ ${cmd}\ncd: no such directory: ${target}\n`);
-        }
-      } catch (e) {
-        setShellOutput(prev => prev + `${selectedVM.name}:${shellCwd}$ ${cmd}\n${e}\n`);
-      }
-      setShellCmd("");
-      return;
-    }
-
-    // For all other commands, prepend cd to tracked CWD
-    const fullCmd = `cd ${shellCwd} && ${cmd}`;
     try {
-      const output = await limaApi.shell(selectedVM.name, fullCmd);
-      setShellOutput(prev => prev + `${selectedVM.name}:${shellCwd}$ ${cmd}\n${output}\n`);
+      const output = await limaApi.shell(selectedVM.name, shellCmd);
+      setShellOutput(prev => prev + `$ ${shellCmd}\n${output}\n`);
       setShellCmd("");
     } catch (e) {
-      setShellOutput(prev => prev + `${selectedVM.name}:${shellCwd}$ ${cmd}\nError: ${e}\n`);
+      setShellOutput(prev => prev + `$ ${shellCmd}\nError: ${e}\n`);
       setShellCmd("");
     }
   };
@@ -173,14 +95,11 @@ export default function LinuxVMs() {
             {vms.length} VM{vms.length !== 1 ? "s" : ""}
           </span>
         </h1>
-        <div className="content-header-actions" style={{ display: "flex", gap: 8 }}>
+        <div className="content-header-actions">
           <button className="btn btn-ghost" onClick={fetchVMs}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.3"/>
             </svg>
-          </button>
-          <button className="btn btn-primary" onClick={() => setShowCreate(true)}>
-            + New VM
           </button>
         </div>
       </div>
@@ -188,21 +107,20 @@ export default function LinuxVMs() {
       <div className="content-body">
         {notification && (
           <div style={{
-            position: "fixed", top: 16, right: 16, padding: "12px 20px",
+            position: "fixed", top: 16, right: 16, padding: "10px 16px",
             borderRadius: "var(--radius-md)",
-            background: notification.type === "success" ? "#1a2e1a" : "#2e1a1a",
+            background: notification.type === "success" ? "rgba(63,185,80,0.15)" : "rgba(248,81,73,0.15)",
             border: `1px solid ${notification.type === "success" ? "var(--accent-green)" : "var(--accent-red)"}`,
             color: notification.type === "success" ? "var(--accent-green)" : "var(--accent-red)",
-            fontSize: "var(--text-sm)", fontWeight: 500, zIndex: 9999, boxShadow: "0 8px 32px rgba(0,0,0,0.6)",
-            backdropFilter: "blur(12px)", display: "flex", alignItems: "center", gap: 8, maxWidth: 420,
+            fontSize: "var(--text-sm)", zIndex: 200, boxShadow: "var(--shadow-lg)",
           }}>
-            {notification.type === "success" ? <CheckIcon size={14} /> : <ErrorIcon size={14} />} {notification.text}
+            {notification.type === "success" ? "✓" : "✕"} {notification.text}
           </div>
         )}
 
         {error && (
           <div className="card" style={{ borderColor: "var(--accent-yellow)", marginBottom: 16 }}>
-            <p style={{ color: "var(--accent-yellow)", fontSize: "var(--text-sm)", display: "flex", alignItems: "center", gap: 6 }}><WarningIcon size={14} /> {error}</p>
+            <p style={{ color: "var(--accent-yellow)", fontSize: "var(--text-sm)" }}>⚠ {error}</p>
           </div>
         )}
 
@@ -212,7 +130,7 @@ export default function LinuxVMs() {
               const isLoading = actionLoading?.startsWith(vm.name);
               const isRunning = vm.status === "Running";
               return (
-                <div key={vm.name} onClick={() => { setSelectedVM(vm); setShellOutput(""); setShellCwd("/"); }} style={{
+                <div key={vm.name} onClick={() => { setSelectedVM(vm); setShellOutput(""); }} style={{
                   padding: 16, background: "var(--bg-secondary)", borderRadius: 12,
                   border: "1px solid var(--border-primary)", cursor: "pointer",
                   opacity: isLoading ? 0.6 : 1, transition: "all 200ms",
@@ -225,7 +143,7 @@ export default function LinuxVMs() {
                         </svg>
                         <span style={{ fontWeight: 600, fontSize: "var(--text-md)" }}>{vm.name}</span>
                         <span style={{ color: statusColor(vm.status), fontWeight: 500, fontSize: "var(--text-xs)" }}>
-                          <StatusDot size={8} color={statusColor(vm.status)} style={{ display: "inline-block", verticalAlign: "middle" }} /> {vm.status}
+                          ● {vm.status}
                         </span>
                       </div>
                       <div style={{ display: "flex", gap: 16, marginTop: 4, fontSize: "var(--text-xs)", color: "var(--text-muted)", fontFamily: "var(--font-mono)" }}>
@@ -238,13 +156,13 @@ export default function LinuxVMs() {
                     <div style={{ display: "flex", gap: 6 }} onClick={e => e.stopPropagation()}>
                       {isRunning ? (
                         <button className="btn btn-ghost" style={{ fontSize: "var(--text-xs)" }}
-                          disabled={!!isLoading} onClick={() => handleAction(vm.name, "stop")}><StopIcon size={12} /> Stop</button>
+                          disabled={!!isLoading} onClick={() => handleAction(vm.name, "stop")}>⏹ Stop</button>
                       ) : (
                         <button className="btn btn-ghost" style={{ fontSize: "var(--text-xs)", color: "var(--accent-green)" }}
-                          disabled={!!isLoading} onClick={() => handleAction(vm.name, "start")}><PlayIcon size={12} /> Start</button>
+                          disabled={!!isLoading} onClick={() => handleAction(vm.name, "start")}>▶ Start</button>
                       )}
                       <button className="btn btn-ghost" style={{ fontSize: "var(--text-xs)", color: "var(--accent-red)" }}
-                        disabled={!!isLoading} onClick={() => handleAction(vm.name, "delete")}><TrashIcon size={12} /></button>
+                        disabled={!!isLoading} onClick={() => handleAction(vm.name, "delete")}>🗑</button>
                     </div>
                   </div>
                 </div>
@@ -259,8 +177,7 @@ export default function LinuxVMs() {
               </svg>
             </div>
             <div className="empty-state-title">No Linux VMs</div>
-            <div className="empty-state-text">Create a Linux VM to get started.</div>
-            <button className="btn btn-primary" onClick={() => setShowCreate(true)}>+ New VM</button>
+            <div className="empty-state-text">Lima VMs will appear here. Create one with <code>limactl start</code>.</div>
           </div>
         )}
       </div>
@@ -273,10 +190,10 @@ export default function LinuxVMs() {
               <h2 className="modal-title">
                 {selectedVM.name}
                 <span style={{ color: statusColor(selectedVM.status), fontSize: "var(--text-sm)", marginLeft: 8 }}>
-                  <StatusDot size={8} color={statusColor(selectedVM.status)} style={{ display: "inline-block", verticalAlign: "middle" }} /> {selectedVM.status}
+                  ● {selectedVM.status}
                 </span>
               </h2>
-              <button className="btn btn-icon btn-ghost" onClick={() => setSelectedVM(null)}><CloseIcon size={16} /></button>
+              <button className="btn btn-icon btn-ghost" onClick={() => setSelectedVM(null)}>✕</button>
             </div>
 
             <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 8, marginBottom: 16 }}>
@@ -307,12 +224,12 @@ export default function LinuxVMs() {
                   minHeight: 120, maxHeight: 300, overflow: "auto", whiteSpace: "pre-wrap",
                   color: "var(--text-secondary)",
                 }}>
-                  {shellOutput || `Run commands inside '${selectedVM.name}' VM...`}
+                  {shellOutput || "Run commands inside the VM..."}
                 </div>
                 <div style={{ display: "flex", gap: 8 }}>
                   <input type="text" value={shellCmd} onChange={e => setShellCmd(e.target.value)}
                     onKeyDown={e => e.key === "Enter" && runShell()}
-                    placeholder={`${selectedVM.name}:${shellCwd}$ Enter command...`}
+                    placeholder="Enter command..."
                     style={{
                       flex: 1, padding: "8px 12px", background: "var(--bg-primary)",
                       border: "1px solid var(--border-primary)", borderRadius: 6,
@@ -325,66 +242,6 @@ export default function LinuxVMs() {
 
             <div className="modal-footer">
               <button className="btn btn-primary" onClick={() => setSelectedVM(null)}>Close</button>
-            </div>
-          </div>
-        </div>
-      )}
-      <ConfirmDialog {...ConfirmDialogProps} />
-
-      {/* Create VM Modal */}
-      {showCreate && (
-        <div className="modal-overlay" onClick={() => setShowCreate(false)}>
-          <div className="modal" onClick={e => e.stopPropagation()} style={{ width: "min(560px, 95vw)" }}>
-            <div className="modal-header">
-              <h2 className="modal-title">Create VM</h2>
-              <button className="btn btn-icon btn-ghost" onClick={() => setShowCreate(false)}><CloseIcon size={16} /></button>
-            </div>
-
-            <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-              <div>
-                <label className="form-label">VM Name</label>
-                <input type="text" value={newVM.name} onChange={e => setNewVM({ ...newVM, name: e.target.value })}
-                  placeholder="my-vm"
-                  style={{ width: "100%", padding: "8px 12px", background: "var(--bg-primary)", border: "1px solid var(--border-primary)", borderRadius: 6, color: "var(--text-primary)", fontSize: "var(--text-sm)" }} />
-              </div>
-
-              <div>
-                <label className="form-label">Template</label>
-                <select value={newVM.template} onChange={e => setNewVM({ ...newVM, template: e.target.value })}
-                  style={{ width: "100%", padding: "8px 12px", background: "var(--bg-primary)", border: "1px solid var(--border-primary)", borderRadius: 6, color: "var(--text-primary)", fontSize: "var(--text-sm)" }}>
-                  <option value="">Default (Ubuntu)</option>
-                  {templates.map(t => <option key={t} value={t}>{t}</option>)}
-                </select>
-              </div>
-
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12 }}>
-                <div>
-                  <label className="form-label">CPUs</label>
-                  <input type="number" min={1} max={16} value={newVM.cpus}
-                    onChange={e => setNewVM({ ...newVM, cpus: parseInt(e.target.value) || 1 })}
-                    style={{ width: "100%", padding: "8px 12px", background: "var(--bg-primary)", border: "1px solid var(--border-primary)", borderRadius: 6, color: "var(--text-primary)", fontSize: "var(--text-sm)" }} />
-                </div>
-                <div>
-                  <label className="form-label">Memory (GiB)</label>
-                  <input type="number" min={1} max={64} value={newVM.memory}
-                    onChange={e => setNewVM({ ...newVM, memory: parseInt(e.target.value) || 1 })}
-                    style={{ width: "100%", padding: "8px 12px", background: "var(--bg-primary)", border: "1px solid var(--border-primary)", borderRadius: 6, color: "var(--text-primary)", fontSize: "var(--text-sm)" }} />
-                </div>
-                <div>
-                  <label className="form-label">Disk (GiB)</label>
-                  <input type="number" min={10} max={500} value={newVM.disk}
-                    onChange={e => setNewVM({ ...newVM, disk: parseInt(e.target.value) || 10 })}
-                    style={{ width: "100%", padding: "8px 12px", background: "var(--bg-primary)", border: "1px solid var(--border-primary)", borderRadius: 6, color: "var(--text-primary)", fontSize: "var(--text-sm)" }} />
-                </div>
-              </div>
-            </div>
-
-            <div className="modal-footer">
-              <button className="btn btn-ghost" onClick={() => setShowCreate(false)}>Cancel</button>
-              <button className="btn btn-primary" onClick={handleCreate}
-                disabled={!newVM.name.trim()}>
-                Create & Start
-              </button>
             </div>
           </div>
         </div>

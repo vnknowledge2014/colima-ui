@@ -41,10 +41,7 @@ async function call<T>(
   if (isTauri()) {
     const invoke = await getInvoke();
     if (invoke) {
-      // Tauri invoke available — call the command directly.
-      // Let errors propagate (e.g. "Docker not available").
-      // Only fall through to HTTP if invoke itself is not available.
-      return await (invoke(tauriCmd, tauriArgs) as Promise<T>);
+      return invoke(tauriCmd, tauriArgs) as Promise<T>;
     }
   }
 
@@ -198,23 +195,8 @@ export const colimaApi = {
 // ===== Docker API =====
 
 export const dockerApi = {
-  listContainers: async (all = true): Promise<DockerContainer[]> => {
-    const raw = await call<any>("list_containers", { all }, "GET", "/api/containers", { all: String(all) });
-    if (!raw) return [];
-    const items = Array.isArray(raw) ? raw : [];
-    // Normalize field names for Tauri IPC compatibility
-    return items.map((v: any) => ({
-      Id: v.Id || v.id || v.ID || "",
-      Names: v.Names || v.names || "",
-      Image: v.Image || v.image || "",
-      Status: v.Status || v.status || "",
-      State: v.State || v.state || "",
-      Ports: v.Ports || v.ports || "",
-      CreatedAt: v.CreatedAt || v.created_at || v.createdAt || "",
-      Size: v.Size || v.size || "",
-      Command: v.Command || v.command || "",
-    }));
-  },
+  listContainers: (all = true) =>
+    call<DockerContainer[]>("list_containers", { all }, "GET", "/api/containers", { all: String(all) }),
 
   startContainer: (containerId: string) =>
     call<string>("start_container", { containerId }, "POST", "/api/containers/start", { containerId }),
@@ -231,18 +213,8 @@ export const dockerApi = {
   containerLogs: (containerId: string, lines = 200) =>
     call<string>("container_logs", { containerId, lines }, "GET", "/api/containers/logs", { containerId, lines: String(lines) }),
 
-  listImages: async (): Promise<DockerImage[]> => {
-    const raw = await call<any>("list_images", undefined, "GET", "/api/images");
-    if (!raw) return [];
-    const items = Array.isArray(raw) ? raw : [];
-    return items.map((v: any) => ({
-      Id: v.Id || v.id || v.ID || "",
-      Repository: v.Repository || v.repository || "",
-      Tag: v.Tag || v.tag || "",
-      Size: v.Size || v.size || "",
-      CreatedAt: v.CreatedAt || v.created_at || v.createdAt || "",
-    }));
-  },
+  listImages: () =>
+    call<DockerImage[]>("list_images", undefined, "GET", "/api/images"),
 
   inspectContainer: (containerId: string) =>
     call<string>("inspect_container", { containerId }, "GET", "/api/containers/inspect", { containerId }),
@@ -296,18 +268,8 @@ export const dockerApi = {
 // ===== Volumes API =====
 
 export const volumesApi = {
-  listVolumes: async (): Promise<DockerVolume[]> => {
-    const raw = await call<any>("list_volumes", undefined, "GET", "/api/volumes");
-    if (!raw) return [];
-    const items = Array.isArray(raw) ? raw : [];
-    return items.map((v: any) => ({
-      Name: v.Name || v.name || "",
-      Driver: v.Driver || v.driver || "",
-      Mountpoint: v.Mountpoint || v.mountpoint || v.mount_point || "",
-      Scope: v.Scope || v.scope || "",
-      Labels: v.Labels || v.labels || "",
-    }));
-  },
+  listVolumes: () =>
+    call<DockerVolume[]>("list_volumes", undefined, "GET", "/api/volumes"),
 
   createVolume: (name: string, driver = "local") =>
     call<string>("create_volume", { name, driver }, "POST", "/api/volumes/create", undefined, { name, driver }),
@@ -325,21 +287,8 @@ export const volumesApi = {
 // ===== Networks API =====
 
 export const networksApi = {
-  listNetworks: async (): Promise<DockerNetwork[]> => {
-    const raw = await call<any>("list_networks", undefined, "GET", "/api/networks");
-    if (!raw) return [];
-    const items = Array.isArray(raw) ? raw : [];
-    // Normalize field names for Tauri IPC compatibility
-    return items.map((v: any) => ({
-      Id: v.Id || v.id || v.ID || "",
-      Name: v.Name || v.name || "",
-      Driver: v.Driver || v.driver || "",
-      Scope: v.Scope || v.scope || "",
-      Ipv6: v.Ipv6 || v.ipv6 || v.IPv6 || "",
-      Internal: v.Internal || v.internal || "",
-      Labels: v.Labels || v.labels || "",
-    }));
-  },
+  listNetworks: () =>
+    call<DockerNetwork[]>("list_networks", undefined, "GET", "/api/networks"),
 
   createNetwork: (name: string, driver = "bridge", subnet = "") =>
     call<string>("create_network", { name, driver, subnet }, "POST", "/api/networks/create", undefined, { name, driver, subnet }),
@@ -356,14 +305,6 @@ export const networksApi = {
 
 // ===== System API =====
 
-export interface PlatformInfo {
-  os: "macos" | "linux" | "windows";
-  arch: string;
-  wsl: boolean;
-  wsl_available: boolean;
-  package_managers: Array<{ name: string; available: boolean; version: string }>;
-}
-
 export const systemApi = {
   checkSystem: () =>
     call<SystemInfo>("check_system", undefined, "GET", "/api/system/check"),
@@ -373,30 +314,6 @@ export const systemApi = {
     call<string>("system_prune", { all }, "POST", "/api/system/prune", { all: String(all) }),
   systemDf: () =>
     call<string>("system_df", undefined, "GET", "/api/system/df"),
-
-  // Setup Wizard APIs
-  getPlatform: () =>
-    call<PlatformInfo>("get_platform", undefined, "GET", "/api/system/platform"),
-  installDep: (name: "colima" | "docker" | "lima", method = "brew") =>
-    call<{ success: boolean; output: string }>(
-      "install_dependency", { name, method }, "POST", "/api/system/install", undefined, { name, method }
-    ),
-  checkHomebrew: () =>
-    call<{ installed: boolean; version: string }>(
-      "check_homebrew", undefined, "GET", "/api/system/homebrew"
-    ),
-  configureAutostart: (enable: boolean) =>
-    call<string>(
-      "configure_autostart", { enable }, "POST", "/api/system/autostart", undefined, { enable }
-    ),
-  getAutostartStatus: () =>
-    call<{ enabled: boolean }>(
-      "get_autostart_status", undefined, "GET", "/api/system/autostart"
-    ),
-  checkTool: (name: string) =>
-    call<{ installed: boolean; version: string }>(
-      "check_tool", { name }, "GET", "/api/system/check-tool", { name }
-    ),
 };
 
 // ===== Compose API =====
@@ -411,21 +328,11 @@ export const composeApi = {
   list: async (): Promise<ComposeProject[]> => {
     const raw = await call<any>("list_compose_projects", undefined, "GET", "/api/compose");
     if (!raw) return [];
-
-    // Normalize field names: Tauri IPC returns snake_case (name, status, config_files)
-    // but TypeScript interface expects PascalCase (Name, Status, ConfigFiles)
-    const normalize = (items: any[]): ComposeProject[] =>
-      items.map((v: any) => ({
-        Name: v.Name || v.name || "",
-        Status: v.Status || v.status || "",
-        ConfigFiles: v.ConfigFiles || v.config_files || v.configFiles || "",
-      }));
-
     // Tauri IPC may return parsed array directly
-    if (Array.isArray(raw)) return normalize(raw);
+    if (Array.isArray(raw)) return raw;
     if (typeof raw === 'string') {
       if (!raw.trim()) return [];
-      try { return normalize(JSON.parse(raw)); } catch { return []; }
+      try { return JSON.parse(raw); } catch { return []; }
     }
     return [];
   },
@@ -444,17 +351,17 @@ export const composeApi = {
 // ===== Models API =====
 
 export const modelsApi = {
-  listModels: (profile: string, runner = "") =>
-    call<AiModel[]>("list_models", { profile, runner: runner || undefined }, "GET", "/api/models", { profile, ...(runner ? { runner } : {}) }),
+  listModels: (profile: string) =>
+    call<AiModel[]>("list_models", { profile }, "GET", "/api/models", { profile }),
 
-  pullModel: (profile: string, modelName: string, runner = "") =>
-    call<string>("pull_model", { profile, modelName, runner: runner || undefined }, "POST", "/api/models/pull", { profile, modelName, ...(runner ? { runner } : {}) }),
+  pullModel: (profile: string, modelName: string) =>
+    call<string>("pull_model", { profile, modelName }, "POST", "/api/models/pull", { profile, modelName }),
 
-  serveModel: (profile: string, modelName: string, port: number, runner = "") =>
-    call<string>("serve_model", { profile, modelName, port, runner: runner || undefined }, "POST", "/api/models/serve", { profile, modelName, port: String(port), ...(runner ? { runner } : {}) }),
+  serveModel: (profile: string, modelName: string, port: number) =>
+    call<string>("serve_model", { profile, modelName, port }, "POST", "/api/models/serve", { profile, modelName, port: String(port) }),
 
-  deleteModel: (profile: string, modelName: string, runner = "") =>
-    call<string>("delete_model", { profile, modelName, runner: runner || undefined }, "POST", "/api/models/delete", { profile, modelName, ...(runner ? { runner } : {}) }),
+  deleteModel: (profile: string, modelName: string) =>
+    call<string>("delete_model", { profile, modelName }, "POST", "/api/models/delete", { profile, modelName }),
 };
 
 // ===== Kubernetes API =====
@@ -482,72 +389,6 @@ export const k8sApi = {
     call<string>("k8s_nodes", undefined, "GET", "/api/k8s/nodes"),
   events: (namespace = "all") =>
     call<string>("k8s_events", { namespace }, "GET", "/api/k8s/events", { namespace }),
-  // Phase 1: New endpoints
-  resources: (resource: string, namespace = "all") =>
-    call<string>("k8s_resources", { resource, namespace }, "GET", "/api/k8s/resources", { resource, namespace }),
-  deleteResource: (resourceType: string, namespace: string, name: string) =>
-    call<string>("k8s_delete_resource", { resourceType, namespace, name }, "POST", "/api/k8s/resources/delete", undefined, { resourceType, namespace, name }),
-  restart: (resourceType: string, namespace: string, name: string) =>
-    call<string>("k8s_restart", { resourceType, namespace, name }, "POST", "/api/k8s/resources/restart", undefined, { resourceType, namespace, name }),
-  yaml: (resourceType: string, namespace: string, name: string) =>
-    call<string>("k8s_yaml", { resourceType, namespace, name }, "GET", "/api/k8s/resources/yaml", { resourceType, namespace, name }),
-  nodesJson: () =>
-    call<string>("k8s_nodes_json", undefined, "GET", "/api/k8s/nodes/json"),
-  eventsJson: (namespace = "all") =>
-    call<string>("k8s_events_json", { namespace }, "GET", "/api/k8s/events/json", { namespace }),
-  contexts: () =>
-    call<string>("k8s_contexts", undefined, "GET", "/api/k8s/contexts"),
-  currentContext: () =>
-    call<string>("k8s_current_context", undefined, "GET", "/api/k8s/contexts/current"),
-  setContext: (context: string) =>
-    call<string>("k8s_set_context", { context }, "POST", "/api/k8s/contexts/set", undefined, { context }),
-  // Phase 2
-  apply: (yaml: string, namespace = "") =>
-    call<string>("k8s_apply", { yaml, namespace }, "POST", "/api/k8s/apply", undefined, { yaml, namespace }),
-  portForwardStart: (namespace: string, name: string, localPort: number, remotePort: number, resourceType = "pod") =>
-    call<string>("k8s_pf_start", { namespace, name, localPort, remotePort, resourceType }, "POST", "/api/k8s/port-forward/start", undefined, { namespace, name, localPort, remotePort, resourceType }),
-  portForwardStop: (localPort: number) =>
-    call<string>("k8s_pf_stop", { localPort }, "POST", "/api/k8s/port-forward/stop", undefined, { localPort }),
-  portForwardList: () =>
-    call<string>("k8s_pf_list", undefined, "GET", "/api/k8s/port-forward/list"),
-  exec: (namespace: string, pod: string, container = "") =>
-    call<string>("k8s_exec", { namespace, pod, container }, "POST", "/api/k8s/exec", undefined, { namespace, pod, container }),
-  podContainers: (namespace: string, pod: string) =>
-    call<string>("k8s_pod_containers", { namespace, pod }, "GET", "/api/k8s/pods/containers", { namespace, pod }),
-  containerLogs: (namespace: string, pod: string, container = "", lines = 200, previous = false) =>
-    call<string>("k8s_container_logs", { namespace, pod, container, lines, previous }, "GET", "/api/k8s/pods/container-logs", { namespace, pod, container, lines: String(lines), previous: String(previous) }),
-  nodeAction: (name: string, action: string) =>
-    call<string>("k8s_node_action", { name, action }, "POST", "/api/k8s/nodes/action", undefined, { name, action }),
-  // Phase 3
-  genericScale: (resourceType: string, namespace: string, name: string, replicas: number) =>
-    call<string>("k8s_generic_scale", { resourceType, namespace, name, replicas }, "POST", "/api/k8s/scale-generic", undefined, { resourceType, namespace, name, replicas }),
-  clusterHealth: () =>
-    call<string>("k8s_cluster_health", undefined, "GET", "/api/k8s/cluster-health"),
-  // CRDs
-  crds: () =>
-    call<string>("k8s_crds", undefined, "GET", "/api/k8s/crds"),
-  crdResources: (resource: string, namespace = "all") =>
-    call<string>("k8s_crd_resources", { resource, namespace }, "GET", "/api/k8s/crds/resources", { resource, namespace }),
-  // Log streaming — returns URL for EventSource (SSE)
-  logStreamUrl: (namespace: string, pod: string, container = "", tail = 50) => {
-    const params = new URLSearchParams({ namespace, pod, tail: String(tail) });
-    if (container) params.set("container", container);
-    return `http://127.0.0.1:11420/api/k8s/pods/logs/stream?${params}`;
-  },
-  // Benchmark
-  benchmark: (url: string, concurrency = 5, requests = 50, method = "GET") =>
-    call<string>("k8s_benchmark", { url, concurrency, requests, method }, "POST", "/api/k8s/benchmark", undefined, { url, concurrency, requests, method }),
-};
-
-// ===== Kind API =====
-
-export const kindApi = {
-  list: () =>
-    call<string>("kind_list", undefined, "GET", "/api/kind"),
-  create: (name: string, image = "") =>
-    call<string>("kind_create", { name, image }, "POST", "/api/kind/create", undefined, { name, image }),
-  delete: (name: string) =>
-    call<string>("kind_delete", { name }, "POST", "/api/kind/delete", undefined, { name }),
 };
 
 // ===== Lima API =====
@@ -605,8 +446,6 @@ export const limaApi = {
     call<string>("lima_shell", { name, command }, "POST", "/api/lima/shell", undefined, { name, command }),
   templates: () =>
     call<string>("lima_templates", undefined, "GET", "/api/lima/templates"),
-  create: (config: { name: string; cpus?: number; memory?: number; disk?: number; template?: string }) =>
-    call<string>("lima_create", config, "POST", "/api/lima/create", undefined, config),
 };
 
 function formatLimaBytes(bytes: number): string {
@@ -622,6 +461,13 @@ export interface ChatMessage {
   content: string;
 }
 
+export interface SearchResult {
+  title: string;
+  url: string;
+  content: string;
+  engine: string;
+}
+
 export const aiApi = {
   chat: (provider: string, model: string, apiKey: string, messages: ChatMessage[], endpoint = "") =>
     call<string>("ai_chat", {
@@ -635,23 +481,17 @@ export const aiApi = {
     }, "POST", "/api/ai/models", undefined, {
       provider, api_key: apiKey, endpoint
     }),
-  search: (query: string, instances?: string[], maxResults?: number, timeoutSecs?: number) =>
+  search: (query: string, instances: string[] = [], maxResults = 5) =>
     call<SearchResult[]>("searxng_search", {
-      query, instances, max_results: maxResults, timeout_secs: timeoutSecs
+      query, instances: instances.length > 0 ? instances : null, maxResults, timeoutSecs: null
     }, "POST", "/api/ai/search", undefined, {
-      query, instances, max_results: maxResults, timeout_secs: timeoutSecs
+      query, instances: instances.length > 0 ? instances : null, max_results: maxResults
     }),
-  fetchPageMarkdown: (url: string, maxLength?: number, mode?: string) =>
+  fetchPageMarkdown: (url: string, maxLength = 8000, mode = "full") =>
     call<string>("fetch_page_as_markdown", {
-      url, max_length: maxLength, mode
+      url, maxLength, mode
     }, "POST", "/api/ai/fetch-page", undefined, {
       url, max_length: maxLength, mode
     }),
 };
 
-export interface SearchResult {
-  title: string;
-  url: string;
-  content: string;
-  engine: string;
-}

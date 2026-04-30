@@ -1,17 +1,21 @@
 import { useState, useEffect, useCallback } from "react";
 import { composeApi, ComposeProject } from "../lib/api";
-import { globalToast } from "../lib/globalToast";
-import { WarningIcon, RestartIcon, StopIcon, CloseIcon } from "../components/Icons";
 
 export default function Compose() {
   const [projects, setProjects] = useState<ComposeProject[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [notification, setNotification] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [selectedProject, setSelectedProject] = useState<ComposeProject | null>(null);
   const [logs, setLogs] = useState("");
   const [services, setServices] = useState("");
   const [detailTab, setDetailTab] = useState<"services" | "logs">("services");
+
+  const showNotification = useCallback((type: "success" | "error", text: string) => {
+    setNotification({ type, text });
+    setTimeout(() => setNotification(null), 4000);
+  }, []);
 
   const fetchProjects = useCallback(async () => {
     try {
@@ -27,9 +31,7 @@ export default function Compose() {
 
   useEffect(() => {
     fetchProjects();
-    const interval = setInterval(() => {
-      if (document.visibilityState === "visible") fetchProjects();
-    }, 15000);
+    const interval = setInterval(fetchProjects, 10000);
     return () => clearInterval(interval);
   }, [fetchProjects]);
 
@@ -38,14 +40,14 @@ export default function Compose() {
     try {
       if (action === "down") {
         await composeApi.down(name);
-        globalToast("success", `Project '${name}' stopped`);
+        showNotification("success", `Project '${name}' stopped`);
       } else {
         await composeApi.restart(name);
-        globalToast("success", `Project '${name}' restarted`);
+        showNotification("success", `Project '${name}' restarted`);
       }
       fetchProjects();
     } catch (e) {
-      globalToast("error", String(e));
+      showNotification("error", String(e));
     } finally {
       setActionLoading(null);
     }
@@ -68,7 +70,6 @@ export default function Compose() {
   };
 
   const parseStatus = (status: string) => {
-    if (!status) return { running: 0, display: "" };
     const match = status.match(/running\((\d+)\)/);
     const running = match ? parseInt(match[1]) : 0;
     return { running, display: status };
@@ -102,11 +103,22 @@ export default function Compose() {
       </div>
 
       <div className="content-body">
-
+        {notification && (
+          <div style={{
+            position: "fixed", top: 16, right: 16, padding: "10px 16px",
+            borderRadius: "var(--radius-md)",
+            background: notification.type === "success" ? "rgba(63,185,80,0.15)" : "rgba(248,81,73,0.15)",
+            border: `1px solid ${notification.type === "success" ? "var(--accent-green)" : "var(--accent-red)"}`,
+            color: notification.type === "success" ? "var(--accent-green)" : "var(--accent-red)",
+            fontSize: "var(--text-sm)", zIndex: 200, boxShadow: "var(--shadow-lg)",
+          }}>
+            {notification.type === "success" ? "✓" : "✕"} {notification.text}
+          </div>
+        )}
 
         {error && (
           <div className="card" style={{ borderColor: "var(--accent-yellow)", marginBottom: 16 }}>
-            <p style={{ color: "var(--accent-yellow)", fontSize: "var(--text-sm)", display: "flex", alignItems: "center", gap: 6 }}><WarningIcon size={14} /> {error}</p>
+            <p style={{ color: "var(--accent-yellow)", fontSize: "var(--text-sm)" }}>⚠ {error}</p>
           </div>
         )}
 
@@ -143,9 +155,9 @@ export default function Compose() {
                     </div>
                     <div style={{ display: "flex", gap: 6 }} onClick={e => e.stopPropagation()}>
                       <button className="btn btn-ghost" style={{ fontSize: "var(--text-xs)" }} disabled={!!isLoading}
-                        onClick={() => handleAction(p.Name, "restart")}><RestartIcon size={12} /> Restart</button>
+                        onClick={() => handleAction(p.Name, "restart")}>↻ Restart</button>
                       <button className="btn btn-ghost" style={{ fontSize: "var(--text-xs)", color: "var(--accent-red)" }}
-                        disabled={!!isLoading} onClick={() => handleAction(p.Name, "down")}><StopIcon size={12} /> Down</button>
+                        disabled={!!isLoading} onClick={() => handleAction(p.Name, "down")}>⏹ Down</button>
                     </div>
                   </div>
                 </div>
@@ -171,7 +183,7 @@ export default function Compose() {
           <div className="modal" onClick={e => e.stopPropagation()} style={{ width: "min(800px, 95vw)", maxHeight: "80vh" }}>
             <div className="modal-header">
               <h2 className="modal-title">{selectedProject.Name}</h2>
-              <button className="btn btn-icon btn-ghost" onClick={() => setSelectedProject(null)}><CloseIcon size={16} /></button>
+              <button className="btn btn-icon btn-ghost" onClick={() => setSelectedProject(null)}>✕</button>
             </div>
 
             <div style={{ display: "flex", gap: 2, borderBottom: "1px solid var(--border-primary)", marginBottom: 16 }}>
