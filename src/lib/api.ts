@@ -305,6 +305,14 @@ export const networksApi = {
 
 // ===== System API =====
 
+export interface PlatformInfo {
+  os: string;
+  arch: string;
+  wsl: boolean;
+  wsl_available: boolean;
+  package_managers: { name: string; available: boolean; version: string }[];
+}
+
 export const systemApi = {
   checkSystem: () =>
     call<SystemInfo>("check_system", undefined, "GET", "/api/system/check"),
@@ -314,7 +322,47 @@ export const systemApi = {
     call<string>("system_prune", { all }, "POST", "/api/system/prune", { all: String(all) }),
   systemDf: () =>
     call<string>("system_df", undefined, "GET", "/api/system/df"),
+  // SetupWizard helpers — graceful stubs until backend commands are implemented
+  getPlatform: async (): Promise<PlatformInfo> => {
+    try {
+      return await call<PlatformInfo>("get_platform", undefined, "GET", "/api/system/platform");
+    } catch {
+      // Fallback: detect from browser UA
+      const ua = navigator.userAgent.toLowerCase();
+      const os = ua.includes("mac") ? "macos" : ua.includes("linux") ? "linux" : ua.includes("win") ? "windows" : "macos";
+      return { os, arch: "aarch64", wsl: false, wsl_available: false, package_managers: [{ name: "brew", available: true, version: "" }] };
+    }
+  },
+  checkHomebrew: async (): Promise<{ installed: boolean; version: string }> => {
+    try {
+      return await call<{ installed: boolean; version: string }>("check_homebrew", undefined, "GET", "/api/system/homebrew");
+    } catch {
+      return { installed: false, version: "" };
+    }
+  },
+  checkTool: async (name: string): Promise<{ installed: boolean; version: string }> => {
+    try {
+      return await call<{ installed: boolean; version: string }>("check_tool", { name }, "GET", "/api/system/tool", { name });
+    } catch {
+      return { installed: false, version: "" };
+    }
+  },
+  installDep: async (name: string, method: string): Promise<{ success: boolean }> => {
+    try {
+      return await call<{ success: boolean }>("install_dep", { name, method }, "POST", "/api/system/install", undefined, { name, method });
+    } catch {
+      return { success: false };
+    }
+  },
+  configureAutostart: async (enable: boolean): Promise<void> => {
+    try {
+      await call<string>("configure_autostart", { enable }, "POST", "/api/system/autostart", undefined, { enable });
+    } catch {
+      // Silently fail — not critical
+    }
+  },
 };
+
 
 // ===== Compose API =====
 
