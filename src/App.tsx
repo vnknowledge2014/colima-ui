@@ -23,6 +23,7 @@ const DockerfileGen = React.lazy(() => import("./pages/DockerfileGen"));
 const Settings = React.lazy(() => import("./pages/Settings"));
 const SetupWizard = React.lazy(() => import("./components/SetupWizard"));
 const GettingStartedTour = React.lazy(() => import("./components/GettingStartedTour"));
+const AiChatBubble = React.lazy(() => import("./components/AiChatBubble"));
 
 type Page = "dashboard" | "instances" | "containers" | "images" | "volumes" | "networks" | "compose" | "kubernetes" | "linux-vms" | "dockerfile" | "terminal" | "models" | "settings";
 
@@ -535,6 +536,11 @@ function App() {
           }}
         />
       )}
+
+      {/* AI Diagnostics Bubble — global floating overlay */}
+      <Suspense fallback={null}>
+        <AiChatBubble onNavigate={(target) => setPage(target as Page)} />
+      </Suspense>
     </div>
   );
 }

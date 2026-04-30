@@ -26,6 +26,23 @@ const NIX_USER_PATHS: &[&str] = &[
     ".nix-defexpr/channels/bin",
 ];
 
+/// Version manager / user-local paths that need $HOME expansion
+const USER_PATHS: &[&str] = &[
+    // asdf version manager (manages node, kubectl, helm, etc.)
+    ".asdf/shims",
+    ".asdf/bin",
+    // Cargo (Rust)
+    ".cargo/bin",
+    // Go
+    "go/bin",
+    // Local bin
+    ".local/bin",
+    // Rancher Desktop
+    ".rd/bin",
+    // Krew (kubectl plugin manager)
+    ".krew/bin",
+];
+
 /// The computed PATH, stored for use by `apply_path_to_cmd()` in late-spawned contexts.
 static COMPUTED_PATH: std::sync::OnceLock<String> = std::sync::OnceLock::new();
 
@@ -58,20 +75,33 @@ pub fn fix_path_env() {
                 paths.push(full);
             }
         }
+
+        // Add version-manager and user-local paths (asdf, cargo, go, etc.)
+        for rel in USER_PATHS {
+            let full = format!("{}/{}", home, rel);
+            if !paths.contains(&full) && PathBuf::from(&full).exists() {
+                paths.push(full);
+            }
+        }
     }
 
-    // Also try to load user's shell PATH via login shell
-    if let Ok(output) = Command::new("/bin/sh")
-        .args(["-l", "-c", "echo $PATH"])
-        .output()
-    {
-        if output.status.success() {
-            let shell_path = String::from_utf8_lossy(&output.stdout).trim().to_string();
-            for p in shell_path.split(':') {
-                let ps = p.to_string();
-                if !ps.is_empty() && !paths.contains(&ps) {
-                    paths.push(ps);
+    // Try to load user's shell PATH via login shell
+    // Use zsh (macOS default) first, then fall back to sh
+    let shell_cmds = [
+        ("/bin/zsh", &["-l", "-c", "echo $PATH"][..]),
+        ("/bin/sh", &["-l", "-c", "echo $PATH"][..]),
+    ];
+    for (shell, args) in &shell_cmds {
+        if let Ok(output) = Command::new(shell).args(*args).output() {
+            if output.status.success() {
+                let shell_path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                for p in shell_path.split(':') {
+                    let ps = p.to_string();
+                    if !ps.is_empty() && !paths.contains(&ps) {
+                        paths.push(ps);
+                    }
                 }
+                break; // Use the first successful shell
             }
         }
     }

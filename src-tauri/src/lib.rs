@@ -10,10 +10,13 @@ use commands::ai_chat;
 use commands::colima;
 use commands::compose;
 use commands::docker;
+use commands::knowledge_bank;
 use commands::kubernetes;
 use commands::lima;
 use commands::models;
 use commands::networks;
+use commands::searxng;
+use commands::shell_sandbox;
 use commands::system;
 use commands::volumes;
 use poller::PollerState;
@@ -29,6 +32,9 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .manage(PollerState::default())
         .setup(|app| {
+            // Initialize Knowledge Bank (SQLite)
+            knowledge_bank::init_knowledge_bank();
+
             // Start HTTP API server for browser-mode access
             api_server::start_api_server();
             // Start background instance poller
@@ -57,6 +63,7 @@ pub fn run() {
             colima::instance_status,
             colima::get_ssh_command,
             colima::kubernetes_action,
+            colima::collect_diagnostic_logs,
             // Docker commands
             docker::list_containers,
             docker::start_container,
@@ -132,6 +139,18 @@ pub fn run() {
             // AI Chat
             ai_chat::ai_chat,
             ai_chat::ai_list_models,
+            // AI Diagnostics — SearXNG + HTML→MD
+            searxng::searxng_search,
+            searxng::fetch_page_as_markdown,
+            // Knowledge Bank
+            knowledge_bank::kb_query,
+            knowledge_bank::kb_feedback,
+            knowledge_bank::kb_save_solution,
+            knowledge_bank::kb_save_anti_pattern,
+            // Shell Sandbox
+            shell_sandbox::sandbox_classify,
+            shell_sandbox::sandbox_execute,
+            shell_sandbox::sandbox_execute_approved,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

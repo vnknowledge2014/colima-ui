@@ -1707,6 +1707,37 @@ async fn api_ai_list_models(
     }
 }
 
+// ===== AI Diagnostics routes (SearXNG + HTML→MD) =====
+
+async fn api_ai_search(
+    Json(body): Json<serde_json::Value>,
+) -> (StatusCode, Json<ApiResponse<Vec<crate::commands::searxng::SearchResult>>>) {
+    let query = body["query"].as_str().unwrap_or("").to_string();
+    let instances: Option<Vec<String>> = body["instances"]
+        .as_array()
+        .map(|arr| arr.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect());
+    let max_results = body["max_results"].as_u64().map(|n| n as usize);
+    let timeout_secs = body["timeout_secs"].as_u64();
+
+    match crate::commands::searxng::searxng_search(query, instances, max_results, timeout_secs).await {
+        Ok(results) => (StatusCode::OK, Json(ApiResponse { success: true, data: Some(results), error: None })),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(ApiResponse { success: false, data: None, error: Some(e) })),
+    }
+}
+
+async fn api_ai_fetch_page(
+    Json(body): Json<serde_json::Value>,
+) -> (StatusCode, Json<ApiResponse<String>>) {
+    let url = body["url"].as_str().unwrap_or("").to_string();
+    let max_length = body["max_length"].as_u64().map(|n| n as usize);
+    let mode = body["mode"].as_str().map(|s| s.to_string());
+
+    match crate::commands::searxng::fetch_page_as_markdown(url, max_length, mode).await {
+        Ok(md) => ok(md),
+        Err(e) => err(e),
+    }
+}
+
 // ===== Docker System routes =====
 
 async fn api_docker_df() -> (StatusCode, Json<ApiResponse<String>>) {
@@ -3430,6 +3461,8 @@ pub fn build_router() -> Router {
         // AI Chat
         .route("/api/ai/chat", post(api_ai_chat))
         .route("/api/ai/models", post(api_ai_list_models))
+        .route("/api/ai/search", post(api_ai_search))
+        .route("/api/ai/fetch-page", post(api_ai_fetch_page))
         // Terminal sessions (browser mode)
         .route("/api/terminal/create", post(api_terminal_create))
         .route("/api/terminal/write", post(api_terminal_write))

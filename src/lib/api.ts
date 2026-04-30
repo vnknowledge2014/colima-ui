@@ -635,5 +635,23 @@ export const aiApi = {
     }, "POST", "/api/ai/models", undefined, {
       provider, api_key: apiKey, endpoint
     }),
+  search: (query: string, instances?: string[], maxResults?: number, timeoutSecs?: number) =>
+    call<SearchResult[]>("searxng_search", {
+      query, instances, max_results: maxResults, timeout_secs: timeoutSecs
+    }, "POST", "/api/ai/search", undefined, {
+      query, instances, max_results: maxResults, timeout_secs: timeoutSecs
+    }),
+  fetchPageMarkdown: (url: string, maxLength?: number, mode?: string) =>
+    call<string>("fetch_page_as_markdown", {
+      url, max_length: maxLength, mode
+    }, "POST", "/api/ai/fetch-page", undefined, {
+      url, max_length: maxLength, mode
+    }),
 };
 
+export interface SearchResult {
+  title: string;
+  url: string;
+  content: string;
+  engine: string;
+}

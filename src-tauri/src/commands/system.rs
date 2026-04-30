@@ -1,5 +1,6 @@
 use serde::Serialize;
 use std::process::Command;
+use crate::path_util;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct SystemInfo {
@@ -12,8 +13,11 @@ pub struct SystemInfo {
 }
 
 fn get_version(cmd: &str, args: &[&str]) -> Option<String> {
-    Command::new(cmd)
-        .args(args)
+    let resolved = path_util::resolve_binary(cmd);
+    let mut command = Command::new(&resolved);
+    command.args(args);
+    path_util::apply_path_to_cmd(&mut command);
+    command
         .output()
         .ok()
         .filter(|o| o.status.success())
