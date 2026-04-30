@@ -114,11 +114,11 @@ function CreateInstanceDialog({ onClose, onCreated }: { onClose: () => void; onC
         </div>
         <div style={{ borderTop: "1px solid var(--border-subtle)", paddingTop: 16, marginTop: 8 }}>
           <div className="form-group" style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
-            <input type="checkbox" id="k8s-check" checked={config.kubernetes} onChange={(e) => setConfig({ ...config, kubernetes: e.target.checked })} style={{ accentColor: "var(--accent-blue)" }} />
+            <input type="checkbox" className="checkbox" id="k8s-check" checked={config.kubernetes} onChange={(e) => setConfig({ ...config, kubernetes: e.target.checked })} />
             <label htmlFor="k8s-check" className="form-label" style={{ marginBottom: 0 }}>Enable Kubernetes (K3s)</label>
           </div>
           <div className="form-group" style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
-            <input type="checkbox" id="net-addr" checked={config.network_address} onChange={(e) => setConfig({ ...config, network_address: e.target.checked })} style={{ accentColor: "var(--accent-blue)" }} />
+            <input type="checkbox" className="checkbox" id="net-addr" checked={config.network_address} onChange={(e) => setConfig({ ...config, network_address: e.target.checked })} />
             <label htmlFor="net-addr" className="form-label" style={{ marginBottom: 0 }}>Reachable Network Address</label>
           </div>
         </div>

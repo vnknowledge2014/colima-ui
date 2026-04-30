@@ -220,7 +220,7 @@ function ContainerDetail({
                 <option value={1000}>1000 lines</option>
               </select>
               <label style={{ display: "flex", alignItems: "center", gap: 4, fontSize: "var(--text-xs)", color: "var(--text-secondary)", cursor: "pointer" }}>
-                <input type="checkbox" checked={autoScroll} onChange={(e) => setAutoScroll(e.target.checked)} style={{ accentColor: "var(--accent-blue)" }} />
+                <input type="checkbox" className="checkbox" checked={autoScroll} onChange={(e) => setAutoScroll(e.target.checked)} />
                 Auto-scroll
               </label>
               <button className="btn btn-ghost" style={{ padding: "4px 8px", fontSize: "var(--text-xs)" }} onClick={fetchLogs}>
@@ -427,11 +427,11 @@ function RunContainerModal({ onClose, onSuccess }: { onClose: () => void; onSucc
           </div>
           <div style={{ display: "flex", gap: 16 }}>
             <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: "var(--text-sm)", color: "var(--text-secondary)", cursor: "pointer" }}>
-              <input type="checkbox" checked={detach} onChange={e => setDetach(e.target.checked)} style={{ accentColor: "var(--accent-blue)" }} />
+              <input type="checkbox" className="checkbox" checked={detach} onChange={e => setDetach(e.target.checked)} />
               Detached mode
             </label>
             <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: "var(--text-sm)", color: "var(--text-secondary)", cursor: "pointer" }}>
-              <input type="checkbox" checked={removeOnExit} onChange={e => setRemoveOnExit(e.target.checked)} style={{ accentColor: "var(--accent-blue)" }} />
+              <input type="checkbox" className="checkbox" checked={removeOnExit} onChange={e => setRemoveOnExit(e.target.checked)} />
               Remove on exit
             </label>
           </div>
@@ -505,8 +505,7 @@ function VirtualContainerRows({
               onContextMenu={(e) => onContextMenu(e, c)}
             >
               <div className="vtable-cell" style={{ textAlign: 'center' }} onClick={(e) => e.stopPropagation()}>
-                <input type="checkbox" checked={selected.has(c.Id)} onChange={() => toggleSelect(c.Id)}
-                  style={{ accentColor: 'var(--accent-blue)', cursor: 'pointer' }} />
+                <input type="checkbox" className="checkbox" checked={selected.has(c.Id)} onChange={() => toggleSelect(c.Id)} />
               </div>
               <div className="vtable-cell">
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -817,8 +816,8 @@ export default function Containers() {
             {/* Header */}
             <div className="vtable-header" style={{ display: 'grid', gridTemplateColumns: gridCols }}>
               <div className="vtable-header-cell" style={{ textAlign: 'center' }}>
-                <input type="checkbox" checked={filtered.length > 0 && selected.size === filtered.length}
-                  onChange={toggleAll} style={{ accentColor: 'var(--accent-blue)', cursor: 'pointer' }} />
+                <input type="checkbox" className="checkbox" checked={filtered.length > 0 && selected.size === filtered.length}
+                  onChange={toggleAll} />
               </div>
               <div className="vtable-header-cell">Name</div>
               <div className="vtable-header-cell">Image</div>

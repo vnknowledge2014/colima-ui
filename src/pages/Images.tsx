@@ -54,8 +54,7 @@ function VirtualImageRows({
                 onContextMenu={(e) => onContextMenu(e, img)}
               >
                 <div className="vtable-cell" style={{ textAlign: 'center' }}>
-                  <input type="checkbox" checked={selected.has(img.Id)} onChange={() => toggleSelect(img.Id)}
-                    style={{ accentColor: 'var(--accent-blue)', cursor: 'pointer' }} />
+                  <input type="checkbox" className="checkbox" checked={selected.has(img.Id)} onChange={() => toggleSelect(img.Id)} />
                 </div>
                 <div className="vtable-cell" style={{ fontWeight: 500 }}>{img.Repository}</div>
                 <div className="vtable-cell">
@@ -418,8 +417,7 @@ export default function Images() {
           <div className="vtable">
             <div className="vtable-header" style={{ display: 'grid', gridTemplateColumns: gridCols }}>
               <div className="vtable-header-cell" style={{ textAlign: 'center' }}>
-                <input type="checkbox" checked={filteredImages.length > 0 && selected.size === filteredImages.length}
-                  onChange={toggleAll} style={{ accentColor: 'var(--accent-blue)', cursor: 'pointer' }} />
+                <input type="checkbox" className="checkbox" checked={filteredImages.length > 0 && selected.size === filteredImages.length} onChange={toggleAll} />
               </div>
               <div className="vtable-header-cell">Repository</div>
               <div className="vtable-header-cell">Tag</div>

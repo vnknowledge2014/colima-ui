@@ -146,16 +146,15 @@ export default function Networks(_props: NetworksProps) {
   };
 
   return (
-    <div style={{ padding: "24px" }}>
-      {/* Header */}
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "20px" }}>
-        <div>
-          <h2 style={{ margin: 0, fontSize: "var(--text-xl)", fontWeight: 600 }}>Networks</h2>
-          <p style={{ margin: "4px 0 0", color: "var(--text-muted)", fontSize: "var(--text-sm)" }}>
+    <>
+      <div className="content-header">
+        <h1>
+          Networks
+          <span style={{ fontSize: "var(--text-sm)", color: "var(--text-muted)", fontWeight: 400, marginLeft: 12 }}>
             {networks.length} network{networks.length !== 1 ? "s" : ""}
-          </p>
-        </div>
-        <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+          </span>
+        </h1>
+        <div className="content-header-actions">
           {selected.size > 0 && (
             <button className="btn btn-ghost" style={{ color: "var(--accent-red)", fontSize: "var(--text-sm)" }}
               onClick={handleBatchRemove} disabled={batchLoading}>
@@ -171,6 +170,8 @@ export default function Networks(_props: NetworksProps) {
           <button className="btn btn-ghost" onClick={refresh}>↻ Refresh</button>
         </div>
       </div>
+
+      <div className="content-body">
 
       {/* Error */}
       {error && (
@@ -250,32 +251,30 @@ export default function Networks(_props: NetworksProps) {
         <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
           {filtered.map(net => (
             <div key={net.Id} style={{ padding: "16px", background: selected.has(net.Id) ? "rgba(88,166,255,0.06)" : "var(--bg-secondary)", borderRadius: "12px", border: selected.has(net.Id) ? "1px solid rgba(88,166,255,0.25)" : "1px solid var(--border-primary)", transition: "all 150ms" }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 10, flex: 1, minWidth: 0 }}>
                   {isSystemNetwork(net.Name) ? (
-                    <input type="checkbox" disabled checked={false}
-                      title="System network — cannot be removed"
-                      style={{ opacity: 0.3, cursor: "not-allowed" }} />
+                    <input type="checkbox" className="checkbox" disabled checked={false} title="System network — cannot be removed" />
                   ) : (
-                    <input type="checkbox" checked={selected.has(net.Id)} onChange={() => toggleSelect(net.Id)}
-                      style={{ accentColor: "var(--accent-blue)", cursor: "pointer" }} />
+                    <input type="checkbox" className="checkbox" checked={selected.has(net.Id)} onChange={() => toggleSelect(net.Id)} />
                   )}
-                  <div>
+                  <div style={{ minWidth: 0 }}>
                     <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                    <span style={{ fontWeight: 600, fontSize: "var(--text-base)" }}>{net.Name}</span>
-                    {isSystemNetwork(net.Name) && (
-                      <span style={{ fontSize: "var(--text-xs)", padding: "2px 6px", borderRadius: "4px", background: "rgba(139,148,158,0.2)", color: "var(--text-muted)" }}>
-                        system
-                      </span>
-                    )}
-                  </div>
-                  <div style={{ color: "var(--text-muted)", fontSize: "var(--text-sm)", marginTop: "4px" }}>
-                    Driver: <span style={{ color: driverColor(net.Driver) }}>{net.Driver}</span>
-                    {net.Scope && <> · Scope: {net.Scope}</>}
-                    <> · ID: {net.Id.substring(0, 12)}</>
+                      <span style={{ fontWeight: 600, fontSize: "var(--text-base)" }}>{net.Name}</span>
+                      {isSystemNetwork(net.Name) && (
+                        <span style={{ fontSize: "var(--text-xs)", padding: "2px 6px", borderRadius: "4px", background: "rgba(139,148,158,0.2)", color: "var(--text-muted)", flexShrink: 0 }}>
+                          system
+                        </span>
+                      )}
+                    </div>
+                    <div style={{ color: "var(--text-muted)", fontSize: "var(--text-sm)", marginTop: "4px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      Driver: <span style={{ color: driverColor(net.Driver) }}>{net.Driver}</span>
+                      {net.Scope && <> · Scope: {net.Scope}</>}
+                      <> · ID: {net.Id.substring(0, 12)}</>
+                    </div>
                   </div>
                 </div>
-                <div style={{ display: "flex", gap: "6px" }}>
+                <div style={{ display: "flex", gap: "6px", flexShrink: 0 }}>
                   <button className="btn btn-ghost" onClick={() => handleInspect(net.Name)} style={{ fontSize: "var(--text-xs)", padding: "4px 10px" }}>
                     {inspecting === net.Name ? "Hide" : "Inspect"}
                   </button>
@@ -291,7 +290,6 @@ export default function Networks(_props: NetworksProps) {
                   )}
                 </div>
               </div>
-              </div>
               {inspecting === net.Name && (
                 <pre style={{ marginTop: "12px", padding: "12px", background: "var(--bg-primary)", borderRadius: "8px", fontSize: "var(--text-xs)", overflow: "auto", maxHeight: "300px", color: "var(--text-secondary)" }}>
                   {inspectData}
@@ -302,6 +300,7 @@ export default function Networks(_props: NetworksProps) {
         </div>
       )}
       <ConfirmDialog {...ConfirmDialogProps} />
-    </div>
+      </div>
+    </>
   );
 }

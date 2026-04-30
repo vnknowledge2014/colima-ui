@@ -134,16 +134,15 @@ export default function Volumes(_props: VolumesProps) {
   };
 
   return (
-    <div style={{ padding: "24px" }}>
-      {/* Header */}
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "20px" }}>
-        <div>
-          <h2 style={{ margin: 0, fontSize: "var(--text-xl)", fontWeight: 600 }}>Volumes</h2>
-          <p style={{ margin: "4px 0 0", color: "var(--text-muted)", fontSize: "var(--text-sm)" }}>
+    <>
+      <div className="content-header">
+        <h1>
+          Volumes
+          <span style={{ fontSize: "var(--text-sm)", color: "var(--text-muted)", fontWeight: 400, marginLeft: 12 }}>
             {volumes.length} volume{volumes.length !== 1 ? "s" : ""}
-          </p>
-        </div>
-        <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+          </span>
+        </h1>
+        <div className="content-header-actions">
           {selected.size > 0 && (
             <button className="btn btn-ghost" style={{ color: "var(--accent-red)", fontSize: "var(--text-sm)" }}
               onClick={handleBatchRemove} disabled={batchLoading}>
@@ -160,6 +159,8 @@ export default function Volumes(_props: VolumesProps) {
           <button className="btn btn-ghost" onClick={refresh}>↻ Refresh</button>
         </div>
       </div>
+
+      <div className="content-body">
 
       {/* Error */}
       {error && (
@@ -227,8 +228,7 @@ export default function Volumes(_props: VolumesProps) {
             <div key={vol.Name} style={{ padding: "16px", background: selected.has(vol.Name) ? "rgba(88,166,255,0.06)" : "var(--bg-secondary)", borderRadius: "12px", border: selected.has(vol.Name) ? "1px solid rgba(88,166,255,0.25)" : "1px solid var(--border-primary)", transition: "all 150ms" }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                  <input type="checkbox" checked={selected.has(vol.Name)} onChange={() => toggleSelect(vol.Name)}
-                    style={{ accentColor: "var(--accent-blue)", cursor: "pointer" }} />
+                  <input type="checkbox" className="checkbox" checked={selected.has(vol.Name)} onChange={() => toggleSelect(vol.Name)} />
                   <div>
                     {(() => {
                       const { display, isHash } = formatVolumeName(vol.Name);
@@ -272,6 +272,7 @@ export default function Volumes(_props: VolumesProps) {
         </div>
       )}
       <ConfirmDialog {...ConfirmDialogProps} />
-    </div>
+      </div>
+    </>
   );
 }

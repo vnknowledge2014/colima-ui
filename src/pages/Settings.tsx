@@ -346,8 +346,7 @@ export default function Settings({ systemInfo }: SettingsProps) {
               Behavior
             </div>
             <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", fontSize: "var(--text-sm)" }}>
-              <input type="checkbox" checked={autoTrigger} onChange={e => setAutoTrigger(e.target.checked)}
-                style={{ width: 16, height: 16, accentColor: "var(--accent-blue)" }} />
+              <input type="checkbox" className="checkbox" checked={autoTrigger} onChange={e => setAutoTrigger(e.target.checked)} />
               <span>Auto-trigger on errors</span>
             </label>
             <div style={{ fontSize: "var(--text-xs)", color: "var(--text-muted)", marginTop: 4, marginLeft: 24 }}>
