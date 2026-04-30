@@ -226,28 +226,29 @@ export default function Volumes(_props: VolumesProps) {
         <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
           {filtered.map(vol => (
             <div key={vol.Name} style={{ padding: "16px", background: selected.has(vol.Name) ? "rgba(88,166,255,0.06)" : "var(--bg-secondary)", borderRadius: "12px", border: selected.has(vol.Name) ? "1px solid rgba(88,166,255,0.25)" : "1px solid var(--border-primary)", transition: "all 150ms" }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 10, flex: 1, minWidth: 0 }}>
                   <input type="checkbox" className="checkbox" checked={selected.has(vol.Name)} onChange={() => toggleSelect(vol.Name)} />
-                  <div>
+                  <div style={{ minWidth: 0 }}>
                     {(() => {
                       const { display, isHash } = formatVolumeName(vol.Name);
                       return (
-                        <div style={{ fontWeight: 600, fontSize: "var(--text-base)", maxWidth: '500px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={vol.Name}>
+                        <div style={{ fontWeight: 600, fontSize: "var(--text-base)", overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={vol.Name}>
                           {isHash ? (
                             <span style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-sm)', color: 'var(--text-secondary)' }}>{display}</span>
                           ) : display}
                         </div>
                       );
                     })()}
-                  <div style={{ color: "var(--text-muted)", fontSize: "var(--text-sm)", marginTop: "4px", maxWidth: '600px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                  <div style={{ color: "var(--text-muted)", fontSize: "var(--text-sm)", marginTop: "4px", overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
                     title={`Driver: ${vol.Driver}${vol.Scope ? ` · Scope: ${vol.Scope}` : ''}${vol.Mountpoint ? ` · ${vol.Mountpoint}` : ''}`}>
                     Driver: <span style={{ color: "var(--accent-blue)" }}>{vol.Driver}</span>
                     {vol.Scope && <> · Scope: {vol.Scope}</>}
                     {vol.Mountpoint && <> · {vol.Mountpoint}</>}
                   </div>
+                  </div>
                 </div>
-                <div style={{ display: "flex", gap: "6px" }}>
+                <div style={{ display: "flex", gap: "6px", flexShrink: 0 }}>
                   <button className="btn btn-ghost" onClick={() => handleInspect(vol.Name)} style={{ fontSize: "var(--text-xs)", padding: "4px 10px" }}>
                     {inspecting === vol.Name ? "Hide" : "Inspect"}
                   </button>
@@ -260,7 +261,6 @@ export default function Volumes(_props: VolumesProps) {
                     {actionLoading === vol.Name ? "..." : "Remove"}
                   </button>
                 </div>
-              </div>
               </div>
               {inspecting === vol.Name && (
                 <pre style={{ marginTop: "12px", padding: "12px", background: "var(--bg-primary)", borderRadius: "8px", fontSize: "var(--text-xs)", overflow: "auto", maxHeight: "300px", color: "var(--text-secondary)" }}>
