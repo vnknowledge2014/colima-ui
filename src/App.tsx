@@ -3,7 +3,7 @@ import { colimaApi, dockerApi, volumesApi, networksApi, systemApi, ColimaInstanc
 import { onToast, ToastMessage } from "./lib/globalToast";
 import { WarningIcon } from "./components/Icons";
 import { useSetAtom } from "jotai";
-import { containersAtom, imagesAtom, dockerLoadingAtom } from "./store/dockerAtom";
+import { containersAtom, imagesAtom, dockerLoadingAtom, isEventCooldownActive } from "./store/dockerAtom";
 import { volumesAtom, volumesLoadingAtom, networksAtom, networksLoadingAtom } from "./store/resourceAtom";
 import "./index.css";
 
@@ -250,6 +250,11 @@ function App() {
       // Also subscribe to push updates for real-time sync
       import("@tauri-apps/api/event").then((mod) => {
         mod.listen<{ containers: any[], images: any[] }>("docker-state-updated", (event) => {
+          // Skip event-based updates during cooldown (after manual action like stop/start)
+          // The manual refreshContainers() already set fresh authoritative data;
+          // accepting this event would overwrite it with potentially stale data.
+          if (isEventCooldownActive()) return;
+
           // Normalize field names from bollard format
           const containers = (event.payload.containers || []).map((v: any) => ({
             Id: v.Id || v.id || v.ID || "",
@@ -314,6 +319,8 @@ function App() {
       // SSE for real-time push updates (container start/stop/etc.)
       const es = new EventSource("http://127.0.0.1:11420/api/events");
       es.addEventListener("docker-state-updated", (e) => {
+        // Skip stale pushes during cooldown (same as Tauri event handler)
+        if (isEventCooldownActive()) return;
         try {
           const data = JSON.parse((e as MessageEvent).data);
           setContainers(data.containers);
