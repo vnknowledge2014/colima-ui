@@ -29,13 +29,22 @@ fn docker_cmd() -> Command {
     cmd
 }
 
+/// Run a Docker CLI command on a blocking thread pool to avoid starving Tokio.
+async fn docker_output(args: Vec<String>) -> Result<std::process::Output, String> {
+    tokio::task::spawn_blocking(move || {
+        docker_cmd()
+            .args(args.iter().map(|s| s.as_str()).collect::<Vec<&str>>())
+            .output()
+            .map_err(|e| format!("Failed to run docker command: {}", e))
+    })
+    .await
+    .map_err(|e| format!("Task join error: {}", e))?
+}
+
 /// List all Docker networks
 #[tauri::command]
 pub async fn list_networks() -> Result<Vec<DockerNetwork>, String> {
-    let output = docker_cmd()
-        .args(["network", "ls", "--format", "json", "--no-trunc"])
-        .output()
-        .map_err(|e| format!("Failed to list networks: {}", e))?;
+    let output = docker_output(vec!["network".into(), "ls".into(), "--format".into(), "json".into(), "--no-trunc".into()]).await?;
 
     if !output.status.success() {
         return Err(format!(
@@ -65,28 +74,21 @@ pub async fn create_network(
     driver: String,
     subnet: String,
 ) -> Result<String, String> {
-    let mut args = vec!["network", "create"];
+    let mut args = vec!["network".to_string(), "create".to_string()];
 
-    let driver_flag;
     if !driver.is_empty() {
-        driver_flag = driver.clone();
-        args.push("--driver");
-        args.push(&driver_flag);
+        args.push("--driver".to_string());
+        args.push(driver);
     }
 
-    let subnet_flag;
     if !subnet.is_empty() {
-        subnet_flag = subnet.clone();
-        args.push("--subnet");
-        args.push(&subnet_flag);
+        args.push("--subnet".to_string());
+        args.push(subnet);
     }
 
-    args.push(&name);
+    args.push(name.clone());
 
-    let output = docker_cmd()
-        .args(&args)
-        .output()
-        .map_err(|e| format!("Failed to create network: {}", e))?;
+    let output = docker_output(args).await?;
 
     if !output.status.success() {
         return Err(format!(
@@ -101,10 +103,7 @@ pub async fn create_network(
 /// Remove a Docker network
 #[tauri::command]
 pub async fn remove_network(name: String) -> Result<String, String> {
-    let output = docker_cmd()
-        .args(["network", "rm", &name])
-        .output()
-        .map_err(|e| format!("Failed to remove network: {}", e))?;
+    let output = docker_output(vec!["network".into(), "rm".into(), name.clone()]).await?;
 
     if !output.status.success() {
         return Err(format!(
@@ -119,10 +118,7 @@ pub async fn remove_network(name: String) -> Result<String, String> {
 /// Inspect a Docker network (raw JSON)
 #[tauri::command]
 pub async fn inspect_network(name: String) -> Result<String, String> {
-    let output = docker_cmd()
-        .args(["network", "inspect", &name])
-        .output()
-        .map_err(|e| format!("Failed to inspect network: {}", e))?;
+    let output = docker_output(vec!["network".into(), "inspect".into(), name]).await?;
 
     if !output.status.success() {
         return Err(format!(
@@ -137,10 +133,7 @@ pub async fn inspect_network(name: String) -> Result<String, String> {
 /// Prune unused Docker networks
 #[tauri::command]
 pub async fn prune_networks() -> Result<String, String> {
-    let output = docker_cmd()
-        .args(["network", "prune", "-f"])
-        .output()
-        .map_err(|e| format!("Failed to prune networks: {}", e))?;
+    let output = docker_output(vec!["network".into(), "prune".into(), "-f".into()]).await?;
 
     if !output.status.success() {
         return Err(format!(

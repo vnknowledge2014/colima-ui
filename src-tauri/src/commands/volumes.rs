@@ -41,13 +41,22 @@ fn docker_cmd() -> Command {
     cmd
 }
 
+/// Run a Docker CLI command on a blocking thread pool to avoid starving Tokio.
+async fn docker_output(args: Vec<String>) -> Result<std::process::Output, String> {
+    tokio::task::spawn_blocking(move || {
+        docker_cmd()
+            .args(args.iter().map(|s| s.as_str()).collect::<Vec<&str>>())
+            .output()
+            .map_err(|e| format!("Failed to run docker command: {}", e))
+    })
+    .await
+    .map_err(|e| format!("Task join error: {}", e))?
+}
+
 /// List all Docker volumes
 #[tauri::command]
 pub async fn list_volumes() -> Result<Vec<DockerVolume>, String> {
-    let output = docker_cmd()
-        .args(["volume", "ls", "--format", "json"])
-        .output()
-        .map_err(|e| format!("Failed to list volumes: {}", e))?;
+    let output = docker_output(vec!["volume".into(), "ls".into(), "--format".into(), "json".into()]).await?;
 
     if !output.status.success() {
         return Err(format!(
@@ -73,20 +82,15 @@ pub async fn list_volumes() -> Result<Vec<DockerVolume>, String> {
 /// Create a Docker volume
 #[tauri::command]
 pub async fn create_volume(name: String, driver: String) -> Result<String, String> {
-    let mut args = vec!["volume", "create"];
+    let mut args = vec!["volume".to_string(), "create".to_string()];
 
-    let driver_flag;
     if !driver.is_empty() && driver != "local" {
-        driver_flag = driver.clone();
-        args.push("--driver");
-        args.push(&driver_flag);
+        args.push("--driver".to_string());
+        args.push(driver);
     }
-    args.push(&name);
+    args.push(name.clone());
 
-    let output = docker_cmd()
-        .args(&args)
-        .output()
-        .map_err(|e| format!("Failed to create volume: {}", e))?;
+    let output = docker_output(args).await?;
 
     if !output.status.success() {
         return Err(format!(
@@ -101,16 +105,13 @@ pub async fn create_volume(name: String, driver: String) -> Result<String, Strin
 /// Remove a Docker volume
 #[tauri::command]
 pub async fn remove_volume(name: String, force: bool) -> Result<String, String> {
-    let mut args = vec!["volume", "rm"];
+    let mut args = vec!["volume".to_string(), "rm".to_string()];
     if force {
-        args.push("-f");
+        args.push("-f".to_string());
     }
-    args.push(&name);
+    args.push(name.clone());
 
-    let output = docker_cmd()
-        .args(&args)
-        .output()
-        .map_err(|e| format!("Failed to remove volume: {}", e))?;
+    let output = docker_output(args).await?;
 
     if !output.status.success() {
         return Err(format!(
@@ -125,10 +126,7 @@ pub async fn remove_volume(name: String, force: bool) -> Result<String, String> 
 /// Prune unused Docker volumes
 #[tauri::command]
 pub async fn prune_volumes() -> Result<String, String> {
-    let output = docker_cmd()
-        .args(["volume", "prune", "-f"])
-        .output()
-        .map_err(|e| format!("Failed to prune volumes: {}", e))?;
+    let output = docker_output(vec!["volume".into(), "prune".into(), "-f".into()]).await?;
 
     if !output.status.success() {
         return Err(format!(
@@ -143,10 +141,7 @@ pub async fn prune_volumes() -> Result<String, String> {
 /// Inspect a Docker volume (raw JSON)
 #[tauri::command]
 pub async fn inspect_volume(name: String) -> Result<String, String> {
-    let output = docker_cmd()
-        .args(["volume", "inspect", &name])
-        .output()
-        .map_err(|e| format!("Failed to inspect volume: {}", e))?;
+    let output = docker_output(vec!["volume".into(), "inspect".into(), name]).await?;
 
     if !output.status.success() {
         return Err(format!(

@@ -20,13 +20,22 @@ fn docker_cmd() -> Command {
     cmd
 }
 
+/// Run a Docker CLI command on a blocking thread pool to avoid starving Tokio.
+async fn docker_output(args: Vec<String>) -> Result<std::process::Output, String> {
+    tokio::task::spawn_blocking(move || {
+        docker_cmd()
+            .args(args.iter().map(|s| s.as_str()).collect::<Vec<&str>>())
+            .output()
+            .map_err(|e| format!("Failed to run docker command: {}", e))
+    })
+    .await
+    .map_err(|e| format!("Task join error: {}", e))?
+}
+
 /// List Docker Compose projects
 #[tauri::command]
 pub async fn list_compose_projects() -> Result<Vec<ComposeProject>, String> {
-    let output = docker_cmd()
-        .args(["compose", "ls", "--format", "json", "-a"])
-        .output()
-        .map_err(|e| format!("Failed to list compose projects: {}", e))?;
+    let output = docker_output(vec!["compose".into(), "ls".into(), "--format".into(), "json".into(), "-a".into()]).await?;
 
     if !output.status.success() {
         return Err(format!(
@@ -56,20 +65,17 @@ pub async fn list_compose_projects() -> Result<Vec<ComposeProject>, String> {
 /// Start a Docker Compose project
 #[tauri::command]
 pub async fn compose_up(project_dir: String, detach: bool) -> Result<String, String> {
-    let mut args = vec!["compose"];
+    let mut args = vec!["compose".to_string()];
     if !project_dir.is_empty() {
-        args.push("-f");
-        args.push(&project_dir);
+        args.push("-f".to_string());
+        args.push(project_dir);
     }
-    args.push("up");
+    args.push("up".to_string());
     if detach {
-        args.push("-d");
+        args.push("-d".to_string());
     }
 
-    let output = docker_cmd()
-        .args(&args)
-        .output()
-        .map_err(|e| format!("Failed to compose up: {}", e))?;
+    let output = docker_output(args).await?;
 
     if !output.status.success() {
         return Err(format!(
@@ -84,10 +90,7 @@ pub async fn compose_up(project_dir: String, detach: bool) -> Result<String, Str
 /// Stop a Docker Compose project
 #[tauri::command]
 pub async fn compose_down(project_name: String) -> Result<String, String> {
-    let output = docker_cmd()
-        .args(["compose", "-p", &project_name, "down"])
-        .output()
-        .map_err(|e| format!("Failed to compose down: {}", e))?;
+    let output = docker_output(vec!["compose".into(), "-p".into(), project_name.clone(), "down".into()]).await?;
 
     if !output.status.success() {
         return Err(format!(
@@ -102,10 +105,7 @@ pub async fn compose_down(project_name: String) -> Result<String, String> {
 /// Restart a Docker Compose project
 #[tauri::command]
 pub async fn compose_restart(project_name: String) -> Result<String, String> {
-    let output = docker_cmd()
-        .args(["compose", "-p", &project_name, "restart"])
-        .output()
-        .map_err(|e| format!("Failed to compose restart: {}", e))?;
+    let output = docker_output(vec!["compose".into(), "-p".into(), project_name.clone(), "restart".into()]).await?;
 
     if !output.status.success() {
         return Err(format!(
@@ -121,18 +121,10 @@ pub async fn compose_restart(project_name: String) -> Result<String, String> {
 #[tauri::command]
 pub async fn compose_logs(project_name: String, lines: u32) -> Result<String, String> {
     let tail = lines.to_string();
-    let output = docker_cmd()
-        .args([
-            "compose",
-            "-p",
-            &project_name,
-            "logs",
-            "--tail",
-            &tail,
-            "--no-color",
-        ])
-        .output()
-        .map_err(|e| format!("Failed to get compose logs: {}", e))?;
+    let output = docker_output(vec![
+        "compose".into(), "-p".into(), project_name, "logs".into(),
+        "--tail".into(), tail, "--no-color".into(),
+    ]).await?;
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
@@ -149,10 +141,9 @@ pub async fn compose_logs(project_name: String, lines: u32) -> Result<String, St
 /// List services in a compose project
 #[tauri::command]
 pub async fn compose_ps(project_name: String) -> Result<String, String> {
-    let output = docker_cmd()
-        .args(["compose", "-p", &project_name, "ps", "--format", "json"])
-        .output()
-        .map_err(|e| format!("Failed to list compose services: {}", e))?;
+    let output = docker_output(vec![
+        "compose".into(), "-p".into(), project_name, "ps".into(), "--format".into(), "json".into(),
+    ]).await?;
 
     if !output.status.success() {
         return Err(format!(
