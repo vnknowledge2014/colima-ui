@@ -78,13 +78,18 @@ pub async fn start_docker_watcher(app: AppHandle, state: Arc<RwLock<DockerState>
         // Try to connect (or reconnect) to Docker daemon via Colima socket
         let docker = match connect_bollard() {
             Some(d) => {
-                // Verify connection is actually alive with a ping
-                if d.ping().await.is_err() {
-                    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
-                    continue;
+                // Verify connection is actually alive with a ping (with timeout)
+                match tokio::time::timeout(std::time::Duration::from_secs(5), d.ping()).await {
+                    Ok(Ok(_)) => {
+                        eprintln!("[DockerWatcher] Connected to Docker daemon");
+                        d
+                    }
+                    _ => {
+                        eprintln!("[DockerWatcher] Docker ping failed or timed out");
+                        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                        continue;
+                    }
                 }
-                eprintln!("[DockerWatcher] Connected to Docker daemon");
-                d
             }
             None => {
                 tokio::time::sleep(std::time::Duration::from_secs(2)).await;
@@ -138,7 +143,11 @@ pub async fn start_docker_watcher(app: AppHandle, state: Arc<RwLock<DockerState>
         }
 
         // Stream ended — check if Docker is actually gone or just a transient stream error
-        if docker.ping().await.is_ok() {
+        let ping_ok = matches!(
+            tokio::time::timeout(std::time::Duration::from_secs(5), docker.ping()).await,
+            Ok(Ok(_))
+        );
+        if ping_ok {
             // Docker is still alive — transient stream error.
             // Don't clear state, just reconnect the event stream.
             eprintln!("[DockerWatcher] Event stream interrupted but Docker is alive — reconnecting stream");
@@ -242,21 +251,43 @@ async fn update_cache(
     docker: &Docker,
     state: &Arc<RwLock<DockerState>>,
 ) -> Result<serde_json::Value, String> {
-    let containers = docker
-        .list_containers(Some(ListContainersOptions::<String> {
+    let containers = match tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        docker.list_containers(Some(ListContainersOptions::<String> {
             all: true,
             ..Default::default()
-        }))
-        .await
-        .unwrap_or_default();
+        })),
+    )
+    .await
+    {
+        Ok(Ok(c)) => c,
+        Ok(Err(e)) => {
+            eprintln!("[DockerWatcher] list_containers error: {}", e);
+            vec![]
+        }
+        Err(_) => {
+            return Err("update_cache: list_containers timed out".to_string());
+        }
+    };
 
-    let images = docker
-        .list_images(Some(ListImagesOptions::<String> {
+    let images = match tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        docker.list_images(Some(ListImagesOptions::<String> {
             all: false,
             ..Default::default()
-        }))
-        .await
-        .unwrap_or_default();
+        })),
+    )
+    .await
+    {
+        Ok(Ok(i)) => i,
+        Ok(Err(e)) => {
+            eprintln!("[DockerWatcher] list_images error: {}", e);
+            vec![]
+        }
+        Err(_) => {
+            return Err("update_cache: list_images timed out".to_string());
+        }
+    };
 
     let mapped_containers = map_containers(&containers);
     let mapped_images = map_images(&images);

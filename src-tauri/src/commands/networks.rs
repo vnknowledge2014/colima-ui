@@ -29,16 +29,23 @@ fn docker_cmd() -> Command {
     cmd
 }
 
-/// Run a Docker CLI command on a blocking thread pool to avoid starving Tokio.
+/// Run a Docker CLI command on a blocking thread pool with a 10s timeout.
 async fn docker_output(args: Vec<String>) -> Result<std::process::Output, String> {
-    tokio::task::spawn_blocking(move || {
-        docker_cmd()
-            .args(args.iter().map(|s| s.as_str()).collect::<Vec<&str>>())
-            .output()
-            .map_err(|e| format!("Failed to run docker command: {}", e))
-    })
-    .await
-    .map_err(|e| format!("Task join error: {}", e))?
+    let result = tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        tokio::task::spawn_blocking(move || {
+            docker_cmd()
+                .args(args.iter().map(|s| s.as_str()).collect::<Vec<&str>>())
+                .output()
+                .map_err(|e| format!("Failed to run docker command: {}", e))
+        }),
+    )
+    .await;
+
+    match result {
+        Ok(join_result) => join_result.map_err(|e| format!("Task join error: {}", e))?,
+        Err(_) => Err("Docker command timed out (daemon may be unresponsive)".to_string()),
+    }
 }
 
 /// List all Docker networks

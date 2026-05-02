@@ -211,7 +211,10 @@ function App() {
       let unlisten3: (() => void) | undefined;
 
       // Helper: fetch all Docker resource data (volumes + networks)
+      // Retries automatically on failure (e.g. when Docker daemon is temporarily unresponsive)
+      let retryTimer: ReturnType<typeof setTimeout> | null = null;
       const refetchAllResources = async () => {
+        let fetchFailed = false;
         try {
           const [c, i] = await Promise.all([
             dockerApi.listContainers(true),
@@ -221,17 +224,24 @@ function App() {
           setImages(i);
           setDockerLoading(false);
         } catch {
-          setDockerLoading(false);
+          fetchFailed = true;
+          // Keep loading=true during retries so user sees spinner, not "No containers"
         }
         // Volumes & Networks — fetch independently so one failure doesn't block the other
         volumesApi.listVolumes().then((v) => {
           setVolumes(v);
           setVolumesLoading(false);
-        }).catch(() => { setVolumesLoading(false); });
+        }).catch(() => { /* keep loading=true for retry */ });
         networksApi.listNetworks().then((n) => {
           setNetworks(n);
           setNetworksLoading(false);
-        }).catch(() => { setNetworksLoading(false); });
+        }).catch(() => { /* keep loading=true for retry */ });
+
+        // If any fetch failed, schedule a retry
+        if (fetchFailed) {
+          if (retryTimer) clearTimeout(retryTimer);
+          retryTimer = setTimeout(() => refetchAllResources(), 5000);
+        }
       };
 
       // Immediate fetch via normalized API (handles field-name mapping)
@@ -282,7 +292,7 @@ function App() {
           refetchAllResources();
         }).then((fn) => { unlisten3 = fn; });
       });
-      return () => { if (unlisten) unlisten(); if (unlisten2) unlisten2(); if (unlisten3) unlisten3(); };
+      return () => { if (unlisten) unlisten(); if (unlisten2) unlisten2(); if (unlisten3) unlisten3(); if (retryTimer) clearTimeout(retryTimer); };
     } else {
       // Browser mode: immediate fetch + SSE for real-time updates
       let pollInterval: ReturnType<typeof setInterval> | null = null;

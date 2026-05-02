@@ -49,20 +49,29 @@ fn docker_cmd() -> Command {
     cmd
 }
 
-/// Run a Docker CLI command on a blocking thread pool.
+/// Run a Docker CLI command on a blocking thread pool with a timeout.
 /// All Docker CLI calls MUST use this instead of calling .output() directly,
 /// because .output() blocks the current thread and starves the Tokio runtime
 /// when multiple commands are issued concurrently (e.g. list_containers +
 /// list_images + list_volumes + list_networks all fired at once from the UI).
+/// Timeout: 10 seconds. If Docker daemon is frozen, we return Err instead of
+/// hanging forever (which causes permanent loading spinners in the UI).
 async fn docker_output(args: Vec<String>) -> Result<std::process::Output, String> {
-    tokio::task::spawn_blocking(move || {
-        docker_cmd()
-            .args(args.iter().map(|s| s.as_str()).collect::<Vec<&str>>())
-            .output()
-            .map_err(|e| format!("Failed to run docker command: {}", e))
-    })
-    .await
-    .map_err(|e| format!("Task join error: {}", e))?
+    let result = tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        tokio::task::spawn_blocking(move || {
+            docker_cmd()
+                .args(args.iter().map(|s| s.as_str()).collect::<Vec<&str>>())
+                .output()
+                .map_err(|e| format!("Failed to run docker command: {}", e))
+        }),
+    )
+    .await;
+
+    match result {
+        Ok(join_result) => join_result.map_err(|e| format!("Task join error: {}", e))?,
+        Err(_) => Err("Docker command timed out (daemon may be unresponsive)".to_string()),
+    }
 }
 
 /// List all Docker containers
@@ -78,18 +87,23 @@ pub async fn list_containers(
     {
         let lock = state.read().await;
         if let Some(docker) = &lock.docker {
-            match docker
-                .list_containers(Some(bollard::container::ListContainersOptions::<String> {
+            match tokio::time::timeout(
+                std::time::Duration::from_secs(5),
+                docker.list_containers(Some(bollard::container::ListContainersOptions::<String> {
                     all,
                     ..Default::default()
-                }))
-                .await
+                })),
+            )
+            .await
             {
-                Ok(containers) => {
+                Ok(Ok(containers)) => {
                     return Ok(crate::docker_state::map_containers(&containers));
                 }
-                Err(e) => {
+                Ok(Err(e)) => {
                     bollard_error = Some(format!("{}", e));
+                }
+                Err(_) => {
+                    bollard_error = Some("Bollard timed out".to_string());
                 }
             }
         }
@@ -234,18 +248,23 @@ pub async fn list_images(
     {
         let lock = state.read().await;
         if let Some(docker) = &lock.docker {
-            match docker
-                .list_images(Some(bollard::image::ListImagesOptions::<String> {
+            match tokio::time::timeout(
+                std::time::Duration::from_secs(5),
+                docker.list_images(Some(bollard::image::ListImagesOptions::<String> {
                     all: false,
                     ..Default::default()
-                }))
-                .await
+                })),
+            )
+            .await
             {
-                Ok(images) => {
+                Ok(Ok(images)) => {
                     return Ok(crate::docker_state::map_images(&images));
                 }
-                Err(e) => {
+                Ok(Err(e)) => {
                     bollard_error = Some(format!("{}", e));
+                }
+                Err(_) => {
+                    bollard_error = Some("Bollard timed out".to_string());
                 }
             }
         }
