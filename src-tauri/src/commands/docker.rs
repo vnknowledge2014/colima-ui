@@ -42,7 +42,9 @@ pub struct DockerImage {
 }
 
 fn docker_cmd() -> Command {
-    let mut cmd = Command::new("docker");
+    let resolved = crate::path_util::resolve_binary("docker");
+    let mut cmd = Command::new(&resolved);
+    crate::path_util::apply_path_to_cmd(&mut cmd);
     if let Some(host) = crate::path_util::detect_docker_host() {
         cmd.env("DOCKER_HOST", host);
     }
@@ -592,4 +594,72 @@ pub async fn unpause_container(container_id: String) -> Result<String, String> {
     }
 
     Ok(format!("Container {} unpaused", container_id))
+}
+
+/// Diagnostic command to debug Docker connectivity issues from inside the app.
+/// Reports: resolved paths, socket detection, DOCKER_HOST, PATH, and test results.
+#[tauri::command]
+pub async fn docker_diagnose(
+    state: tauri::State<'_, std::sync::Arc<tokio::sync::RwLock<crate::docker_state::DockerState>>>,
+) -> Result<serde_json::Value, String> {
+    let docker_path = crate::path_util::resolve_binary("docker");
+    let colima_path = crate::path_util::resolve_binary("colima");
+    let docker_host = crate::path_util::detect_docker_host();
+    let env_path = std::env::var("PATH").unwrap_or_default();
+    let home = std::env::var("HOME").unwrap_or_default();
+
+    // Check socket existence
+    let socket_path = docker_host.as_ref().map(|h| h.trim_start_matches("unix://").to_string());
+    let socket_exists = socket_path.as_ref().map(|p| std::path::Path::new(p).exists()).unwrap_or(false);
+
+    // Check Bollard state
+    let bollard_connected = {
+        let lock = state.read().await;
+        lock.docker.is_some()
+    };
+
+    // Test docker CLI with timeout
+    let cli_test = tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        tokio::task::spawn_blocking(move || {
+            let output = docker_cmd()
+                .args(["version", "--format", "{{.Server.Version}}"])
+                .output();
+            match output {
+                Ok(o) => {
+                    let stdout = String::from_utf8_lossy(&o.stdout).trim().to_string();
+                    let stderr = String::from_utf8_lossy(&o.stderr).trim().to_string();
+                    serde_json::json!({
+                        "success": o.status.success(),
+                        "exit_code": o.status.code(),
+                        "stdout": stdout,
+                        "stderr": stderr,
+                    })
+                }
+                Err(e) => serde_json::json!({
+                    "success": false,
+                    "error": format!("{}", e),
+                }),
+            }
+        }),
+    )
+    .await;
+
+    let cli_result = match cli_test {
+        Ok(Ok(v)) => v,
+        Ok(Err(e)) => serde_json::json!({"error": format!("join error: {}", e)}),
+        Err(_) => serde_json::json!({"error": "timed out after 5s"}),
+    };
+
+    Ok(serde_json::json!({
+        "docker_binary": docker_path,
+        "colima_binary": colima_path,
+        "docker_host": docker_host,
+        "socket_path": socket_path,
+        "socket_exists": socket_exists,
+        "bollard_connected": bollard_connected,
+        "home": home,
+        "path": env_path,
+        "cli_test": cli_result,
+    }))
 }

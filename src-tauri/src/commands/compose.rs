@@ -13,7 +13,9 @@ pub struct ComposeProject {
 }
 
 fn docker_cmd() -> Command {
-    let mut cmd = Command::new("docker");
+    let resolved = crate::path_util::resolve_binary("docker");
+    let mut cmd = Command::new(&resolved);
+    crate::path_util::apply_path_to_cmd(&mut cmd);
     if let Some(host) = crate::path_util::detect_docker_host() {
         cmd.env("DOCKER_HOST", host);
     }

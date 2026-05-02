@@ -88,6 +88,7 @@ pub fn run() {
             docker::rename_container,
             docker::pause_container,
             docker::unpause_container,
+            docker::docker_diagnose,
             // Volume commands
             volumes::list_volumes,
             volumes::create_volume,

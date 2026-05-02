@@ -66,7 +66,10 @@ pub struct StartConfig {
 }
 
 fn colima_cmd() -> Command {
-    Command::new("colima")
+    let resolved = crate::path_util::resolve_binary("colima");
+    let mut cmd = Command::new(&resolved);
+    crate::path_util::apply_path_to_cmd(&mut cmd);
+    cmd
 }
 
 /// List all Colima instances
@@ -273,32 +276,44 @@ pub async fn delete_instance(
 /// Get extended status of an instance
 #[tauri::command]
 pub async fn instance_status(profile: String) -> Result<InstanceStatus, String> {
-    let mut args = vec!["status", "--json", "--extended"];
+    let result = tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        tokio::task::spawn_blocking(move || {
+            let mut args = vec!["status", "--json", "--extended"];
 
-    let profile_flag;
-    if profile != "default" && !profile.is_empty() {
-        profile_flag = profile.clone();
-        args.push("--profile");
-        args.push(&profile_flag);
+            let profile_flag;
+            if profile != "default" && !profile.is_empty() {
+                profile_flag = profile.clone();
+                args.push("--profile");
+                args.push(&profile_flag);
+            }
+
+            let output = colima_cmd()
+                .args(&args)
+                .output()
+                .map_err(|e| format!("Failed to get status: {}", e))?;
+
+            if !output.status.success() {
+                return Err(format!(
+                    "colima status failed: {}",
+                    String::from_utf8_lossy(&output.stderr)
+                ));
+            }
+
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let status: InstanceStatus =
+                serde_json::from_str(&stdout).map_err(|e| format!("Failed to parse status: {}", e))?;
+
+            Ok(status)
+        }),
+    )
+    .await;
+
+    match result {
+        Ok(Ok(status)) => status,
+        Ok(Err(e)) => Err(format!("Task join error: {}", e)),
+        Err(_) => Err("colima status timed out (daemon may be unresponsive)".to_string()),
     }
-
-    let output = colima_cmd()
-        .args(&args)
-        .output()
-        .map_err(|e| format!("Failed to get status: {}", e))?;
-
-    if !output.status.success() {
-        return Err(format!(
-            "colima status failed: {}",
-            String::from_utf8_lossy(&output.stderr)
-        ));
-    }
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let status: InstanceStatus =
-        serde_json::from_str(&stdout).map_err(|e| format!("Failed to parse status: {}", e))?;
-
-    Ok(status)
 }
 
 /// SSH into a Colima instance (returns the command to execute)
