@@ -106,6 +106,8 @@ pub async fn start_docker_watcher(app: AppHandle, state: Arc<RwLock<DockerState>
         if let Ok(data) = update_cache(&docker, &state).await {
             let _ = app.emit("docker-state-updated", data);
         }
+        // Notify frontend of reconnection so it can refetch volumes/networks/compose
+        let _ = app.emit("docker-reconnected", serde_json::json!({}));
 
         // Stream Docker events until connection drops
         // Debounce: coalesce rapid event bursts (e.g., docker compose up fires 40+ events)
@@ -128,14 +130,23 @@ pub async fn start_docker_watcher(app: AppHandle, state: Arc<RwLock<DockerState>
                     // dropped — the next event after the window will trigger update
                 }
                 Err(_) => {
-                    // Connection error — break to reconnect
+                    // Event stream error — could be transient (idle timeout, brief hiccup)
+                    // Verify Docker is truly down before nuking all state
                     break;
                 }
             }
         }
 
-        // Stream ended (Docker stopped or connection lost)
-        // Clear stale data and notify frontend
+        // Stream ended — check if Docker is actually gone or just a transient stream error
+        if docker.ping().await.is_ok() {
+            // Docker is still alive — transient stream error.
+            // Don't clear state, just reconnect the event stream.
+            eprintln!("[DockerWatcher] Event stream interrupted but Docker is alive — reconnecting stream");
+            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+            continue;
+        }
+
+        // Docker is truly unreachable — clear stale data and notify frontend
         {
             let mut lock = state.write().await;
             lock.docker = None;

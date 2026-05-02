@@ -1,10 +1,10 @@
 import React, { useState, useEffect, useCallback, Suspense } from "react";
-import { colimaApi, dockerApi, systemApi, ColimaInstance, SystemInfo } from "./lib/api";
+import { colimaApi, dockerApi, volumesApi, networksApi, systemApi, ColimaInstance, SystemInfo } from "./lib/api";
 import { onToast, ToastMessage } from "./lib/globalToast";
 import { WarningIcon } from "./components/Icons";
 import { useSetAtom } from "jotai";
 import { containersAtom, imagesAtom, dockerLoadingAtom } from "./store/dockerAtom";
-import { volumesAtom, networksAtom } from "./store/resourceAtom";
+import { volumesAtom, volumesLoadingAtom, networksAtom, networksLoadingAtom } from "./store/resourceAtom";
 import "./index.css";
 
 // Lazy-loaded pages — each becomes a separate chunk
@@ -199,26 +199,43 @@ function App() {
   const setImages = useSetAtom(imagesAtom);
   const setDockerLoading = useSetAtom(dockerLoadingAtom);
   const setVolumes = useSetAtom(volumesAtom);
+  const setVolumesLoading = useSetAtom(volumesLoadingAtom);
   const setNetworks = useSetAtom(networksAtom);
+  const setNetworksLoading = useSetAtom(networksLoadingAtom);
 
   // Global Docker State Effect
   useEffect(() => {
     if (isTauri) {
       let unlisten: (() => void) | undefined;
       let unlisten2: (() => void) | undefined;
+      let unlisten3: (() => void) | undefined;
+
+      // Helper: fetch all Docker resource data (volumes + networks)
+      const refetchAllResources = async () => {
+        try {
+          const [c, i] = await Promise.all([
+            dockerApi.listContainers(true),
+            dockerApi.listImages(),
+          ]);
+          setContainers(c);
+          setImages(i);
+          setDockerLoading(false);
+        } catch {
+          setDockerLoading(false);
+        }
+        // Volumes & Networks — fetch independently so one failure doesn't block the other
+        volumesApi.listVolumes().then((v) => {
+          setVolumes(v);
+          setVolumesLoading(false);
+        }).catch(() => { setVolumesLoading(false); });
+        networksApi.listNetworks().then((n) => {
+          setNetworks(n);
+          setNetworksLoading(false);
+        }).catch(() => { setNetworksLoading(false); });
+      };
 
       // Immediate fetch via normalized API (handles field-name mapping)
-      Promise.all([
-        dockerApi.listContainers(true),
-        dockerApi.listImages(),
-      ]).then(([c, i]) => {
-        setContainers(c);
-        setImages(i);
-        setDockerLoading(false);
-      }).catch(() => {
-        // Docker not available yet — atoms stay empty
-        setDockerLoading(false);
-      });
+      refetchAllResources();
 
       // Also subscribe to push updates for real-time sync
       import("@tauri-apps/api/event").then((mod) => {
@@ -248,15 +265,24 @@ function App() {
         }).then((fn) => { unlisten = fn; });
 
         // Listen for connection-lost event to clear ALL Docker state
+        // Set loading=true so pages show spinner (not empty state) on next visit
         mod.listen("docker-connection-lost", () => {
           setContainers([]);
           setImages([]);
           setVolumes([]);
           setNetworks([]);
-          setDockerLoading(false);
+          setDockerLoading(true);
+          setVolumesLoading(true);
+          setNetworksLoading(true);
         }).then((fn) => { unlisten2 = fn; });
+
+        // Listen for reconnection — refetch ALL resources (volumes, networks, etc.)
+        // This ensures tabs that were cleared by connection-lost get repopulated
+        mod.listen("docker-reconnected", () => {
+          refetchAllResources();
+        }).then((fn) => { unlisten3 = fn; });
       });
-      return () => { if (unlisten) unlisten(); if (unlisten2) unlisten2(); };
+      return () => { if (unlisten) unlisten(); if (unlisten2) unlisten2(); if (unlisten3) unlisten3(); };
     } else {
       // Browser mode: immediate fetch + SSE for real-time updates
       let pollInterval: ReturnType<typeof setInterval> | null = null;
@@ -297,7 +323,7 @@ function App() {
         if (pollInterval) clearInterval(pollInterval);
       };
     }
-  }, [setContainers, setImages, setDockerLoading]);
+  }, [setContainers, setImages, setDockerLoading, setVolumes, setVolumesLoading, setNetworks, setNetworksLoading]);
 
   // Smooth 1-second clock
   useEffect(() => {
