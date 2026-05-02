@@ -3561,13 +3561,35 @@ async fn sse_docker_watcher() {
         publish_sse_event("docker-state-updated", &data);
     }
 
-    // Watch events and push updates
+    // Watch events and push updates (trailing-edge debounce — same as Tauri watcher)
     let mut stream = docker.events(Some(EventsOptions::<String>::default()));
-    while let Some(event) = stream.next().await {
-        if event.is_ok() {
-            if let Some(data) = fetch_docker_state(&docker).await {
-                publish_sse_event("docker-state-updated", &data);
+    let debounce_ms: u64 = 500;
+
+    loop {
+        let event = tokio::select! {
+            ev = stream.next() => ev,
+        };
+
+        match event {
+            Some(Ok(_)) => {
+                // Drain burst of events, wait for 500ms silence before fetching
+                loop {
+                    match tokio::time::timeout(
+                        std::time::Duration::from_millis(debounce_ms),
+                        stream.next(),
+                    )
+                    .await
+                    {
+                        Ok(Some(Ok(_))) => continue,
+                        Ok(Some(Err(_))) | Ok(None) => break,
+                        Err(_) => break, // timeout — burst settled
+                    }
+                }
+                if let Some(data) = fetch_docker_state(&docker).await {
+                    publish_sse_event("docker-state-updated", &data);
+                }
             }
+            Some(Err(_)) | None => break,
         }
     }
 }

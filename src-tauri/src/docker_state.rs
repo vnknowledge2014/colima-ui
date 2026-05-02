@@ -115,28 +115,60 @@ pub async fn start_docker_watcher(app: AppHandle, state: Arc<RwLock<DockerState>
         let _ = app.emit("docker-reconnected", serde_json::json!({}));
 
         // Stream Docker events until connection drops
-        // Debounce: coalesce rapid event bursts (e.g., docker compose up fires 40+ events)
-        // into a single update. Max 4 updates/second.
+        // Trailing-edge debounce: when events arrive in rapid bursts (e.g., docker stop
+        // fires kill→stop→die within ~200ms), wait for the burst to settle before
+        // refreshing. This ensures we always capture the FINAL state, not an
+        // intermediate transition state.
         let mut stream = docker.events(Some(EventsOptions::<String>::default()));
-        let mut last_update = tokio::time::Instant::now();
-        let debounce_interval = std::time::Duration::from_millis(250);
+        let debounce_ms: u64 = 500; // wait 500ms after last event before fetching
 
-        while let Some(event) = stream.next().await {
+        loop {
+            // Wait for the next event
+            let event = tokio::select! {
+                ev = stream.next() => ev,
+            };
+
             match event {
-                Ok(_) => {
-                    let now = tokio::time::Instant::now();
-                    if now.duration_since(last_update) >= debounce_interval {
-                        last_update = now;
-                        if let Ok(data) = update_cache(&docker, &state).await {
-                            let _ = app.emit("docker-state-updated", data);
+                Some(Ok(_)) => {
+                    // Event received — now drain any further events within the debounce window
+                    // (trailing-edge: keep resetting the timer while events keep coming)
+                    loop {
+                        match tokio::time::timeout(
+                            std::time::Duration::from_millis(debounce_ms),
+                            stream.next(),
+                        )
+                        .await
+                        {
+                            Ok(Some(Ok(_))) => {
+                                // Another event within the window — keep draining
+                                continue;
+                            }
+                            Ok(Some(Err(_))) => {
+                                // Stream error during drain — break to outer error handling
+                                break;
+                            }
+                            Ok(None) => {
+                                // Stream ended during drain
+                                break;
+                            }
+                            Err(_) => {
+                                // Timeout — debounce window elapsed with no new events.
+                                // NOW fetch the final state.
+                                break;
+                            }
                         }
                     }
-                    // Events arriving within the debounce window are silently
-                    // dropped — the next event after the window will trigger update
+                    // Fetch and emit the settled state
+                    if let Ok(data) = update_cache(&docker, &state).await {
+                        let _ = app.emit("docker-state-updated", data);
+                    }
                 }
-                Err(_) => {
-                    // Event stream error — could be transient (idle timeout, brief hiccup)
-                    // Verify Docker is truly down before nuking all state
+                Some(Err(_)) => {
+                    // Event stream error — break to reconnect logic
+                    break;
+                }
+                None => {
+                    // Stream ended
                     break;
                 }
             }

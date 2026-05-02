@@ -3,7 +3,7 @@ import { dockerApi, DockerContainer } from "../lib/api";
 import { globalToast } from "../lib/globalToast";
 import { ConfirmDialog, useConfirm } from "../components/ConfirmDialog";
 import { useAtom, useAtomValue } from "jotai";
-import { containersAtom, dockerLoadingAtom } from "../store/dockerAtom";
+import { containersAtom, dockerLoadingAtom, setEventCooldown } from "../store/dockerAtom";
 import { StopIcon, PlayIcon, PauseIcon, RestartIcon, CloseIcon, WarningIcon } from "../components/Icons";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import ContextMenu, { ContextMenuItem } from "../components/ContextMenu";
@@ -641,6 +641,7 @@ export default function Containers() {
 
   const handleAction = async (id: string, name: string, action: string) => {
     setActionLoading(`${id}-${action}`);
+    setEventCooldown(); // Prevent stale watcher events from overwriting our fresh fetch
     try {
       switch (action) {
         case "start": await dockerApi.startContainer(id); break;
@@ -675,6 +676,7 @@ export default function Containers() {
     const ok = await confirm({ title: "Stop Selected", message: `Stop ${names.length} container${names.length > 1 ? "s" : ""}?\n\n${names.join(", ")}`, confirmText: "Stop All", variant: "warning" });
     if (!ok) return;
     setBatchLoading(true);
+    setEventCooldown();
     let ok_count = 0;
     for (const c of filtered.filter(c => selected.has(c.Id) && c.State === "running")) {
       try { await dockerApi.stopContainer(c.Id); ok_count++; } catch { /* continue */ }
@@ -691,6 +693,7 @@ export default function Containers() {
     const ok = await confirm({ title: "Remove Selected", message: `Remove ${names.length} container${names.length > 1 ? "s" : ""}?\n\n${names.join(", ")}\n\nThis cannot be undone.`, confirmText: `Remove ${names.length}`, variant: "danger" });
     if (!ok) return;
     setBatchLoading(true);
+    setEventCooldown();
     let ok_count = 0;
     for (const c of filtered.filter(c => selected.has(c.Id))) {
       try { await dockerApi.removeContainer(c.Id, true); ok_count++; } catch { /* continue */ }
