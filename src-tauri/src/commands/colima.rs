@@ -184,32 +184,36 @@ pub async fn stop_instance(
         "images": []
     }));
 
-    let mut args = vec!["stop"];
+    // `colima stop` blocks for 30-60s — run on thread pool to avoid starving tokio
+    tokio::task::spawn_blocking(move || {
+        let mut args = vec!["stop".to_string()];
 
-    let profile_flag;
-    if profile != "default" && !profile.is_empty() {
-        profile_flag = profile.clone();
-        args.push("--profile");
-        args.push(&profile_flag);
-    }
+        if profile != "default" && !profile.is_empty() {
+            args.push("--profile".to_string());
+            args.push(profile.clone());
+        }
 
-    if force {
-        args.push("--force");
-    }
+        if force {
+            args.push("--force".to_string());
+        }
 
-    let output = colima_cmd()
-        .args(&args)
-        .output()
-        .map_err(|e| format!("Failed to stop colima: {}", e))?;
+        let args_ref: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
+        let output = colima_cmd()
+            .args(&args_ref)
+            .output()
+            .map_err(|e| format!("Failed to stop colima: {}", e))?;
 
-    if !output.status.success() {
-        return Err(format!(
-            "colima stop failed: {}",
-            String::from_utf8_lossy(&output.stderr)
-        ));
-    }
+        if !output.status.success() {
+            return Err(format!(
+                "colima stop failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            ));
+        }
 
-    Ok(format!("Instance '{}' stopped", profile))
+        Ok(format!("Instance '{}' stopped", profile))
+    })
+    .await
+    .map_err(|e| format!("Task join error: {}", e))?
 }
 
 /// Delete a Colima instance
@@ -234,32 +238,36 @@ pub async fn delete_instance(
         "images": []
     }));
 
-    let mut args = vec!["delete"];
+    // `colima delete` can block — run on thread pool to avoid starving tokio
+    tokio::task::spawn_blocking(move || {
+        let mut args = vec!["delete".to_string()];
 
-    let profile_flag;
-    if profile != "default" && !profile.is_empty() {
-        profile_flag = profile.clone();
-        args.push("--profile");
-        args.push(&profile_flag);
-    }
+        if profile != "default" && !profile.is_empty() {
+            args.push("--profile".to_string());
+            args.push(profile.clone());
+        }
 
-    if force {
-        args.push("--force");
-    }
+        if force {
+            args.push("--force".to_string());
+        }
 
-    let output = colima_cmd()
-        .args(&args)
-        .output()
-        .map_err(|e| format!("Failed to delete colima: {}", e))?;
+        let args_ref: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
+        let output = colima_cmd()
+            .args(&args_ref)
+            .output()
+            .map_err(|e| format!("Failed to delete colima: {}", e))?;
 
-    if !output.status.success() {
-        return Err(format!(
-            "colima delete failed: {}",
-            String::from_utf8_lossy(&output.stderr)
-        ));
-    }
+        if !output.status.success() {
+            return Err(format!(
+                "colima delete failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            ));
+        }
 
-    Ok(format!("Instance '{}' deleted", profile))
+        Ok(format!("Instance '{}' deleted", profile))
+    })
+    .await
+    .map_err(|e| format!("Task join error: {}", e))?
 }
 
 /// Get extended status of an instance
@@ -312,35 +320,39 @@ pub async fn kubernetes_action(profile: String, action: String) -> Result<String
         return Err(format!("Invalid kubernetes action: {}", action));
     }
 
-    let mut args = vec!["kubernetes", action.as_str()];
+    // `colima kubernetes` can block for a long time — run on thread pool
+    tokio::task::spawn_blocking(move || {
+        let mut args = vec!["kubernetes".to_string(), action.clone()];
 
-    let profile_flag;
-    if profile != "default" && !profile.is_empty() {
-        profile_flag = profile.clone();
-        args.push("--profile");
-        args.push(&profile_flag);
-    }
-
-    let output = colima_cmd()
-        .args(&args)
-        .output()
-        .map_err(|e| format!("Failed to execute kubernetes {}: {}", action, e))?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-        // Treat "not enabled" / "not running" as success for delete/stop
-        if (action == "delete" || action == "stop")
-            && (stderr.contains("not enabled") || stderr.contains("not running"))
-        {
-            return Ok(format!(
-                "Kubernetes {} completed (already disabled)",
-                action
-            ));
+        if profile != "default" && !profile.is_empty() {
+            args.push("--profile".to_string());
+            args.push(profile.clone());
         }
-        return Err(format!("kubernetes {} failed: {}", action, stderr));
-    }
 
-    Ok(format!("Kubernetes {} completed", action))
+        let args_ref: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
+        let output = colima_cmd()
+            .args(&args_ref)
+            .output()
+            .map_err(|e| format!("Failed to execute kubernetes {}: {}", action, e))?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+            // Treat "not enabled" / "not running" as success for delete/stop
+            if (action == "delete" || action == "stop")
+                && (stderr.contains("not enabled") || stderr.contains("not running"))
+            {
+                return Ok(format!(
+                    "Kubernetes {} completed (already disabled)",
+                    action
+                ));
+            }
+            return Err(format!("kubernetes {} failed: {}", action, stderr));
+        }
+
+        Ok(format!("Kubernetes {} completed", action))
+    })
+    .await
+    .map_err(|e| format!("Task join error: {}", e))?
 }
 
 // ===== Diagnostic Log Collection for AI Agent =====
