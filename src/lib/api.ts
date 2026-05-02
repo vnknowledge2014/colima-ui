@@ -289,8 +289,8 @@ export const dockerApi = {
     call<string>("unpause_container", { containerId }, "POST", "/api/containers/unpause", undefined, { id: containerId }),
   systemDf: () =>
     call<string>("system_df", undefined, "GET", "/api/docker/df"),
-  systemPrune: () =>
-    call<string>("system_prune", undefined, "POST", "/api/docker/prune"),
+  systemPrune: (all = true) =>
+    call<string>("system_prune", { all }, "POST", "/api/docker/prune"),
 };
 
 // ===== Volumes API =====
