@@ -110,6 +110,8 @@ pub fn run() {
             system::check_system,
             system::get_colima_version,
             system::check_tool,
+            system::host_specs,
+            system::get_app_context,
             // Compose commands
             compose::list_compose_projects,
             compose::compose_up,

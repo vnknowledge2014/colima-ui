@@ -154,6 +154,7 @@ export default function AiChatBubble({ onNavigate }: AiChatBubbleProps) {
   const [statusText, setStatusText] = useState("");
   const [pendingApprovals, setPendingApprovals] = useState<{ id: number; command: string; resolve: (v: boolean) => void }[]>([]);
   const [feedbackDismissed, setFeedbackDismissed] = useState(() => localStorage.getItem("ai_feedback_dismissed") === "true");
+  const [appContext, setAppContext] = useState("");
 
   // Config — shared localStorage keys
   const [provider, setProvider] = useState(() => localStorage.getItem("ai_provider") || "anthropic");
@@ -195,6 +196,13 @@ export default function AiChatBubble({ onNavigate }: AiChatBubbleProps) {
   useEffect(() => {
     if (showConfig) fetchModels();
   }, [provider, showConfig, fetchModels]);
+
+  // Load app context (CONTEXT.md) once on mount — Tier 1 AI knowledge injection
+  useEffect(() => {
+    aiApi.getAppContext()
+      .then(ctx => setAppContext(ctx))
+      .catch(() => { /* context unavailable — AI still works without it */ });
+  }, []);
 
   // Auto-scroll
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -247,6 +255,9 @@ export default function AiChatBubble({ onNavigate }: AiChatBubbleProps) {
 
     const chatHistory: ChatMessage[] = [
       { role: "system", content: SYSTEM_PROMPT },
+      // Tier 1: Authoritative ColimaUI + Colima knowledge (loaded from bundled CONTEXT.md)
+      ...(appContext ? [{ role: "system" as const, content: `## APP & TOOL CONTEXT\n\n${appContext}` }] : []),
+      // Tier 2: Knowledge Bank (proven fixes from user history)
       ...(kbContext ? [{ role: "system" as const, content: `[Knowledge Bank]\n${kbContext}` }] : []),
       ...messages.filter(m => m.role !== "system").map(m => ({
         role: m.role as "user" | "assistant",

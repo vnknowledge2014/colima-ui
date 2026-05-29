@@ -364,6 +364,15 @@ export interface PlatformInfo {
   package_managers: Array<{ name: string; available: boolean; version: string }>;
 }
 
+export interface HostSpecs {
+  cpu_cores: number;
+  memory_gib: number;
+  disk_free_gib: number;
+  disk_total_gib: number;
+  arch: string;
+  model: string;
+}
+
 export const systemApi = {
   checkSystem: () =>
     call<SystemInfo>("check_system", undefined, "GET", "/api/system/check"),
@@ -373,6 +382,10 @@ export const systemApi = {
     call<string>("system_prune", { all }, "POST", "/api/system/prune", { all: String(all) }),
   systemDf: () =>
     call<string>("system_df", undefined, "GET", "/api/system/df"),
+
+  // Host hardware detection
+  hostSpecs: () =>
+    call<HostSpecs>("host_specs", undefined, "GET", "/api/system/host-specs"),
 
   // Setup Wizard APIs
   getPlatform: () =>
@@ -647,6 +660,8 @@ export const aiApi = {
     }, "POST", "/api/ai/fetch-page", undefined, {
       url, max_length: maxLength, mode
     }),
+  getAppContext: () =>
+    call<string>("get_app_context", {}, "GET", "/api/ai/context"),
 };
 
 export interface SearchResult {

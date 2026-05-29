@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect } from "react";
-import { colimaApi, ColimaInstance, StartConfig, kindApi } from "../lib/api";
+import { colimaApi, ColimaInstance, StartConfig, kindApi, systemApi, HostSpecs, aiApi } from "../lib/api";
 import { globalToast } from "../lib/globalToast";
 import { CloseIcon, CheckIcon, StatusDot } from "../components/Icons";
 import ContextMenu, { ContextMenuItem } from "../components/ContextMenu";
@@ -37,14 +37,321 @@ function ConfirmDialog({ title, message, confirmLabel, danger, onConfirm, onCanc
   );
 }
 
+/* ===== Instance Profile Presets ===== */
+interface InstancePreset {
+  id: string;
+  label: string;
+  description: string;
+  icon: string;
+  cpus: number;
+  memory: number;
+  disk: number;
+  runtime: string;
+  color: string;
+  kubernetes?: boolean;
+  network_address?: boolean;
+}
+
+// ===== SVG Icons for Presets =====
+const PresetIcons: Record<string, React.FC<{ size?: number; color?: string }>> = {
+  minimal: ({ size = 18, color = "currentColor" }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
+    </svg>
+  ),
+  development: ({ size = 18, color = "currentColor" }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/>
+    </svg>
+  ),
+  standard: ({ size = 18, color = "currentColor" }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/>
+    </svg>
+  ),
+  power: ({ size = 18, color = "currentColor" }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z"/>
+    </svg>
+  ),
+  kubernetes: ({ size = 18, color = "currentColor" }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="12" r="10"/>
+      <line x1="12" y1="2" x2="12" y2="6"/><line x1="12" y1="18" x2="12" y2="22"/>
+      <line x1="4.93" y1="4.93" x2="7.76" y2="7.76"/><line x1="16.24" y1="16.24" x2="19.07" y2="19.07"/>
+      <line x1="2" y1="12" x2="6" y2="12"/><line x1="18" y1="12" x2="22" y2="12"/>
+      <line x1="4.93" y1="19.07" x2="7.76" y2="16.24"/><line x1="16.24" y1="7.76" x2="19.07" y2="4.93"/>
+    </svg>
+  ),
+  custom: ({ size = 18, color = "currentColor" }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/>
+      <circle cx="12" cy="12" r="3"/>
+    </svg>
+  ),
+};
+
+const CUSTOM_PRESETS_KEY = "colima-ui-custom-presets";
+const DETECTED_PRESETS_KEY = "colima-ui-detected-presets";
+const DETECTED_HOST_KEY = "colima-ui-detected-host";
+const LAST_PROFILE_KEY_PREFIX = "colima-ui-last-profile-";
+
+function loadCustomPresets(): InstancePreset[] {
+  try {
+    const raw = localStorage.getItem(CUSTOM_PRESETS_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch { return []; }
+}
+
+function saveCustomPresets(presets: InstancePreset[]) {
+  localStorage.setItem(CUSTOM_PRESETS_KEY, JSON.stringify(presets));
+}
+
+const CUSTOM_COLORS = [
+  "#e06c75", "#e5c07b", "#61afef", "#c678dd", "#56b6c2",
+  "#d19a66", "#98c379", "#be5046", "#61afef", "#abb2bf",
+];
+
+function loadDetectedPresets(): InstancePreset[] | null {
+  try {
+    const raw = localStorage.getItem(DETECTED_PRESETS_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch { return null; }
+}
+function saveDetectedPresets(p: InstancePreset[]) {
+  localStorage.setItem(DETECTED_PRESETS_KEY, JSON.stringify(p));
+}
+function loadDetectedHostInfo(): HostSpecs | null {
+  try {
+    const raw = localStorage.getItem(DETECTED_HOST_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch { return null; }
+}
+function saveDetectedHostInfo(h: HostSpecs) {
+  localStorage.setItem(DETECTED_HOST_KEY, JSON.stringify(h));
+}
+
+function loadLastUsedProfile(instanceId: string): string | null {
+  try { return localStorage.getItem(LAST_PROFILE_KEY_PREFIX + instanceId) ?? null; } catch { return null; }
+}
+function saveLastUsedProfile(instanceId: string, presetId: string) {
+  try { localStorage.setItem(LAST_PROFILE_KEY_PREFIX + instanceId, presetId); } catch { /* noop */ }
+}
+
+const DEFAULT_PRESETS: InstancePreset[] = [
+  { id: "minimal", label: "Minimal", description: "Nhẹ, tiết kiệm tài nguyên", icon: "minimal", cpus: 1, memory: 1, disk: 20, runtime: "docker", color: "var(--accent-green)" },
+  { id: "development", label: "Development", description: "Phát triển hàng ngày", icon: "development", cpus: 2, memory: 4, disk: 60, runtime: "docker", color: "var(--accent-blue)" },
+  { id: "standard", label: "Standard", description: "Dùng chung, cân bằng", icon: "standard", cpus: 4, memory: 8, disk: 100, runtime: "docker", color: "var(--accent-purple)" },
+  { id: "power", label: "Power", description: "Build & CI nặng", icon: "power", cpus: 8, memory: 16, disk: 200, runtime: "docker", color: "var(--accent-orange)" },
+  { id: "kubernetes", label: "Kubernetes", description: "K3s cluster local", icon: "kubernetes", cpus: 4, memory: 8, disk: 100, runtime: "docker", color: "#a78bfa" },
+];
+
+/** Generate optimal presets based on host hardware specs */
+function generateOptimalPresets(specs: HostSpecs): InstancePreset[] {
+  const { cpu_cores: cpus, memory_gib: mem, disk_free_gib: diskFree } = specs;
+  // Use at most 80% of free disk for the largest profile
+  const diskBudget = Math.max(diskFree > 0 ? Math.floor(diskFree * 0.8) : 200, 20);
+
+  // Clamp helper
+  const clamp = (v: number, min: number, max: number) => Math.max(min, Math.min(max, v));
+  // Round to nearest even number for memory
+  const roundMem = (v: number) => Math.max(1, Math.round(v));
+
+  return [
+    {
+      id: "minimal", label: "Minimal", description: "Nhẹ, tiết kiệm tài nguyên", icon: "minimal",
+      cpus: clamp(Math.floor(cpus * 0.15), 1, 4),
+      memory: roundMem(mem * 0.1),
+      disk: clamp(Math.floor(diskBudget * 0.1), 10, 30),
+      runtime: "docker", color: "var(--accent-green)",
+    },
+    {
+      id: "development", label: "Development", description: "Phát triển hàng ngày", icon: "development",
+      cpus: clamp(Math.floor(cpus * 0.25), 1, 8),
+      memory: roundMem(mem * 0.25),
+      disk: clamp(Math.floor(diskBudget * 0.25), 20, 100),
+      runtime: "docker", color: "var(--accent-blue)",
+    },
+    {
+      id: "standard", label: "Standard", description: "Dùng chung, cân bằng", icon: "standard",
+      cpus: clamp(Math.floor(cpus * 0.5), 2, 16),
+      memory: roundMem(mem * 0.5),
+      disk: clamp(Math.floor(diskBudget * 0.4), 40, 200),
+      runtime: "docker", color: "var(--accent-purple)",
+    },
+    {
+      id: "power", label: "Power", description: "Build & CI nặng", icon: "power",
+      cpus: clamp(Math.floor(cpus * 0.75), 4, 32),
+      memory: roundMem(mem * 0.75),
+      disk: clamp(Math.floor(diskBudget * 0.6), 60, 500),
+      runtime: "docker", color: "var(--accent-orange)",
+    },
+    {
+      id: "kubernetes", label: "Kubernetes", description: "K3s cluster local", icon: "kubernetes",
+      cpus: clamp(Math.floor(cpus * 0.5), 2, 16),
+      memory: roundMem(mem * 0.5),
+      disk: clamp(Math.floor(diskBudget * 0.4), 40, 200),
+      runtime: "docker", color: "#a78bfa",
+    },
+  ];
+}
+
 /* ===== Create Instance Dialog ===== */
 function CreateInstanceDialog({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
+  const [selectedPreset, setSelectedPreset] = useState<string | null>(null);
+  const [presets, setPresets] = useState<InstancePreset[]>(() => loadDetectedPresets() ?? DEFAULT_PRESETS);
+  const [customPresets, setCustomPresets] = useState<InstancePreset[]>(loadCustomPresets);
+  const [hostInfo, setHostInfo] = useState<HostSpecs | null>(loadDetectedHostInfo);
+  const [detecting, setDetecting] = useState(false);
+  const [aiOptimizing, setAiOptimizing] = useState(false);
+  const [aiOptimized, setAiOptimized] = useState(false);
+  const [showSaveForm, setShowSaveForm] = useState(false);
+  const [saveLabel, setSaveLabel] = useState("");
   const [config, setConfig] = useState<StartConfig>({
     profile: "default", runtime: "docker", cpus: 2, memory: 2, disk: 60, vm_type: "vz",
     kubernetes: false, kubernetes_version: "", arch: "", mount_type: "", mounts: [], dns: [], network_address: false,
   });
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Persist presets/hostInfo so they survive dialog re-open
+  const updatePresets = (p: InstancePreset[]) => { setPresets(p); saveDetectedPresets(p); };
+  const updateHostInfo = (h: HostSpecs) => { setHostInfo(h); saveDetectedHostInfo(h); };
+
+  const handleAutoDetect = async () => {
+    setDetecting(true);
+    setAiOptimized(false);
+    try {
+      const specs = await systemApi.hostSpecs();
+      updateHostInfo(specs);
+
+      // Step 1: Apply math-based presets immediately
+      const mathPresets = generateOptimalPresets(specs);
+      updatePresets(mathPresets);
+      globalToast("success", `Detected: ${specs.cpu_cores} CPUs · ${specs.memory_gib} GiB RAM · ${specs.disk_free_gib} GiB free`);
+      setDetecting(false);
+
+      // Step 2: Ask AI to optimize (if configured)
+      const apiKey = localStorage.getItem("ai_api_key") || "";
+      const provider = localStorage.getItem("ai_provider") || "anthropic";
+      const model = localStorage.getItem("ai_model") || "";
+      const endpoint = localStorage.getItem("ai_endpoint") || "";
+      const hasAi = !!(apiKey || provider === "ollama-local");
+
+      if (hasAi && model) {
+        setAiOptimizing(true);
+        try {
+          const prompt = `You are a macOS VM resource allocation expert. Given these host specs:
+- CPU cores: ${specs.cpu_cores}
+- Total RAM: ${specs.memory_gib} GiB
+- Free disk: ${specs.disk_free_gib} GiB (total: ${specs.disk_total_gib} GiB)
+- Architecture: ${specs.arch}
+- Model: ${specs.model || "unknown"}
+
+Return ONLY a valid JSON object (no markdown, no explanation) with optimized Colima VM settings for 5 profiles.
+Rules:
+- Never exceed 80% of host CPU/RAM
+- Disk allocation from free disk only, never exceed 70% of free disk per profile
+- Minimal must be lightweight (development/testing)
+- Development is for daily coding
+- Standard is balanced general-purpose
+- Power is for heavy builds/CI
+- Kubernetes needs at least 2 CPUs and 4 GiB RAM for k3s
+- All values must be integers
+
+JSON format:
+{
+  "minimal":     { "cpus": N, "memory": N, "disk": N },
+  "development": { "cpus": N, "memory": N, "disk": N },
+  "standard":    { "cpus": N, "memory": N, "disk": N },
+  "power":       { "cpus": N, "memory": N, "disk": N },
+  "kubernetes":  { "cpus": N, "memory": N, "disk": N }
+}`;
+
+          const raw = await aiApi.chat(provider, model, apiKey,
+            [{ role: "user", content: prompt }], endpoint);
+          const text = typeof raw === "string" ? raw : String(raw);
+
+          // Extract JSON from response
+          const jsonMatch = text.match(/\{[\s\S]*\}/);
+          if (jsonMatch) {
+            const data = JSON.parse(jsonMatch[0]);
+            setPresets(prev => {
+              const updated = prev.map(p => {
+                const override = data[p.id];
+                if (!override) return p;
+                return {
+                  ...p,
+                  cpus: Math.max(1, Math.min(Math.floor(specs.cpu_cores * 0.8), parseInt(override.cpus) || p.cpus)),
+                  memory: Math.max(1, Math.min(Math.floor(specs.memory_gib * 0.8), parseInt(override.memory) || p.memory)),
+                  disk: Math.max(10, Math.min(Math.floor(specs.disk_free_gib * 0.7), parseInt(override.disk) || p.disk)),
+                };
+              });
+              saveDetectedPresets(updated);
+              return updated;
+            });
+            setAiOptimized(true);
+            globalToast("success", "AI optimized profiles for your hardware");
+          }
+        } catch (e) {
+          // AI failed — math presets already applied, silently continue
+          console.warn("AI optimization failed, using math presets:", e);
+        } finally {
+          setAiOptimizing(false);
+        }
+      }
+    } catch (e) {
+      globalToast("error", `Failed to detect host specs: ${e}`);
+      setDetecting(false);
+    }
+  };
+
+  const applyPreset = (preset: InstancePreset) => {
+    setSelectedPreset(preset.id);
+    setConfig(prev => ({
+      ...prev,
+      cpus: preset.cpus,
+      memory: preset.memory,
+      disk: preset.disk,
+      runtime: preset.runtime,
+      kubernetes: preset.kubernetes ?? preset.id === "kubernetes",
+      network_address: preset.network_address ?? false,
+    }));
+  };
+
+  const handleSaveCustomPreset = () => {
+    if (!saveLabel.trim()) return;
+    const flags = [];
+    if (config.kubernetes) flags.push("K8s");
+    if (config.network_address) flags.push("Net");
+    const newPreset: InstancePreset = {
+      id: `custom-${Date.now()}`,
+      label: saveLabel.trim(),
+      icon: "custom",
+      description: `${config.cpus}C · ${config.memory}G · ${config.disk}G${flags.length ? " · " + flags.join("+") : ""}`,
+      cpus: config.cpus,
+      memory: config.memory,
+      disk: config.disk,
+      runtime: config.runtime,
+      kubernetes: config.kubernetes,
+      network_address: config.network_address,
+      color: CUSTOM_COLORS[customPresets.length % CUSTOM_COLORS.length],
+    };
+    const updated = [...customPresets, newPreset];
+    setCustomPresets(updated);
+    saveCustomPresets(updated);
+    setShowSaveForm(false);
+    setSaveLabel("");
+    setSelectedPreset(newPreset.id);
+    globalToast("success", `Profile "${newPreset.label}" saved`);
+  };
+
+  const handleDeleteCustomPreset = (id: string) => {
+    const updated = customPresets.filter(p => p.id !== id);
+    setCustomPresets(updated);
+    saveCustomPresets(updated);
+    if (selectedPreset === id) setSelectedPreset(null);
+  };
 
   const handleCreate = async () => {
     if (!config.profile.trim()) { setError("Profile name is required"); return; }
@@ -61,74 +368,271 @@ function CreateInstanceDialog({ onClose, onCreated }: { onClose: () => void; onC
 
   return (
     <div className="modal-overlay" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
+      <div className="modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 600, width: "min(600px, 95vw)" }}>
         <div className="modal-header">
           <h2 className="modal-title">Create Instance</h2>
           <button className="btn btn-icon btn-ghost" onClick={onClose}><CloseIcon size={16} /></button>
         </div>
         {error && <div style={{ padding: "8px 12px", background: "rgba(248, 81, 73, 0.1)", borderRadius: "var(--radius-md)", color: "var(--accent-red)", fontSize: "var(--text-sm)", marginBottom: 16 }}>{error}</div>}
 
-        <div className="form-group">
-          <label className="form-label">Profile Name</label>
-          <input className="input" value={config.profile} onChange={(e) => setConfig({ ...config, profile: e.target.value })} placeholder="default" />
+        {/* Host Specs Info Banner */}
+        {hostInfo && (
+          <div style={{
+            display: "flex", alignItems: "center", gap: 12, padding: "10px 14px", marginBottom: 16,
+            borderRadius: 10, background: "rgba(88,166,255,0.06)",
+            border: "1px solid rgba(88,166,255,0.15)",
+          }}>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--accent-blue)" strokeWidth="1.5" style={{ flexShrink: 0 }}>
+              <rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/>
+            </svg>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: "11px", fontWeight: 600, color: "var(--text-primary)", marginBottom: 2 }}>
+                {hostInfo.model || `${hostInfo.arch} Host`}
+              </div>
+              <div style={{ fontSize: "10px", color: "var(--text-muted)", fontFamily: "var(--font-mono)" }}>
+                {hostInfo.cpu_cores} cores · {hostInfo.memory_gib} GiB RAM · {hostInfo.disk_free_gib} GiB free / {hostInfo.disk_total_gib} GiB total
+              </div>
+            </div>
+            <span style={{ padding: "2px 8px", borderRadius: 10, fontSize: "9px", fontWeight: 600,
+              background: aiOptimized ? "rgba(167,139,250,0.12)" : "rgba(63,185,80,0.1)",
+              color: aiOptimized ? "#a78bfa" : "var(--accent-green)",
+              whiteSpace: "nowrap" }}>
+              {aiOptimized ? "✦ AI Optimized" : "✓ Detected"}
+            </span>
+          </div>
+        )}
+
+        {/* Quick Start Profiles */}
+        <div style={{ marginBottom: 20 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+            <div style={{ fontSize: "11px", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--text-muted)" }}>
+              Quick Start Profile
+            </div>
+            <button
+              className="btn btn-ghost"
+              onClick={handleAutoDetect}
+              disabled={detecting}
+              style={{
+                fontSize: "10px", padding: "3px 10px", display: "flex", alignItems: "center", gap: 5,
+                borderRadius: 8,
+                background: hostInfo ? "rgba(63,185,80,0.06)" : "rgba(88,166,255,0.06)",
+                border: `1px solid ${hostInfo ? "rgba(63,185,80,0.2)" : "rgba(88,166,255,0.2)"}`,
+                color: hostInfo ? "var(--accent-green)" : "var(--accent-blue)",
+              }}
+            >
+              {detecting ? (
+                <><div className="spinner" style={{ width: 10, height: 10 }} /> Detecting...</>
+              ) : aiOptimizing ? (
+                <><div className="spinner" style={{ width: 10, height: 10, borderColor: "#a78bfa", borderTopColor: "transparent" }} /> AI Optimizing...</>
+              ) : hostInfo ? (
+                <>
+                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.3"/></svg>
+                  Re-detect
+                  {aiOptimized && <span style={{ fontSize: "9px", background: "rgba(167,139,250,0.15)", color: "#a78bfa", padding: "0 4px", borderRadius: 4 }}>✦ AI</span>}
+                </>
+              ) : (
+                <><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg> Auto-detect Host</>
+              )}
+            </button>
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 8 }}>
+            {presets.map(preset => {
+              const isActive = selectedPreset === preset.id;
+              return (
+                <button
+                  key={preset.id}
+                  onClick={() => applyPreset(preset)}
+                  style={{
+                    background: isActive ? `color-mix(in srgb, ${preset.color} 12%, var(--bg-card))` : "var(--bg-primary)",
+                    border: `1.5px solid ${isActive ? preset.color : "var(--border-primary)"}`,
+                    borderRadius: 10,
+                    padding: "10px 8px",
+                    cursor: "pointer",
+                    display: "flex",
+                    flexDirection: "column",
+                    alignItems: "center",
+                    gap: 4,
+                    transition: "all 150ms ease",
+                    boxShadow: isActive ? `0 0 0 2px color-mix(in srgb, ${preset.color} 25%, transparent)` : "none",
+                    outline: "none",
+                    textAlign: "center",
+                  }}
+                >
+                  {(() => { const Icon = PresetIcons[preset.icon] ?? PresetIcons["custom"]; return <Icon size={20} color={isActive ? preset.color : "var(--text-muted)"} />; })()}
+                  <span style={{ fontSize: "11px", fontWeight: 700, color: isActive ? preset.color : "var(--text-primary)", whiteSpace: "nowrap" }}>{preset.label}</span>
+                  <span style={{ fontSize: "10px", color: "var(--text-muted)", lineHeight: 1.3 }}>{preset.description}</span>
+                  <span style={{ fontSize: "9px", fontFamily: "var(--font-mono)", color: isActive ? preset.color : "var(--text-muted)", marginTop: 2, opacity: 0.85 }}>
+                    {preset.cpus}C · {preset.memory}G · {preset.disk}G
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Custom Profiles */}
+          {customPresets.length > 0 && (
+            <>
+              <div style={{ fontSize: "10px", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--text-muted)", marginTop: 10, marginBottom: 6 }}>
+                My Profiles
+              </div>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                {customPresets.map(preset => {
+                  const isActive = selectedPreset === preset.id;
+                  return (
+                    <div key={preset.id} style={{ position: "relative" }}>
+                      <button
+                        onClick={() => applyPreset(preset)}
+                        style={{
+                          background: isActive ? `color-mix(in srgb, ${preset.color} 12%, var(--bg-card))` : "var(--bg-primary)",
+                          border: `1.5px solid ${isActive ? preset.color : "var(--border-primary)"}`,
+                          borderRadius: 10, padding: "8px 14px 8px 10px", cursor: "pointer",
+                          display: "flex", alignItems: "center", gap: 6,
+                          transition: "all 150ms ease",
+                          boxShadow: isActive ? `0 0 0 2px color-mix(in srgb, ${preset.color} 25%, transparent)` : "none",
+                          outline: "none",
+                        }}
+                      >
+                        <div style={{ width: 28, height: 28, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
+                          background: `color-mix(in srgb, ${preset.color} 10%, transparent)`, borderRadius: 8 }}>
+                          {(() => { const Icon = PresetIcons[preset.icon] ?? PresetIcons["custom"]; return <Icon size={14} color={isActive ? preset.color : "var(--text-muted)"} />; })()}
+                        </div>
+                        <div style={{ textAlign: "left" }}>
+                          <div style={{ fontSize: "11px", fontWeight: 700, color: isActive ? preset.color : "var(--text-primary)", whiteSpace: "nowrap" }}>{preset.label}</div>
+                          <div style={{ fontSize: "9px", fontFamily: "var(--font-mono)", color: "var(--text-muted)" }}>
+                            {preset.cpus}C · {preset.memory}G · {preset.disk}G
+                          </div>
+                        </div>
+                      </button>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); handleDeleteCustomPreset(preset.id); }}
+                        style={{
+                          position: "absolute", top: -5, right: -5,
+                          width: 16, height: 16, borderRadius: "50%",
+                          background: "var(--bg-secondary)", border: "1px solid var(--border-primary)",
+                          display: "flex", alignItems: "center", justifyContent: "center",
+                          cursor: "pointer", padding: 0, lineHeight: 1,
+                          color: "var(--text-muted)", fontSize: "10px",
+                        }}
+                        title="Delete profile"
+                      >✕</button>
+                    </div>
+                  );
+                })}
+              </div>
+            </>
+          )}
         </div>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+
+        <div style={{ borderTop: "1px solid var(--border-subtle)", paddingTop: 16 }}>
           <div className="form-group">
-            <label className="form-label">Runtime</label>
-            <select className="input select" value={config.runtime} onChange={(e) => setConfig({ ...config, runtime: e.target.value })}>
-              <option value="docker">Docker</option><option value="containerd">Containerd</option><option value="incus">Incus</option>
+            <label className="form-label">Profile Name</label>
+            <input className="input" value={config.profile} onChange={(e) => setConfig({ ...config, profile: e.target.value })} placeholder="default" />
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+            <div className="form-group">
+              <label className="form-label">Runtime</label>
+              <select className="input select" value={config.runtime} onChange={(e) => { setSelectedPreset(null); setConfig({ ...config, runtime: e.target.value }); }}>
+                <option value="docker">Docker</option><option value="containerd">Containerd</option><option value="incus">Incus</option>
+              </select>
+            </div>
+            <div className="form-group">
+              <label className="form-label">VM Type</label>
+              <select className="input select" value={config.vm_type} onChange={(e) => setConfig({ ...config, vm_type: e.target.value })}>
+                <option value="vz">VZ (macOS 13+)</option><option value="qemu">QEMU</option>
+              </select>
+            </div>
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 16 }}>
+            <div className="form-group">
+              <label className="form-label">CPUs</label>
+              <input className="input" type="number" min={1} max={32} value={config.cpus} onChange={(e) => { setSelectedPreset(null); setConfig({ ...config, cpus: Number(e.target.value) }); }} />
+            </div>
+            <div className="form-group">
+              <label className="form-label">Memory (GiB)</label>
+              <input className="input" type="number" min={1} max={128} value={config.memory} onChange={(e) => { setSelectedPreset(null); setConfig({ ...config, memory: Number(e.target.value) }); }} />
+            </div>
+            <div className="form-group">
+              <label className="form-label">Disk (GiB)</label>
+              <input className="input" type="number" min={10} max={1000} value={config.disk} onChange={(e) => { setSelectedPreset(null); setConfig({ ...config, disk: Number(e.target.value) }); }} />
+            </div>
+          </div>
+          <div className="form-group">
+            <label className="form-label">Architecture</label>
+            <select className="input select" value={config.arch} onChange={(e) => setConfig({ ...config, arch: e.target.value })}>
+              <option value="">Default (host)</option><option value="aarch64">aarch64 (ARM64)</option><option value="x86_64">x86_64 (Intel)</option>
             </select>
           </div>
           <div className="form-group">
-            <label className="form-label">VM Type</label>
-            <select className="input select" value={config.vm_type} onChange={(e) => setConfig({ ...config, vm_type: e.target.value })}>
-              <option value="vz">VZ (macOS 13+)</option><option value="qemu">QEMU</option>
+            <label className="form-label">Mount Type</label>
+            <select className="input select" value={config.mount_type} onChange={(e) => setConfig({ ...config, mount_type: e.target.value })}>
+              <option value="">Default</option><option value="virtiofs">VirtioFS (macOS)</option><option value="sshfs">SSHFS</option><option value="9p">9P</option>
             </select>
           </div>
-        </div>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 16 }}>
-          <div className="form-group">
-            <label className="form-label">CPUs</label>
-            <input className="input" type="number" min={1} max={32} value={config.cpus} onChange={(e) => setConfig({ ...config, cpus: Number(e.target.value) })} />
-          </div>
-          <div className="form-group">
-            <label className="form-label">Memory (GiB)</label>
-            <input className="input" type="number" min={1} max={128} value={config.memory} onChange={(e) => setConfig({ ...config, memory: Number(e.target.value) })} />
-          </div>
-          <div className="form-group">
-            <label className="form-label">Disk (GiB)</label>
-            <input className="input" type="number" min={10} max={1000} value={config.disk} onChange={(e) => setConfig({ ...config, disk: Number(e.target.value) })} />
+          <div style={{ borderTop: "1px solid var(--border-subtle)", paddingTop: 16, marginTop: 8 }}>
+            <div className="form-group" style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+              <input type="checkbox" className="checkbox" id="k8s-check" checked={config.kubernetes} onChange={(e) => setConfig({ ...config, kubernetes: e.target.checked })} />
+              <label htmlFor="k8s-check" className="form-label" style={{ marginBottom: 0 }}>Enable Kubernetes (K3s)</label>
+            </div>
+            <div className="form-group" style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+              <input type="checkbox" className="checkbox" id="net-addr" checked={config.network_address} onChange={(e) => setConfig({ ...config, network_address: e.target.checked })} />
+              <label htmlFor="net-addr" className="form-label" style={{ marginBottom: 0 }}>Reachable Network Address</label>
+            </div>
           </div>
         </div>
-        <div className="form-group">
-          <label className="form-label">Architecture</label>
-          <select className="input select" value={config.arch} onChange={(e) => setConfig({ ...config, arch: e.target.value })}>
-            <option value="">Default (host)</option><option value="aarch64">aarch64 (ARM64)</option><option value="x86_64">x86_64 (Intel)</option>
-          </select>
-        </div>
-        <div className="form-group">
-          <label className="form-label">Mount Type</label>
-          <select className="input select" value={config.mount_type} onChange={(e) => setConfig({ ...config, mount_type: e.target.value })}>
-            <option value="">Default</option><option value="virtiofs">VirtioFS (macOS)</option><option value="sshfs">SSHFS</option><option value="9p">9P</option>
-          </select>
-        </div>
-        <div style={{ borderTop: "1px solid var(--border-subtle)", paddingTop: 16, marginTop: 8 }}>
-          <div className="form-group" style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
-            <input type="checkbox" className="checkbox" id="k8s-check" checked={config.kubernetes} onChange={(e) => setConfig({ ...config, kubernetes: e.target.checked })} />
-            <label htmlFor="k8s-check" className="form-label" style={{ marginBottom: 0 }}>Enable Kubernetes (K3s)</label>
+        {/* Save Profile Form */}
+        {showSaveForm && (
+          <div style={{
+            padding: "12px 16px", margin: "0 0 4px",
+            background: "rgba(88,166,255,0.04)",
+            border: "1px solid rgba(88,166,255,0.15)",
+            borderRadius: 10,
+          }}>
+          <div style={{ fontSize: "11px", fontWeight: 600, color: "var(--text-primary)", marginBottom: 8 }}>Save Current Config as Profile</div>
+            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <div style={{ width: 36, height: 36, display: "flex", alignItems: "center", justifyContent: "center",
+                background: "rgba(88,166,255,0.08)", borderRadius: 8, flexShrink: 0, border: "1px solid rgba(88,166,255,0.2)" }}>
+                <PresetIcons.custom size={16} color="var(--accent-blue)" />
+              </div>
+              <input
+                className="input" value={saveLabel}
+                onChange={(e) => setSaveLabel(e.target.value)}
+                placeholder="Profile name..." autoFocus
+                style={{ flex: 1 }}
+                onKeyDown={(e) => e.key === "Enter" && handleSaveCustomPreset()}
+              />
+              <button className="btn btn-primary" onClick={handleSaveCustomPreset} disabled={!saveLabel.trim()}
+                style={{ fontSize: "var(--text-xs)", padding: "6px 12px", whiteSpace: "nowrap" }}>
+                Save
+              </button>
+              <button className="btn btn-ghost" onClick={() => setShowSaveForm(false)}
+                style={{ fontSize: "var(--text-xs)", padding: "6px 8px" }}>
+                Cancel
+              </button>
+            </div>
+            <div style={{ fontSize: "10px", color: "var(--text-muted)", marginTop: 6 }}>
+              Saves: {config.cpus} CPUs · {config.memory} GiB RAM · {config.disk} GiB Disk · {config.runtime}
+            </div>
           </div>
-          <div className="form-group" style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
-            <input type="checkbox" className="checkbox" id="net-addr" checked={config.network_address} onChange={(e) => setConfig({ ...config, network_address: e.target.checked })} />
-            <label htmlFor="net-addr" className="form-label" style={{ marginBottom: 0 }}>Reachable Network Address</label>
-          </div>
-        </div>
+        )}
+
         <div className="modal-footer">
+          {!showSaveForm && (
+            <button className="btn btn-ghost" onClick={() => setShowSaveForm(true)}
+              style={{ marginRight: "auto", fontSize: "var(--text-xs)", display: "flex", alignItems: "center", gap: 4, color: "var(--accent-blue)" }}>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/>
+                <polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/>
+              </svg>
+              Save as Profile
+            </button>
+          )}
           <button className="btn btn-ghost" onClick={onClose}>Cancel</button>
           <button className="btn btn-primary" onClick={handleCreate} disabled={creating}>
             {creating ? <><div className="spinner" style={{ width: 14, height: 14 }} /> Creating...</> : "Create & Start"}
           </button>
         </div>
       </div>
+
     </div>
   );
 }
@@ -280,7 +784,7 @@ export default function Instances({ instances, onRefresh }: InstancesProps) {
   }, [instances, selected]);
 
 
-  const handleAction = async (profile: string, action: "start" | "stop" | "restart" | "delete") => {
+  const handleAction = async (profile: string, action: "start" | "stop" | "restart" | "delete", config?: StartConfig) => {
     if (action === "delete") {
       setConfirm({
         title: "Delete Instance", danger: true, confirmLabel: "Delete",
@@ -297,16 +801,16 @@ export default function Instances({ instances, onRefresh }: InstancesProps) {
 
     // Fire-and-forget for long-running actions — poller tracks real-time status
     const labels: Record<string, string> = { start: "Starting", stop: "Stopping", restart: "Restarting" };
-    globalToast("success", `${labels[action]} instance '${profile}'...`);
+    globalToast("success", `${labels[action]} instance '${profile}'${config ? ` with ${config.cpus}C/${config.memory}G` : ""}...`);
     setActionLoading(`${profile}-${action}`);
     pendingOps.set("instance-action", `${profile}-${action}`);
 
-    const defaultConfig: StartConfig = { profile, runtime: "docker", cpus: 2, memory: 2, disk: 60, vm_type: "", kubernetes: false, kubernetes_version: "", arch: "", mount_type: "", mounts: [], dns: [], network_address: false };
+    const startConfig: StartConfig = config ?? { profile, runtime: "docker", cpus: 2, memory: 2, disk: 60, vm_type: "", kubernetes: false, kubernetes_version: "", arch: "", mount_type: "", mounts: [], dns: [], network_address: false };
     const runAction = async () => {
       switch (action) {
-        case "start": await colimaApi.startInstance(defaultConfig); break;
+        case "start": await colimaApi.startInstance({ ...startConfig, profile }); break;
         case "stop": await colimaApi.stopInstance(profile); break;
-        case "restart": await colimaApi.stopInstance(profile); await colimaApi.startInstance(defaultConfig); break;
+        case "restart": await colimaApi.stopInstance(profile); await colimaApi.startInstance({ ...startConfig, profile }); break;
       }
     };
 
@@ -471,14 +975,166 @@ export default function Instances({ instances, onRefresh }: InstancesProps) {
   );
 }
 
+/* ===== Profile Dropdown Component (SOTA) ===== */
+function ProfileDropdown({
+  myProfiles, quickPresets, lastUsedId, onSelect,
+}: {
+  myProfiles: InstancePreset[];
+  quickPresets: InstancePreset[];
+  lastUsedId: string | null;
+  onSelect: (p: InstancePreset) => void;
+}) {
+  const sectionLabel = (text: string) => (
+    <div style={{
+      padding: "6px 12px 3px",
+      fontSize: "9px",
+      fontWeight: 700,
+      textTransform: "uppercase",
+      letterSpacing: "0.07em",
+      color: "var(--text-muted)",
+      borderBottom: "1px solid var(--border-primary)",
+      marginBottom: 2,
+    }}>{text}</div>
+  );
+
+  const renderItem = (p: InstancePreset) => {
+    const Icon = PresetIcons[p.icon] ?? PresetIcons["custom"];
+    const isLast = p.id === lastUsedId;
+    return (
+      <button
+        key={p.id}
+        onClick={() => onSelect(p)}
+        style={{
+          display: "flex", alignItems: "center", gap: 9,
+          width: "100%", padding: "7px 12px",
+          background: isLast ? "color-mix(in srgb, var(--accent-blue) 8%, transparent)" : "none",
+          border: "none", cursor: "pointer",
+          color: "var(--text-primary)", fontSize: "var(--text-xs)",
+          transition: "background 0.1s",
+        }}
+        onMouseEnter={e => (e.currentTarget.style.background = `color-mix(in srgb, ${p.color} 10%, transparent)`)}
+        onMouseLeave={e => (e.currentTarget.style.background = isLast ? "color-mix(in srgb, var(--accent-blue) 8%, transparent)" : "none")}
+      >
+        {/* Icon */}
+        <div style={{
+          width: 24, height: 24, flexShrink: 0,
+          display: "flex", alignItems: "center", justifyContent: "center",
+          background: `color-mix(in srgb, ${p.color} 14%, transparent)`,
+          borderRadius: 7,
+        }}>
+          <Icon size={13} color={p.color} />
+        </div>
+        {/* Label + specs */}
+        <div style={{ flex: 1, textAlign: "left", minWidth: 0 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
+            <span style={{ fontWeight: 600, fontSize: "11px", color: isLast ? "var(--accent-blue)" : "var(--text-primary)" }}>{p.label}</span>
+            {isLast && (
+              <span style={{
+                fontSize: "8px", fontWeight: 700, padding: "1px 5px",
+                background: "color-mix(in srgb, var(--accent-blue) 20%, transparent)",
+                color: "var(--accent-blue)", borderRadius: 4, letterSpacing: "0.04em",
+              }}>last</span>
+            )}
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 4, marginTop: 1 }}>
+            <span style={{ fontSize: "9px", color: "var(--text-muted)", fontFamily: "var(--font-mono)" }}>
+              {p.cpus}C · {p.memory}G · {p.disk}G
+            </span>
+            {(p.kubernetes ?? p.id === "kubernetes") && (
+              <span style={{
+                fontSize: "8px", padding: "1px 4px",
+                background: "color-mix(in srgb, #a78bfa 18%, transparent)",
+                color: "#a78bfa", borderRadius: 3, fontWeight: 600,
+              }}>K8s</span>
+            )}
+            {p.network_address && (
+              <span style={{
+                fontSize: "8px", padding: "1px 4px",
+                background: "color-mix(in srgb, var(--accent-green) 18%, transparent)",
+                color: "var(--accent-green)", borderRadius: 3, fontWeight: 600,
+              }}>Net</span>
+            )}
+          </div>
+        </div>
+      </button>
+    );
+  };
+
+  return (
+    <div style={{
+      position: "absolute", top: "calc(100% + 4px)", right: 0, zIndex: 200,
+      minWidth: 210,
+      background: "var(--bg-card)",
+      border: "1px solid var(--border-primary)",
+      borderRadius: 12,
+      boxShadow: "0 12px 32px rgba(0,0,0,0.35), 0 2px 8px rgba(0,0,0,0.2)",
+      overflow: "hidden",
+    }}>
+      {myProfiles.length > 0 && (
+        <>
+          {sectionLabel("My Profiles")}
+          {myProfiles.map(renderItem)}
+        </>
+      )}
+      {quickPresets.length > 0 && (
+        <>
+          {myProfiles.length > 0 && <div style={{ height: 1, background: "var(--border-primary)", margin: "3px 0" }} />}
+          {sectionLabel("Quick Presets")}
+          {quickPresets.map(renderItem)}
+        </>
+      )}
+    </div>
+  );
+}
+
 /* ===== Colima Detail Panel ===== */
-function ColimaDetail({ inst, actionLoading, onAction, onRefresh }: { inst: ColimaInstance; actionLoading: string | null; onAction: (profile: string, action: "start" | "stop" | "restart" | "delete") => void; onRefresh: () => void }) {
+function ColimaDetail({ inst, actionLoading, onAction, onRefresh }: { inst: ColimaInstance; actionLoading: string | null; onAction: (profile: string, action: "start" | "stop" | "restart" | "delete", config?: StartConfig) => void; onRefresh: () => void }) {
   const profileId = inst.name === "colima" ? "default" : inst.name.replace("colima-", "");
   const isRunning = inst.status === "Running";
   const isLoading = actionLoading?.startsWith(profileId);
-  // Use module-level pendingOps so state persists across tab switches
   const [k8sLoading, setK8sLoading] = useState<string | null>(pendingOps.get(`k8s-${profileId}`) || null);
   const [k8sNotice, setK8sNotice] = useState<{ type: "success" | "error"; text: string } | null>(null);
+  const [showProfileMenu, setShowProfileMenu] = useState<"start" | "restart" | null>(null);
+
+  // Tiered profile lists: custom ("My Profiles") first, then quick presets
+  const myProfiles: InstancePreset[] = loadCustomPresets();
+  const quickPresets: InstancePreset[] = loadDetectedPresets() ?? DEFAULT_PRESETS;
+  const allProfiles: InstancePreset[] = [...myProfiles, ...quickPresets];
+
+  // Last-used profile per instance
+  const lastUsedId = loadLastUsedProfile(profileId);
+  const lastUsedPreset = lastUsedId ? allProfiles.find(p => p.id === lastUsedId) ?? null : null;
+
+  // Helper: build StartConfig from preset
+  const presetToConfig = (p: InstancePreset): StartConfig => ({
+    profile: profileId,
+    runtime: p.runtime,
+    cpus: p.cpus,
+    memory: p.memory,
+    disk: p.disk,
+    vm_type: "vz",
+    kubernetes: p.kubernetes ?? p.id === "kubernetes",
+    kubernetes_version: "",
+    arch: "",
+    mount_type: "",
+    mounts: [],
+    dns: [],
+    network_address: p.network_address ?? false,
+  });
+
+  const handleProfileAction = (p: InstancePreset, action: "start" | "restart") => {
+    saveLastUsedProfile(profileId, p.id);
+    setShowProfileMenu(null);
+    onAction(profileId, action, presetToConfig(p));
+  };
+
+  // Close dropdown on outside click
+  useEffect(() => {
+    if (!showProfileMenu) return;
+    const close = () => setShowProfileMenu(null);
+    window.addEventListener("click", close);
+    return () => window.removeEventListener("click", close);
+  }, [showProfileMenu]);
 
   const handleK8sAction = (action: "start" | "stop" | "delete" | "reset") => {
     const labels: Record<string, string> = { start: "Enabling", stop: "Stopping", delete: "Removing", reset: "Resetting" };
@@ -526,14 +1182,72 @@ function ColimaDetail({ inst, actionLoading, onAction, onRefresh }: { inst: Coli
               <button className="btn btn-ghost" disabled={!!isLoading} onClick={() => onAction(profileId, "stop")} style={{ fontSize: "var(--text-xs)", display: "flex", alignItems: "center", gap: 4 }}>
                 {actionLoading === `${profileId}-stop` ? <div className="spinner" style={{ width: 12, height: 12 }} /> : <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="1"/></svg>} Stop
               </button>
-              <button className="btn btn-ghost" disabled={!!isLoading} onClick={() => onAction(profileId, "restart")} style={{ fontSize: "var(--text-xs)", display: "flex", alignItems: "center", gap: 4 }}>
-                {actionLoading === `${profileId}-restart` ? <div className="spinner" style={{ width: 12, height: 12 }} /> : <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.3"/></svg>} Restart
-              </button>
+              {/* Restart split-button — SOTA */}
+              <div style={{ position: "relative", display: "flex" }} onClick={e => e.stopPropagation()}>
+                <button
+                  className="btn btn-ghost"
+                  disabled={!!isLoading}
+                  onClick={() => lastUsedPreset ? handleProfileAction(lastUsedPreset, "restart") : onAction(profileId, "restart")}
+                  style={{ fontSize: "var(--text-xs)", display: "flex", alignItems: "center", gap: 5, borderRadius: "6px 0 0 6px", borderRight: "1px solid var(--border-primary)", maxWidth: 130, overflow: "hidden" }}
+                >
+                  {actionLoading === `${profileId}-restart`
+                    ? <div className="spinner" style={{ width: 12, height: 12, flexShrink: 0 }} />
+                    : <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ flexShrink: 0 }}><path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.3"/></svg>}
+                  <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    Restart{lastUsedPreset ? ` · ${lastUsedPreset.label}` : ""}
+                  </span>
+                </button>
+                <button
+                  className="btn btn-ghost"
+                  disabled={!!isLoading}
+                  onClick={() => setShowProfileMenu(showProfileMenu === "restart" ? null : "restart")}
+                  style={{ fontSize: "10px", padding: "4px 7px", borderRadius: "0 6px 6px 0", display: "flex", alignItems: "center" }}
+                >
+                  <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor"><path d="M7 10l5 5 5-5z"/></svg>
+                </button>
+                {showProfileMenu === "restart" && (
+                  <ProfileDropdown
+                    myProfiles={myProfiles}
+                    quickPresets={quickPresets}
+                    lastUsedId={lastUsedId}
+                    onSelect={p => handleProfileAction(p, "restart")}
+                  />
+                )}
+              </div>
             </>
           ) : (
-            <button className="btn btn-primary" disabled={!!isLoading} onClick={() => onAction(profileId, "start")} style={{ fontSize: "var(--text-xs)", display: "flex", alignItems: "center", gap: 4 }}>
-              {actionLoading === `${profileId}-start` ? <div className="spinner" style={{ width: 12, height: 12 }} /> : <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><polygon points="6,4 20,12 6,20"/></svg>} Start
-            </button>
+            /* Start split-button — SOTA */
+            <div style={{ position: "relative", display: "flex" }} onClick={e => e.stopPropagation()}>
+              <button
+                className="btn btn-primary"
+                disabled={!!isLoading}
+                onClick={() => lastUsedPreset ? handleProfileAction(lastUsedPreset, "start") : onAction(profileId, "start")}
+                style={{ fontSize: "var(--text-xs)", display: "flex", alignItems: "center", gap: 5, borderRadius: "6px 0 0 6px", borderRight: "1px solid rgba(255,255,255,0.15)", maxWidth: 140, overflow: "hidden" }}
+              >
+                {actionLoading === `${profileId}-start`
+                  ? <div className="spinner" style={{ width: 12, height: 12, flexShrink: 0 }} />
+                  : <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" style={{ flexShrink: 0 }}><polygon points="6,4 20,12 6,20"/></svg>}
+                <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  Start{lastUsedPreset ? ` · ${lastUsedPreset.label}` : ""}
+                </span>
+              </button>
+              <button
+                className="btn btn-primary"
+                disabled={!!isLoading}
+                onClick={() => setShowProfileMenu(showProfileMenu === "start" ? null : "start")}
+                style={{ fontSize: "10px", padding: "4px 8px", borderRadius: "0 6px 6px 0", display: "flex", alignItems: "center" }}
+              >
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor"><path d="M7 10l5 5 5-5z"/></svg>
+              </button>
+              {showProfileMenu === "start" && (
+                <ProfileDropdown
+                  myProfiles={myProfiles}
+                  quickPresets={quickPresets}
+                  lastUsedId={lastUsedId}
+                  onSelect={p => handleProfileAction(p, "start")}
+                />
+              )}
+            </div>
           )}
           <button className="btn btn-ghost" disabled={!!isLoading} onClick={() => onAction(profileId, "delete")} style={{ fontSize: "var(--text-xs)", color: "var(--accent-red)", display: "flex", alignItems: "center", gap: 4 }}>
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg> Delete

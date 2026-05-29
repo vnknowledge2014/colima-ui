@@ -389,6 +389,14 @@ async fn api_get_platform() -> (StatusCode, Json<ApiResponse<PlatformInfo>>) {
         Err(e) => err(e),
     }
 }
+// ===== Host Hardware Specs (HTTP) =====
+
+async fn api_host_specs() -> (StatusCode, Json<ApiResponse<system::HostSpecs>>) {
+    match run_blocking(|| Ok(system::detect_host_specs())).await {
+        Ok(specs) => ok(specs),
+        Err(e) => err(e),
+    }
+}
 
 // ===== Install dependency with method =====
 
@@ -1735,6 +1743,26 @@ async fn api_ai_fetch_page(
     match crate::commands::searxng::fetch_page_as_markdown(url, max_length, mode).await {
         Ok(md) => ok(md),
         Err(e) => err(e),
+    }
+}
+
+// ===== AI Context route (browser mode) =====
+
+async fn api_ai_context() -> (StatusCode, Json<ApiResponse<String>>) {
+    // Find CONTEXT.md adjacent to the binary (same as Tauri resource_dir behavior)
+    let exe_path = std::env::current_exe().unwrap_or_default();
+    // In a bundled .app: .../ColimaUI.app/Contents/MacOS/colima-ui
+    // Tauri puts resources at: .../ColimaUI.app/Contents/Resources/resources/
+    let resource_dir = exe_path
+        .parent()  // MacOS/
+        .and_then(|p| p.parent())  // Contents/
+        .map(|p| p.join("Resources").join("resources"))
+        .unwrap_or_else(|| exe_path.parent().unwrap_or(&exe_path).to_path_buf());
+
+    let context_path = resource_dir.join("CONTEXT.md");
+    match std::fs::read_to_string(&context_path) {
+        Ok(content) => ok(content),
+        Err(e) => err(format!("Cannot read CONTEXT.md from {:?}: {e}", context_path)),
     }
 }
 
@@ -3338,6 +3366,7 @@ pub fn build_router() -> Router {
         .route("/api/system/homebrew", get(api_check_homebrew))
         .route("/api/system/check-tool", get(api_check_tool))
         .route("/api/system/platform", get(api_get_platform))
+        .route("/api/system/host-specs", get(api_host_specs))
         .route("/api/system/install", post(api_install_dep))
         // Colima instances
         .route("/api/instances", get(api_list_instances))
@@ -3463,6 +3492,7 @@ pub fn build_router() -> Router {
         .route("/api/ai/models", post(api_ai_list_models))
         .route("/api/ai/search", post(api_ai_search))
         .route("/api/ai/fetch-page", post(api_ai_fetch_page))
+        .route("/api/ai/context", get(api_ai_context))
         // Terminal sessions (browser mode)
         .route("/api/terminal/create", post(api_terminal_create))
         .route("/api/terminal/write", post(api_terminal_write))
