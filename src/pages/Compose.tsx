@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { composeApi, ComposeProject } from "../lib/api";
 import { globalToast } from "../lib/globalToast";
-import { WarningIcon, RestartIcon, StopIcon, CloseIcon } from "../components/Icons";
+import { WarningIcon, RestartIcon, StopIcon, TrashIcon, CloseIcon } from "../components/Icons";
 
 export default function Compose() {
   const [projects, setProjects] = useState<ComposeProject[]>([]);
@@ -150,7 +150,7 @@ export default function Compose() {
                       <button className="btn btn-ghost" style={{ fontSize: "var(--text-xs)" }} disabled={!!isLoading}
                         onClick={() => handleAction(p.Name, "restart")}><RestartIcon size={12} /> Restart</button>
                       <button className="btn btn-ghost" style={{ fontSize: "var(--text-xs)", color: "var(--accent-red)" }}
-                        disabled={!!isLoading} onClick={() => handleAction(p.Name, "down")}><StopIcon size={12} /> Down</button>
+                        disabled={!!isLoading} onClick={() => handleAction(p.Name, "down")}><TrashIcon size={12} /> Down</button>
                     </div>
                   </div>
                 </div>
