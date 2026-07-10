@@ -117,6 +117,7 @@ pub fn run() {
             compose::compose_restart,
             compose::compose_logs,
             compose::compose_ps,
+            compose::compose_stop,
             // Kubernetes commands
             kubernetes::k8s_check,
             kubernetes::k8s_namespaces,

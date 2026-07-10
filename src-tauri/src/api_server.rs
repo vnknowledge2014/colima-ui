@@ -3306,6 +3306,17 @@ async fn api_compose_logs(
     }
 }
 
+async fn api_compose_stop(
+    Json(body): Json<ComposeProjectBody>,
+) -> (StatusCode, Json<ApiResponse<String>>) {
+    match run_blocking(move || run_cmd("docker", &["compose", "-p", &body.project_name, "stop"]))
+        .await
+    {
+        Ok(out) => ok(out),
+        Err(e) => err(e),
+    }
+}
+
 async fn api_compose_ps(
     Query(q): Query<ComposePsQuery>,
 ) -> (StatusCode, Json<ApiResponse<String>>) {
@@ -3394,6 +3405,7 @@ pub fn build_router() -> Router {
         .route("/api/compose/up", post(api_compose_up))
         .route("/api/compose/down", post(api_compose_down))
         .route("/api/compose/restart", post(api_compose_restart))
+        .route("/api/compose/stop", post(api_compose_stop))
         .route("/api/compose/logs", get(api_compose_logs))
         .route("/api/compose/ps", get(api_compose_ps))
         // Kubernetes

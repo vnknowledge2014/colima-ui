@@ -147,6 +147,21 @@ pub async fn compose_logs(project_name: String, lines: u32) -> Result<String, St
     Ok(combined)
 }
 
+/// Stop a Docker Compose project (stops containers without removing them)
+#[tauri::command]
+pub async fn compose_stop(project_name: String) -> Result<String, String> {
+    let output = docker_output(vec!["compose".into(), "-p".into(), project_name.clone(), "stop".into()]).await?;
+
+    if !output.status.success() {
+        return Err(format!(
+            "docker compose stop failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        ));
+    }
+
+    Ok(format!("Compose project '{}' stopped", project_name))
+}
+
 /// List services in a compose project
 #[tauri::command]
 pub async fn compose_ps(project_name: String) -> Result<String, String> {

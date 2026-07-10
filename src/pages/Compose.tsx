@@ -33,11 +33,14 @@ export default function Compose() {
     return () => clearInterval(interval);
   }, [fetchProjects]);
 
-  const handleAction = async (name: string, action: "down" | "restart") => {
+  const handleAction = async (name: string, action: "down" | "restart" | "stop") => {
     setActionLoading(`${name}-${action}`);
     try {
       if (action === "down") {
         await composeApi.down(name);
+        globalToast("success", `Project '${name}' stopped and removed`);
+      } else if (action === "stop") {
+        await composeApi.stop(name);
         globalToast("success", `Project '${name}' stopped`);
       } else {
         await composeApi.restart(name);
@@ -142,6 +145,8 @@ export default function Compose() {
                       )}
                     </div>
                     <div style={{ display: "flex", gap: 6 }} onClick={e => e.stopPropagation()}>
+                      <button className="btn btn-ghost" style={{ fontSize: "var(--text-xs)" }} disabled={!!isLoading}
+                        onClick={() => handleAction(p.Name, "stop")}><StopIcon size={12} /> Stop</button>
                       <button className="btn btn-ghost" style={{ fontSize: "var(--text-xs)" }} disabled={!!isLoading}
                         onClick={() => handleAction(p.Name, "restart")}><RestartIcon size={12} /> Restart</button>
                       <button className="btn btn-ghost" style={{ fontSize: "var(--text-xs)", color: "var(--accent-red)" }}
