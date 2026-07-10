@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { composeApi, ComposeProject } from "../lib/api";
 import { globalToast } from "../lib/globalToast";
-import { WarningIcon, RestartIcon, StopIcon, CloseIcon } from "../components/Icons";
+import { WarningIcon, RestartIcon, StopIcon, TrashIcon, CloseIcon } from "../components/Icons";
 
 export default function Compose() {
   const [projects, setProjects] = useState<ComposeProject[]>([]);
@@ -33,11 +33,14 @@ export default function Compose() {
     return () => clearInterval(interval);
   }, [fetchProjects]);
 
-  const handleAction = async (name: string, action: "down" | "restart") => {
+  const handleAction = async (name: string, action: "down" | "restart" | "stop") => {
     setActionLoading(`${name}-${action}`);
     try {
       if (action === "down") {
         await composeApi.down(name);
+        globalToast("success", `Project '${name}' stopped and removed`);
+      } else if (action === "stop") {
+        await composeApi.stop(name);
         globalToast("success", `Project '${name}' stopped`);
       } else {
         await composeApi.restart(name);
@@ -143,9 +146,11 @@ export default function Compose() {
                     </div>
                     <div style={{ display: "flex", gap: 6 }} onClick={e => e.stopPropagation()}>
                       <button className="btn btn-ghost" style={{ fontSize: "var(--text-xs)" }} disabled={!!isLoading}
+                        onClick={() => handleAction(p.Name, "stop")}><StopIcon size={12} /> Stop</button>
+                      <button className="btn btn-ghost" style={{ fontSize: "var(--text-xs)" }} disabled={!!isLoading}
                         onClick={() => handleAction(p.Name, "restart")}><RestartIcon size={12} /> Restart</button>
                       <button className="btn btn-ghost" style={{ fontSize: "var(--text-xs)", color: "var(--accent-red)" }}
-                        disabled={!!isLoading} onClick={() => handleAction(p.Name, "down")}><StopIcon size={12} /> Down</button>
+                        disabled={!!isLoading} onClick={() => handleAction(p.Name, "down")}><TrashIcon size={12} /> Down</button>
                     </div>
                   </div>
                 </div>

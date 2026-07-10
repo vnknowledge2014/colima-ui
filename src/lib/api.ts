@@ -435,6 +435,8 @@ export const composeApi = {
     call<string>("compose_down", { projectName }, "POST", "/api/compose/down", undefined, { projectName }),
   restart: (projectName: string) =>
     call<string>("compose_restart", { projectName }, "POST", "/api/compose/restart", undefined, { projectName }),
+  stop: (projectName: string) =>
+    call<string>("compose_stop", { projectName }, "POST", "/api/compose/stop", undefined, { projectName }),
   logs: (projectName: string, lines = 200) =>
     call<string>("compose_logs", { projectName, lines }, "GET", "/api/compose/logs", { projectName, lines: String(lines) }),
   ps: (projectName: string) =>
