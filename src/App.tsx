@@ -432,6 +432,8 @@ function App() {
 
   return (
     <div className={`app-layout${isTauri ? " tauri-app" : ""}`}>
+      {isTauri && <div className="titlebar-drag" data-tauri-drag-region />}
+
       {/* Sidebar */}
       <aside className="sidebar">
         <div className="sidebar-header">
