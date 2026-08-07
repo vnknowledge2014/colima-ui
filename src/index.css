@@ -334,6 +334,8 @@ body {
   max-width: 100%;
   overflow: hidden;
   min-width: 0;
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 
 .badge-running {
@@ -1038,6 +1040,10 @@ body {
   font-family: var(--font-mono);
   font-size: var(--text-xs);
   color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 160px;
 }
 
 .wizard-actions {

@@ -426,7 +426,7 @@
                 </div>
               </div>
               <div class="dep-status">
-                {#if tool.version}<span class="dep-version" style="max-width: 180px; overflow: hidden; text-overflow: ellipsis;">{tool.version}</span>{/if}
+                {#if tool.version}<span class="dep-version" style="max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{tool.version}</span>{/if}
                 {#if tool.checking}
                   <span class="badge" style="background: rgba(139,148,158,0.15); color: var(--text-muted);">
                     <div class="spinner" style="width: 10px; height: 10px; border-width: 1.5px;"></div> Checking
