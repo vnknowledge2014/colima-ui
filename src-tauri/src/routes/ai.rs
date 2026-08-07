@@ -1,12 +1,10 @@
 use axum::{
-    extract::{Query, State},
     http::StatusCode,
     response::Json,
 };
-use serde::{Deserialize, Serialize};
 use crate::api_server::*;
 use crate::commands::*;
-use crate::routes::payloads::*;
+
 
 pub async fn api_ai_chat(
     Json(body): Json<serde_json::Value>,

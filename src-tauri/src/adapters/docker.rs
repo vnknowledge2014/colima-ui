@@ -11,6 +11,7 @@ use super::traits::*;
 /// Uses Bollard SDK for listing (fast) and Docker CLI for lifecycle operations.
 pub struct DockerAdapter {
     /// Docker host socket URL (e.g., "unix:///Users/mike/.colima/default/docker.sock")
+    #[allow(dead_code)]
     docker_host: Option<String>,
 }
 
@@ -26,6 +27,7 @@ impl DockerAdapter {
     }
 
     /// Get a Command pre-configured with the correct runtime binary and PATH.
+    #[allow(dead_code)]
     fn docker_cmd(&self) -> std::process::Command {
         let runtime_cmd = crate::commands::runtime::get_runtime_cmd();
         runtime_cmd
@@ -52,6 +54,7 @@ impl DockerAdapter {
     }
 
     /// Parse NDJSON output from Docker CLI (each line is a JSON object).
+    #[allow(dead_code)]
     fn parse_ndjson<T: serde::de::DeserializeOwned>(stdout: &str) -> Vec<T> {
         stdout
             .lines()

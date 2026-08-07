@@ -1,15 +1,15 @@
 use std::process::Command;
 use std::convert::Infallible;
 use axum::response::sse::{Event, Sse};
-use futures_util::StreamExt;
+
 use axum::{
-    extract::{Query, State},
+    extract::Query,
     http::StatusCode,
     response::Json,
 };
-use serde::{Deserialize, Serialize};
+
 use crate::api_server::*;
-use crate::commands::*;
+
 use crate::routes::payloads::*;
 
 pub async fn api_k8s_action(Query(q): Query<K8sQuery>) -> (StatusCode, Json<ApiResponse<String>>) {

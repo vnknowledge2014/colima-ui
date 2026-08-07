@@ -4,9 +4,9 @@ use axum::{
     http::StatusCode,
     response::Json,
 };
-use serde::{Deserialize, Serialize};
+
 use crate::api_server::*;
-use crate::commands::*;
+
 use crate::routes::payloads::*;
 
 pub async fn api_terminal_create(
