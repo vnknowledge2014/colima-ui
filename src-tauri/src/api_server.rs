@@ -38,6 +38,8 @@ use crate::routes::images::*;
 use crate::routes::volumes::*;
 use crate::routes::networks::*;
 use crate::routes::compose::*;
+use crate::routes::payloads::*;
+use crate::routes::capabilities::*;
 use crate::routes::models::*;
 use crate::routes::ws::*;
 use crate::routes::k8s::*;
@@ -211,6 +213,8 @@ pub fn build_router() -> Router {
         .route("/api/sandbox/execute", post(api_sandbox_execute))
         .route("/api/sandbox/execute-approved", post(api_sandbox_execute_approved))
         .route("/api/cli/execute_stream", post(api_sandbox_execute_stream))
+        // Capabilities
+        .route("/api/capabilities", get(api_capabilities))
         // Diagnostics
         .route("/api/diagnostics/logs", get(api_diagnostics_logs))
         // Terminal sessions (browser mode)

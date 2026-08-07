@@ -13,3 +13,4 @@ pub mod lima;
 pub mod compose;
 pub mod kb;
 pub mod payloads;
+pub mod capabilities;
