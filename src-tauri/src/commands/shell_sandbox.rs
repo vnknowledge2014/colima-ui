@@ -241,13 +241,17 @@ fn execute_command(command: &str) -> Result<ExecResult, String> {
 
 /// Classify a command's safety level (for UI display)
 #[tauri::command]
-pub async fn sandbox_classify(command: String) -> Result<ClassifyResult, String> {
+pub async fn sandbox_classify(command: String) -> Result<ClassifyResult, crate::error::ColimaError> {
+    async move {
     Ok(classify(&command))
+    }
+    .await.map_err(|e: String| crate::error::ColimaError::from(e))
 }
 
 /// Execute a safe command (auto-approved)
 #[tauri::command]
-pub async fn sandbox_execute(command: String) -> Result<ExecResult, String> {
+pub async fn sandbox_execute(command: String) -> Result<ExecResult, crate::error::ColimaError> {
+    async move {
     let result = classify(&command);
     match result.safety {
         CommandSafety::Safe => {
@@ -262,11 +266,14 @@ pub async fn sandbox_execute(command: String) -> Result<ExecResult, String> {
             Err(format!("banned:{}", result.reason))
         }
     }
+    }
+    .await.map_err(|e: String| crate::error::ColimaError::from(e))
 }
 
 /// Execute a command that was explicitly approved by the user
 #[tauri::command]
-pub async fn sandbox_execute_approved(command: String) -> Result<ExecResult, String> {
+pub async fn sandbox_execute_approved(command: String) -> Result<ExecResult, crate::error::ColimaError> {
+    async move {
     let result = classify(&command);
     match result.safety {
         CommandSafety::Banned => {
@@ -279,4 +286,6 @@ pub async fn sandbox_execute_approved(command: String) -> Result<ExecResult, Str
                 .map_err(|e| format!("Task join error: {}", e))?
         }
     }
+    }
+    .await.map_err(|e: String| crate::error::ColimaError::from(e))
 }

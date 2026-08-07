@@ -1,3 +1,4 @@
+pub mod error;
 pub mod routes;
 mod api_server;
 pub mod commands;

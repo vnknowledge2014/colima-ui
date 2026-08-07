@@ -50,7 +50,7 @@ pub async fn api_k8s_action(Query(q): Query<K8sQuery>) -> (StatusCode, Json<ApiR
     .await
     {
         Ok(msg) => ok(msg),
-        Err(e) => err(e),
+        Err(e) => err(e.to_string()),
     }
 }
 
@@ -58,7 +58,7 @@ pub async fn api_k8s_action(Query(q): Query<K8sQuery>) -> (StatusCode, Json<ApiR
 pub async fn api_k8s_check() -> (StatusCode, Json<ApiResponse<String>>) {
     match run_blocking(|| run_cmd("kubectl", &["cluster-info", "--request-timeout=3s"])).await {
         Ok(out) => ok(out),
-        Err(e) => err(e),
+        Err(e) => err(e.to_string()),
     }
 }
 
@@ -66,7 +66,7 @@ pub async fn api_k8s_check() -> (StatusCode, Json<ApiResponse<String>>) {
 pub async fn api_k8s_namespaces() -> (StatusCode, Json<ApiResponse<String>>) {
     match run_blocking(|| run_cmd("kubectl", &["get", "namespaces", "-o", "json"])).await {
         Ok(out) => ok(out),
-        Err(e) => err(e),
+        Err(e) => err(e.to_string()),
     }
 }
 
@@ -86,7 +86,7 @@ pub async fn api_k8s_pods(Query(q): Query<K8sNsQuery>) -> (StatusCode, Json<ApiR
     .await
     {
         Ok(out) => ok(out),
-        Err(e) => err(e),
+        Err(e) => err(e.to_string()),
     }
 }
 
@@ -106,7 +106,7 @@ pub async fn api_k8s_services(Query(q): Query<K8sNsQuery>) -> (StatusCode, Json<
     .await
     {
         Ok(out) => ok(out),
-        Err(e) => err(e),
+        Err(e) => err(e.to_string()),
     }
 }
 
@@ -128,7 +128,7 @@ pub async fn api_k8s_deployments(
     .await
     {
         Ok(out) => ok(out),
-        Err(e) => err(e),
+        Err(e) => err(e.to_string()),
     }
 }
 
@@ -148,7 +148,7 @@ pub async fn api_k8s_pod_logs(
     .await
     {
         Ok(out) => ok(out),
-        Err(e) => err(e),
+        Err(e) => err(e.to_string()),
     }
 }
 
@@ -160,7 +160,7 @@ pub async fn api_k8s_delete_pod(
     let pod = body.pod;
     match run_blocking(move || run_cmd("kubectl", &["delete", "pod", "-n", &ns, &pod])).await {
         Ok(out) => ok(out),
-        Err(e) => err(e),
+        Err(e) => err(e.to_string()),
     }
 }
 
@@ -173,7 +173,7 @@ pub async fn api_k8s_describe(
     let name = q.name;
     match run_blocking(move || run_cmd("kubectl", &["describe", &rt, "-n", &ns, &name])).await {
         Ok(out) => ok(out),
-        Err(e) => err(e),
+        Err(e) => err(e.to_string()),
     }
 }
 
@@ -191,7 +191,7 @@ pub async fn api_k8s_scale(Json(body): Json<K8sScaleBody>) -> (StatusCode, Json<
     .await
     {
         Ok(out) => ok(out),
-        Err(e) => err(e),
+        Err(e) => err(e.to_string()),
     }
 }
 
@@ -199,7 +199,7 @@ pub async fn api_k8s_scale(Json(body): Json<K8sScaleBody>) -> (StatusCode, Json<
 pub async fn api_k8s_nodes() -> (StatusCode, Json<ApiResponse<String>>) {
     match run_blocking(|| run_cmd("kubectl", &["get", "nodes", "-o", "wide"])).await {
         Ok(out) => ok(out),
-        Err(e) => err(e),
+        Err(e) => err(e.to_string()),
     }
 }
 
@@ -233,7 +233,7 @@ pub async fn api_k8s_events(Query(q): Query<K8sNsQuery>) -> (StatusCode, Json<Ap
     .await
     {
         Ok(out) => ok(out),
-        Err(e) => err(e),
+        Err(e) => err(e.to_string()),
     }
 }
 
@@ -292,7 +292,7 @@ pub async fn api_k8s_resources(
     .await
     {
         Ok(out) => ok(out),
-        Err(e) => err(e),
+        Err(e) => err(e.to_string()),
     }
 }
 
@@ -312,7 +312,7 @@ pub async fn api_k8s_delete_resource(
     }
     match run_blocking(move || run_cmd("kubectl", &["delete", &rt, &name, "-n", &ns])).await {
         Ok(out) => ok(out),
-        Err(e) => err(e),
+        Err(e) => err(e.to_string()),
     }
 }
 
@@ -328,7 +328,7 @@ pub async fn api_k8s_restart(
         .await
     {
         Ok(out) => ok(out),
-        Err(e) => err(e),
+        Err(e) => err(e.to_string()),
     }
 }
 
@@ -347,7 +347,7 @@ pub async fn api_k8s_yaml(Query(q): Query<K8sYamlQuery>) -> (StatusCode, Json<Ap
     .await
     {
         Ok(out) => ok(out),
-        Err(e) => err(e),
+        Err(e) => err(e.to_string()),
     }
 }
 
@@ -356,7 +356,7 @@ pub async fn api_k8s_yaml(Query(q): Query<K8sYamlQuery>) -> (StatusCode, Json<Ap
 pub async fn api_k8s_nodes_json() -> (StatusCode, Json<ApiResponse<String>>) {
     match run_blocking(|| run_cmd("kubectl", &["get", "nodes", "-o", "json"])).await {
         Ok(out) => ok(out),
-        Err(e) => err(e),
+        Err(e) => err(e.to_string()),
     }
 }
 
@@ -386,7 +386,7 @@ pub async fn api_k8s_events_json(
     .await
     {
         Ok(out) => ok(out),
-        Err(e) => err(e),
+        Err(e) => err(e.to_string()),
     }
 }
 
@@ -395,7 +395,7 @@ pub async fn api_k8s_events_json(
 pub async fn api_k8s_contexts() -> (StatusCode, Json<ApiResponse<String>>) {
     match run_blocking(|| run_cmd("kubectl", &["config", "get-contexts", "-o", "name"])).await {
         Ok(out) => ok(out),
-        Err(e) => err(e),
+        Err(e) => err(e.to_string()),
     }
 }
 
@@ -403,7 +403,7 @@ pub async fn api_k8s_contexts() -> (StatusCode, Json<ApiResponse<String>>) {
 pub async fn api_k8s_current_context() -> (StatusCode, Json<ApiResponse<String>>) {
     match run_blocking(|| run_cmd("kubectl", &["config", "current-context"])).await {
         Ok(out) => ok(out),
-        Err(e) => err(e),
+        Err(e) => err(e.to_string()),
     }
 }
 
@@ -414,7 +414,7 @@ pub async fn api_k8s_set_context(
     let ctx = body.context;
     match run_blocking(move || run_cmd("kubectl", &["config", "use-context", &ctx])).await {
         Ok(out) => ok(out),
-        Err(e) => err(e),
+        Err(e) => err(e.to_string()),
     }
 }
 
@@ -454,7 +454,7 @@ pub async fn api_k8s_apply(Json(body): Json<K8sApplyBody>) -> (StatusCode, Json<
     .await
     {
         Ok(out) => ok(out),
-        Err(e) => err(e),
+        Err(e) => err(e.to_string()),
     }
 }
 
@@ -488,7 +488,7 @@ pub async fn api_k8s_port_forward_start(
     .await
     {
         Ok(out) => ok(out),
-        Err(e) => err(e),
+        Err(e) => err(e.to_string()),
     }
 }
 
@@ -526,7 +526,7 @@ pub async fn api_k8s_port_forward_stop(
     .await
     {
         Ok(out) => ok(out),
-        Err(e) => err(e),
+        Err(e) => err(e.to_string()),
     }
 }
 
@@ -543,7 +543,7 @@ pub async fn api_k8s_port_forward_list() -> (StatusCode, Json<ApiResponse<String
     .await
     {
         Ok(out) => ok(out),
-        Err(e) => err(e),
+        Err(e) => err(e.to_string()),
     }
 }
 
@@ -609,7 +609,7 @@ pub async fn api_k8s_exec(Json(body): Json<K8sExecBody>) -> (StatusCode, Json<Ap
     .await
     {
         Ok(out) => ok(out),
-        Err(e) => err(e),
+        Err(e) => err(e.to_string()),
     }
 }
 
@@ -636,7 +636,7 @@ pub async fn api_k8s_container_logs(
     .await
     {
         Ok(out) => ok(out),
-        Err(e) => err(e),
+        Err(e) => err(e.to_string()),
     }
 }
 
@@ -664,7 +664,7 @@ pub async fn api_k8s_pod_containers(
     .await
     {
         Ok(out) => ok(out),
-        Err(e) => err(e),
+        Err(e) => err(e.to_string()),
     }
 }
 
@@ -692,7 +692,7 @@ pub async fn api_k8s_node_action(
     .await
     {
         Ok(out) => ok(out),
-        Err(e) => err(e),
+        Err(e) => err(e.to_string()),
     }
 }
 
@@ -700,7 +700,7 @@ pub async fn api_k8s_node_action(
 pub async fn api_kind_list() -> (StatusCode, Json<ApiResponse<String>>) {
     match run_blocking(|| run_cmd("kind", &["get", "clusters"])).await {
         Ok(out) => ok(out),
-        Err(e) => err(e),
+        Err(e) => err(e.to_string()),
     }
 }
 
@@ -721,7 +721,7 @@ pub async fn api_kind_create(
     .await
     {
         Ok(out) => ok(out),
-        Err(e) => err(e),
+        Err(e) => err(e.to_string()),
     }
 }
 
@@ -732,7 +732,7 @@ pub async fn api_kind_delete(
     let name = body.name;
     match run_blocking(move || run_cmd("kind", &["delete", "cluster", "--name", &name])).await {
         Ok(out) => ok(out),
-        Err(e) => err(e),
+        Err(e) => err(e.to_string()),
     }
 }
 
@@ -748,7 +748,7 @@ pub async fn api_k8s_generic_scale(
         .await
     {
         Ok(out) => ok(out),
-        Err(e) => err(e),
+        Err(e) => err(e.to_string()),
     }
 }
 
@@ -973,7 +973,7 @@ pub async fn api_k8s_cluster_health() -> (StatusCode, Json<ApiResponse<String>>)
         Ok(result.to_string())
     }).await {
         Ok(out) => ok(out),
-        Err(e) => err(e),
+        Err(e) => err(e.to_string()),
     }
 }
 
@@ -982,7 +982,7 @@ pub async fn api_k8s_cluster_health() -> (StatusCode, Json<ApiResponse<String>>)
 pub async fn api_k8s_crds() -> (StatusCode, Json<ApiResponse<String>>) {
     match run_blocking(|| run_cmd("kubectl", &["get", "crd", "-o", "json"])).await {
         Ok(out) => ok(out),
-        Err(e) => err(e),
+        Err(e) => err(e.to_string()),
     }
 }
 
@@ -1014,7 +1014,7 @@ pub async fn api_k8s_crd_resources(
     .await
     {
         Ok(out) => ok(out),
-        Err(e) => err(e),
+        Err(e) => err(e.to_string()),
     }
 }
 

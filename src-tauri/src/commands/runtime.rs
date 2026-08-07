@@ -54,7 +54,10 @@ pub fn get_runtime_cmd() -> Command {
 
 /// Returns the active runtime name (e.g., "docker", "podman", "containerd").
 #[tauri::command]
-pub async fn get_runtime_info() -> Result<String, String> {
+pub async fn get_runtime_info() -> Result<String, crate::error::ColimaError> {
+    async move {
     let (runtime_name, _, _) = detect_runtime();
     Ok(runtime_name)
+    }
+    .await.map_err(|e: String| crate::error::ColimaError::from(e))
 }

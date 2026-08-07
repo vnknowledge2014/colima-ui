@@ -18,7 +18,8 @@ pub struct AiModel {
 
 /// List available AI models
 #[tauri::command]
-pub async fn list_models(profile: String, runner: Option<String>) -> Result<Vec<AiModel>, String> {
+pub async fn list_models(profile: String, runner: Option<String>) -> Result<Vec<AiModel>, crate::error::ColimaError> {
+    async move {
     let mut args = vec!["model", "list"];
     let profile_flag;
     if profile != "default" && !profile.is_empty() {
@@ -82,11 +83,14 @@ pub async fn list_models(profile: String, runner: Option<String>) -> Result<Vec<
         .collect();
 
     Ok(models)
+    }
+    .await.map_err(|e: String| crate::error::ColimaError::from(e))
 }
 
 /// Pull/download a model
 #[tauri::command]
-pub async fn pull_model(profile: String, model_name: String, runner: Option<String>) -> Result<String, String> {
+pub async fn pull_model(profile: String, model_name: String, runner: Option<String>) -> Result<String, crate::error::ColimaError> {
+    async move {
     let mut args = vec!["model", "pull", model_name.as_str()];
     let profile_flag;
     if profile != "default" && !profile.is_empty() {
@@ -116,11 +120,14 @@ pub async fn pull_model(profile: String, model_name: String, runner: Option<Stri
     }
 
     Ok(format!("Model '{}' pulled successfully", model_name))
+    }
+    .await.map_err(|e: String| crate::error::ColimaError::from(e))
 }
 
 /// Serve a model
 #[tauri::command]
-pub async fn serve_model(profile: String, model_name: String, port: u16, runner: Option<String>) -> Result<String, String> {
+pub async fn serve_model(profile: String, model_name: String, port: u16, runner: Option<String>) -> Result<String, crate::error::ColimaError> {
+    async move {
     let port_str = port.to_string();
     let mut args = vec!["model", "serve", model_name.as_str(), "--port", &port_str];
     let profile_flag;
@@ -151,11 +158,14 @@ pub async fn serve_model(profile: String, model_name: String, port: u16, runner:
     }
 
     Ok(format!("Model '{}' serving on port {}", model_name, port))
+    }
+    .await.map_err(|e: String| crate::error::ColimaError::from(e))
 }
 
 /// Delete a model
 #[tauri::command]
-pub async fn delete_model(profile: String, model_name: String, runner: Option<String>) -> Result<String, String> {
+pub async fn delete_model(profile: String, model_name: String, runner: Option<String>) -> Result<String, crate::error::ColimaError> {
+    async move {
     let mut args = vec!["model", "delete", model_name.as_str()];
     let profile_flag;
     if profile != "default" && !profile.is_empty() {
@@ -185,4 +195,6 @@ pub async fn delete_model(profile: String, model_name: String, runner: Option<St
     }
 
     Ok(format!("Model '{}' deleted", model_name))
+    }
+    .await.map_err(|e: String| crate::error::ColimaError::from(e))
 }

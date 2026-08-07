@@ -34,10 +34,14 @@ export async function call<T>(
   if (isTauri()) {
     const invoke = await getInvoke();
     if (invoke) {
-      // Tauri invoke available — call the command directly.
-      // Let errors propagate (e.g. "Docker not available").
-      // Only fall through to HTTP if invoke itself is not available.
-      return await (invoke(tauriCmd, tauriArgs) as Promise<T>);
+      try {
+        return await (invoke(tauriCmd, tauriArgs) as Promise<T>);
+      } catch (err: any) {
+        if (err && typeof err === 'object' && err.type && err.message) {
+          throw `[${err.type}] ${err.message}`;
+        }
+        throw err;
+      }
     }
   }
 

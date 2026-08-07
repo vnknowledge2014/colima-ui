@@ -54,7 +54,8 @@ async fn docker_output(args: Vec<String>) -> Result<std::process::Output, String
 
 /// List all Docker volumes
 #[tauri::command]
-pub async fn list_volumes() -> Result<Vec<DockerVolume>, String> {
+pub async fn list_volumes() -> Result<Vec<DockerVolume>, crate::error::ColimaError> {
+    async move {
     let output = docker_output(vec!["volume".into(), "ls".into(), "--format".into(), "json".into()]).await?;
 
     if !output.status.success() {
@@ -76,11 +77,14 @@ pub async fn list_volumes() -> Result<Vec<DockerVolume>, String> {
         .collect();
 
     Ok(volumes)
+    }
+    .await.map_err(|e: String| crate::error::ColimaError::from(e))
 }
 
 /// Create a Docker volume
 #[tauri::command]
-pub async fn create_volume(name: String, driver: String) -> Result<String, String> {
+pub async fn create_volume(name: String, driver: String) -> Result<String, crate::error::ColimaError> {
+    async move {
     let mut args = vec!["volume".to_string(), "create".to_string()];
 
     if !driver.is_empty() && driver != "local" {
@@ -99,11 +103,14 @@ pub async fn create_volume(name: String, driver: String) -> Result<String, Strin
     }
 
     Ok(format!("Volume '{}' created", name))
+    }
+    .await.map_err(|e: String| crate::error::ColimaError::from(e))
 }
 
 /// Remove a Docker volume
 #[tauri::command]
-pub async fn remove_volume(name: String, force: bool) -> Result<String, String> {
+pub async fn remove_volume(name: String, force: bool) -> Result<String, crate::error::ColimaError> {
+    async move {
     let mut args = vec!["volume".to_string(), "rm".to_string()];
     if force {
         args.push("-f".to_string());
@@ -120,11 +127,14 @@ pub async fn remove_volume(name: String, force: bool) -> Result<String, String> 
     }
 
     Ok(format!("Volume '{}' removed", name))
+    }
+    .await.map_err(|e: String| crate::error::ColimaError::from(e))
 }
 
 /// Prune unused Docker volumes
 #[tauri::command]
-pub async fn prune_volumes() -> Result<String, String> {
+pub async fn prune_volumes() -> Result<String, crate::error::ColimaError> {
+    async move {
     let output = docker_output(vec!["volume".into(), "prune".into(), "-f".into()]).await?;
 
     if !output.status.success() {
@@ -135,11 +145,14 @@ pub async fn prune_volumes() -> Result<String, String> {
     }
 
     Ok(String::from_utf8_lossy(&output.stdout).to_string())
+    }
+    .await.map_err(|e: String| crate::error::ColimaError::from(e))
 }
 
 /// Inspect a Docker volume (raw JSON)
 #[tauri::command]
-pub async fn inspect_volume(name: String) -> Result<String, String> {
+pub async fn inspect_volume(name: String) -> Result<String, crate::error::ColimaError> {
+    async move {
     let output = docker_output(vec!["volume".into(), "inspect".into(), name]).await?;
 
     if !output.status.success() {
@@ -150,4 +163,6 @@ pub async fn inspect_volume(name: String) -> Result<String, String> {
     }
 
     Ok(String::from_utf8_lossy(&output.stdout).to_string())
+    }
+    .await.map_err(|e: String| crate::error::ColimaError::from(e))
 }

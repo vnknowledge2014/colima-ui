@@ -19,7 +19,7 @@ pub async fn api_terminal_create(
     };
     match result {
         Ok(()) => ok(format!("Session '{}' created", params.session_id)),
-        Err(e) => err(e),
+        Err(e) => err(e.to_string()),
     }
 }
 
@@ -34,7 +34,7 @@ pub async fn api_terminal_write(
     };
     match result {
         Ok(()) => ok("ok".to_string()),
-        Err(e) => err(e),
+        Err(e) => err(e.to_string()),
     }
 }
 
@@ -65,7 +65,7 @@ pub async fn api_terminal_close(
     };
     match result {
         Ok(()) => ok("closed".to_string()),
-        Err(e) => err(e),
+        Err(e) => err(e.to_string()),
     }
 }
 

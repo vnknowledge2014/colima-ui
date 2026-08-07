@@ -53,7 +53,8 @@ pub struct K8sDeployment {
 
 /// Check if kubectl is available and connected
 #[tauri::command]
-pub async fn k8s_check() -> Result<String, String> {
+pub async fn k8s_check() -> Result<String, crate::error::ColimaError> {
+    async move {
     let output = kubectl_cmd()
         .args(["cluster-info", "--request-timeout=3s"])
         .output()
@@ -67,11 +68,14 @@ pub async fn k8s_check() -> Result<String, String> {
     }
 
     Ok(String::from_utf8_lossy(&output.stdout).to_string())
+    }
+    .await.map_err(|e: String| crate::error::ColimaError::from(e))
 }
 
 /// List namespaces
 #[tauri::command]
-pub async fn k8s_namespaces() -> Result<Vec<K8sNamespace>, String> {
+pub async fn k8s_namespaces() -> Result<Vec<K8sNamespace>, crate::error::ColimaError> {
+    async move {
     let output = kubectl_cmd()
         .args(["get", "namespaces", "-o", "json"])
         .output()
@@ -108,11 +112,14 @@ pub async fn k8s_namespaces() -> Result<Vec<K8sNamespace>, String> {
         .collect();
 
     Ok(namespaces)
+    }
+    .await.map_err(|e: String| crate::error::ColimaError::from(e))
 }
 
 /// List pods in a namespace (empty = all namespaces)
 #[tauri::command]
-pub async fn k8s_pods(namespace: String) -> Result<Vec<K8sPod>, String> {
+pub async fn k8s_pods(namespace: String) -> Result<Vec<K8sPod>, crate::error::ColimaError> {
+    async move {
     let mut args = vec!["get", "pods", "-o", "json"];
     if namespace.is_empty() || namespace == "all" {
         args.push("--all-namespaces");
@@ -189,11 +196,14 @@ pub async fn k8s_pods(namespace: String) -> Result<Vec<K8sPod>, String> {
         .collect();
 
     Ok(pods)
+    }
+    .await.map_err(|e: String| crate::error::ColimaError::from(e))
 }
 
 /// List services in a namespace
 #[tauri::command]
-pub async fn k8s_services(namespace: String) -> Result<Vec<K8sService>, String> {
+pub async fn k8s_services(namespace: String) -> Result<Vec<K8sService>, crate::error::ColimaError> {
+    async move {
     let mut args = vec!["get", "services", "-o", "json"];
     if namespace.is_empty() || namespace == "all" {
         args.push("--all-namespaces");
@@ -269,11 +279,14 @@ pub async fn k8s_services(namespace: String) -> Result<Vec<K8sService>, String> 
         .collect();
 
     Ok(services)
+    }
+    .await.map_err(|e: String| crate::error::ColimaError::from(e))
 }
 
 /// List deployments in a namespace
 #[tauri::command]
-pub async fn k8s_deployments(namespace: String) -> Result<Vec<K8sDeployment>, String> {
+pub async fn k8s_deployments(namespace: String) -> Result<Vec<K8sDeployment>, crate::error::ColimaError> {
+    async move {
     let mut args = vec!["get", "deployments", "-o", "json"];
     if namespace.is_empty() || namespace == "all" {
         args.push("--all-namespaces");
@@ -325,11 +338,14 @@ pub async fn k8s_deployments(namespace: String) -> Result<Vec<K8sDeployment>, St
         .collect();
 
     Ok(deployments)
+    }
+    .await.map_err(|e: String| crate::error::ColimaError::from(e))
 }
 
 /// Get pod logs
 #[tauri::command]
-pub async fn k8s_pod_logs(namespace: String, pod: String, lines: u32) -> Result<String, String> {
+pub async fn k8s_pod_logs(namespace: String, pod: String, lines: u32) -> Result<String, crate::error::ColimaError> {
+    async move {
     let tail = lines.to_string();
     let output = kubectl_cmd()
         .args([
@@ -352,11 +368,14 @@ pub async fn k8s_pod_logs(namespace: String, pod: String, lines: u32) -> Result<
     }
 
     Ok(String::from_utf8_lossy(&output.stdout).to_string())
+    }
+    .await.map_err(|e: String| crate::error::ColimaError::from(e))
 }
 
 /// Delete a pod
 #[tauri::command]
-pub async fn k8s_delete_pod(namespace: String, pod: String) -> Result<String, String> {
+pub async fn k8s_delete_pod(namespace: String, pod: String) -> Result<String, crate::error::ColimaError> {
+    async move {
     let output = kubectl_cmd()
         .args(["delete", "pod", "-n", &namespace, &pod])
         .output()
@@ -370,15 +389,14 @@ pub async fn k8s_delete_pod(namespace: String, pod: String) -> Result<String, St
     }
 
     Ok(format!("Pod {} deleted", pod))
+    }
+    .await.map_err(|e: String| crate::error::ColimaError::from(e))
 }
 
 /// Describe a resource (pod, service, deployment, etc.)
 #[tauri::command]
-pub async fn k8s_describe(
-    namespace: String,
-    resource_type: String,
-    name: String,
-) -> Result<String, String> {
+pub async fn k8s_describe(     namespace: String,     resource_type: String,     name: String, ) -> Result<String, crate::error::ColimaError> {
+    async move {
     let output = kubectl_cmd()
         .args(["describe", &resource_type, "-n", &namespace, &name])
         .output()
@@ -392,15 +410,14 @@ pub async fn k8s_describe(
     }
 
     Ok(String::from_utf8_lossy(&output.stdout).to_string())
+    }
+    .await.map_err(|e: String| crate::error::ColimaError::from(e))
 }
 
 /// Scale a deployment
 #[tauri::command]
-pub async fn k8s_scale(
-    namespace: String,
-    deployment: String,
-    replicas: u32,
-) -> Result<String, String> {
+pub async fn k8s_scale(     namespace: String,     deployment: String,     replicas: u32, ) -> Result<String, crate::error::ColimaError> {
+    async move {
     let replicas_str = format!("--replicas={}", replicas);
     let output = kubectl_cmd()
         .args([
@@ -425,11 +442,14 @@ pub async fn k8s_scale(
         "Deployment {} scaled to {} replicas",
         deployment, replicas
     ))
+    }
+    .await.map_err(|e: String| crate::error::ColimaError::from(e))
 }
 
 /// Get cluster nodes
 #[tauri::command]
-pub async fn k8s_nodes() -> Result<String, String> {
+pub async fn k8s_nodes() -> Result<String, crate::error::ColimaError> {
+    async move {
     let output = kubectl_cmd()
         .args(["get", "nodes", "-o", "wide"])
         .output()
@@ -443,11 +463,14 @@ pub async fn k8s_nodes() -> Result<String, String> {
     }
 
     Ok(String::from_utf8_lossy(&output.stdout).to_string())
+    }
+    .await.map_err(|e: String| crate::error::ColimaError::from(e))
 }
 
 /// Get events in a namespace
 #[tauri::command]
-pub async fn k8s_events(namespace: String) -> Result<String, String> {
+pub async fn k8s_events(namespace: String) -> Result<String, crate::error::ColimaError> {
+    async move {
     let mut args = vec!["get", "events", "--sort-by=.metadata.creationTimestamp"];
     if namespace.is_empty() || namespace == "all" {
         args.push("--all-namespaces");
@@ -469,4 +492,6 @@ pub async fn k8s_events(namespace: String) -> Result<String, String> {
     }
 
     Ok(String::from_utf8_lossy(&output.stdout).to_string())
+    }
+    .await.map_err(|e: String| crate::error::ColimaError::from(e))
 }

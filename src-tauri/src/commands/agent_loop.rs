@@ -18,9 +18,8 @@ pub struct ChatMessage {
 
 // Giả lập luồng Agent Loop trong Rust
 #[tauri::command]
-pub async fn run_headless_agent(
-    req: HeadlessChatRequest,
-) -> Result<String, String> {
+pub async fn run_headless_agent(     req: HeadlessChatRequest, ) -> Result<String, crate::error::ColimaError> {
+    async move {
     // 1. Lấy thông tin cấu hình AI
     let _provider = req.provider.clone().unwrap_or_else(|| {
         "openai".to_string()
@@ -93,6 +92,8 @@ pub async fn run_headless_agent(
     }
 
     Ok("Max agent rounds reached.".to_string())
+    }
+    .await.map_err(|e: String| crate::error::ColimaError::from(e))
 }
 
 // Đây là Trái tim của Phase 3: Rust Event Router (Minimal Implementation)
@@ -124,7 +125,7 @@ async fn route_event(event: &str, payload: Value) -> Result<String, String> {
                 dns: vec![],
                 network_address: false,
             };
-            colima::start_instance(config).await
+            colima::start_instance(config).await.map_err(|e| e.to_string())
         }
         _ => {
             // Đối với 90+ events còn lại, hiện tại trả về lỗi để Orchestrator dùng API trực tiếp

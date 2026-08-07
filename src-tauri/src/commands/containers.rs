@@ -99,10 +99,8 @@ pub async fn list_containers_cli(all: bool) -> Result<Vec<serde_json::Value>, St
 /// Always fetches fresh data: tries Bollard first (fast), falls back to Docker CLI.
 /// Returns Err if Docker daemon is unavailable.
 #[tauri::command]
-pub async fn list_containers(
-    state: tauri::State<'_, std::sync::Arc<tokio::sync::RwLock<crate::docker_state::DockerState>>>,
-    all: bool,
-) -> Result<Vec<serde_json::Value>, String> {
+pub async fn list_containers(     state: tauri::State<'_, std::sync::Arc<tokio::sync::RwLock<crate::docker_state::DockerState>>>,     all: bool, ) -> Result<Vec<serde_json::Value>, crate::error::ColimaError> {
+    async move {
     // Try Bollard SDK first (faster — uses Docker socket directly)
     let mut bollard_error: Option<String> = None;
     {
@@ -162,11 +160,14 @@ pub async fn list_containers(
         let stderr = String::from_utf8_lossy(&output.stderr);
         Err(bollard_error.unwrap_or_else(|| format!("Docker is not available: {}", stderr.trim())))
     }
+    }
+    .await.map_err(|e: String| crate::error::ColimaError::from(e))
 }
 
 /// Start a Docker container
 #[tauri::command]
-pub async fn start_container(container_id: String) -> Result<String, String> {
+pub async fn start_container(container_id: String) -> Result<String, crate::error::ColimaError> {
+    async move {
     let output = docker_output(vec!["start".into(), container_id.clone()]).await?;
 
     if !output.status.success() {
@@ -177,11 +178,14 @@ pub async fn start_container(container_id: String) -> Result<String, String> {
     }
 
     Ok(format!("Container {} started", container_id))
+    }
+    .await.map_err(|e: String| crate::error::ColimaError::from(e))
 }
 
 /// Stop a Docker container
 #[tauri::command]
-pub async fn stop_container(container_id: String) -> Result<String, String> {
+pub async fn stop_container(container_id: String) -> Result<String, crate::error::ColimaError> {
+    async move {
     let output = docker_output(vec!["stop".into(), container_id.clone()]).await?;
 
     if !output.status.success() {
@@ -192,11 +196,14 @@ pub async fn stop_container(container_id: String) -> Result<String, String> {
     }
 
     Ok(format!("Container {} stopped", container_id))
+    }
+    .await.map_err(|e: String| crate::error::ColimaError::from(e))
 }
 
 /// Restart a Docker container
 #[tauri::command]
-pub async fn restart_container(container_id: String) -> Result<String, String> {
+pub async fn restart_container(container_id: String) -> Result<String, crate::error::ColimaError> {
+    async move {
     let output = docker_output(vec!["restart".into(), container_id.clone()]).await?;
 
     if !output.status.success() {
@@ -207,11 +214,14 @@ pub async fn restart_container(container_id: String) -> Result<String, String> {
     }
 
     Ok(format!("Container {} restarted", container_id))
+    }
+    .await.map_err(|e: String| crate::error::ColimaError::from(e))
 }
 
 /// Remove a Docker container
 #[tauri::command]
-pub async fn remove_container(container_id: String, force: bool) -> Result<String, String> {
+pub async fn remove_container(container_id: String, force: bool) -> Result<String, crate::error::ColimaError> {
+    async move {
     let mut args = vec!["rm".to_string()];
     if force {
         args.push("-f".to_string());
@@ -228,11 +238,14 @@ pub async fn remove_container(container_id: String, force: bool) -> Result<Strin
     }
 
     Ok(format!("Container {} removed", container_id))
+    }
+    .await.map_err(|e: String| crate::error::ColimaError::from(e))
 }
 
 /// Get container logs (last N lines)
 #[tauri::command]
-pub async fn container_logs(container_id: String, lines: u32) -> Result<String, String> {
+pub async fn container_logs(container_id: String, lines: u32) -> Result<String, crate::error::ColimaError> {
+    async move {
     let tail = lines.to_string();
     let output = docker_output(vec!["logs".into(), "--tail".into(), tail, "--timestamps".into(), container_id]).await?;
 
@@ -255,15 +268,16 @@ pub async fn container_logs(container_id: String, lines: u32) -> Result<String, 
     };
 
     Ok(combined)
+    }
+    .await.map_err(|e: String| crate::error::ColimaError::from(e))
 }
 
 /// List Docker images
 /// Always fetches fresh data: tries Bollard first (fast), falls back to Docker CLI.
 /// Returns Err if Docker daemon is unavailable.
 #[tauri::command]
-pub async fn list_images(
-    state: tauri::State<'_, std::sync::Arc<tokio::sync::RwLock<crate::docker_state::DockerState>>>,
-) -> Result<Vec<serde_json::Value>, String> {
+pub async fn list_images(     state: tauri::State<'_, std::sync::Arc<tokio::sync::RwLock<crate::docker_state::DockerState>>>, ) -> Result<Vec<serde_json::Value>, crate::error::ColimaError> {
+    async move {
     // Try Bollard SDK first (faster — uses Docker socket directly)
     let mut bollard_error: Option<String> = None;
     {
@@ -315,11 +329,14 @@ pub async fn list_images(
         let stderr = String::from_utf8_lossy(&output.stderr);
         Err(bollard_error.unwrap_or_else(|| format!("Docker is not available: {}", stderr.trim())))
     }
+    }
+    .await.map_err(|e: String| crate::error::ColimaError::from(e))
 }
 
 /// Inspect a container (raw JSON)
 #[tauri::command]
-pub async fn inspect_container(container_id: String) -> Result<String, String> {
+pub async fn inspect_container(container_id: String) -> Result<String, crate::error::ColimaError> {
+    async move {
     let output = docker_output(vec!["inspect".into(), container_id]).await?;
 
     if !output.status.success() {
@@ -330,11 +347,14 @@ pub async fn inspect_container(container_id: String) -> Result<String, String> {
     }
 
     Ok(String::from_utf8_lossy(&output.stdout).to_string())
+    }
+    .await.map_err(|e: String| crate::error::ColimaError::from(e))
 }
 
 /// Remove a Docker image
 #[tauri::command]
-pub async fn remove_image(image_id: String, force: bool) -> Result<String, String> {
+pub async fn remove_image(image_id: String, force: bool) -> Result<String, crate::error::ColimaError> {
+    async move {
     let mut args = vec!["rmi".to_string()];
     if force {
         args.push("-f".to_string());
@@ -351,11 +371,14 @@ pub async fn remove_image(image_id: String, force: bool) -> Result<String, Strin
     }
 
     Ok(format!("Image {} removed", image_id))
+    }
+    .await.map_err(|e: String| crate::error::ColimaError::from(e))
 }
 
 /// Pull a Docker image
 #[tauri::command]
-pub async fn pull_image(image_name: String) -> Result<String, String> {
+pub async fn pull_image(image_name: String) -> Result<String, crate::error::ColimaError> {
+    async move {
     let output = docker_output(vec!["pull".into(), image_name]).await?;
 
     if !output.status.success() {
@@ -366,11 +389,14 @@ pub async fn pull_image(image_name: String) -> Result<String, String> {
     }
 
     Ok(String::from_utf8_lossy(&output.stdout).to_string())
+    }
+    .await.map_err(|e: String| crate::error::ColimaError::from(e))
 }
 
 /// Prune unused Docker images
 #[tauri::command]
-pub async fn prune_images() -> Result<String, String> {
+pub async fn prune_images() -> Result<String, crate::error::ColimaError> {
+    async move {
     let output = docker_output(vec!["image".into(), "prune".into(), "-a".into(), "-f".into()]).await?;
 
     if !output.status.success() {
@@ -381,11 +407,14 @@ pub async fn prune_images() -> Result<String, String> {
     }
 
     Ok(String::from_utf8_lossy(&output.stdout).to_string())
+    }
+    .await.map_err(|e: String| crate::error::ColimaError::from(e))
 }
 
 /// Inspect a Docker image (raw JSON)
 #[tauri::command]
-pub async fn inspect_image(image_id: String) -> Result<String, String> {
+pub async fn inspect_image(image_id: String) -> Result<String, crate::error::ColimaError> {
+    async move {
     let output = docker_output(vec!["image".into(), "inspect".into(), image_id]).await?;
 
     if !output.status.success() {
@@ -396,11 +425,14 @@ pub async fn inspect_image(image_id: String) -> Result<String, String> {
     }
 
     Ok(String::from_utf8_lossy(&output.stdout).to_string())
+    }
+    .await.map_err(|e: String| crate::error::ColimaError::from(e))
 }
 
 /// Tag a Docker image
 #[tauri::command]
-pub async fn tag_image(source: String, target: String) -> Result<String, String> {
+pub async fn tag_image(source: String, target: String) -> Result<String, crate::error::ColimaError> {
+    async move {
     let output = docker_output(vec!["tag".into(), source, target.clone()]).await?;
 
     if !output.status.success() {
@@ -411,11 +443,14 @@ pub async fn tag_image(source: String, target: String) -> Result<String, String>
     }
 
     Ok(format!("Image tagged as {}", target))
+    }
+    .await.map_err(|e: String| crate::error::ColimaError::from(e))
 }
 
 /// Docker system prune (containers, images, networks, build cache)
 #[tauri::command]
-pub async fn system_prune(all: bool) -> Result<String, String> {
+pub async fn system_prune(all: bool) -> Result<String, crate::error::ColimaError> {
+    async move {
     let mut args = vec!["system".to_string(), "prune".to_string(), "-f".to_string()];
     if all {
         args.push("-a".to_string());
@@ -431,11 +466,14 @@ pub async fn system_prune(all: bool) -> Result<String, String> {
     }
 
     Ok(String::from_utf8_lossy(&output.stdout).to_string())
+    }
+    .await.map_err(|e: String| crate::error::ColimaError::from(e))
 }
 
 /// Docker system disk usage (plain text for frontend parsing)
 #[tauri::command]
-pub async fn system_df() -> Result<String, String> {
+pub async fn system_df() -> Result<String, crate::error::ColimaError> {
+    async move {
     let output = docker_output(vec!["system".into(), "df".into()]).await?;
 
     if !output.status.success() {
@@ -446,11 +484,14 @@ pub async fn system_df() -> Result<String, String> {
     }
 
     Ok(String::from_utf8_lossy(&output.stdout).to_string())
+    }
+    .await.map_err(|e: String| crate::error::ColimaError::from(e))
 }
 
 /// Get container stats (one-shot, no streaming)
 #[tauri::command]
-pub async fn container_stats(container_id: String) -> Result<String, String> {
+pub async fn container_stats(container_id: String) -> Result<String, crate::error::ColimaError> {
+    async move {
     let output = docker_output(vec!["stats".into(), "--no-stream".into(), "--format".into(), "json".into(), container_id]).await?;
 
     if !output.status.success() {
@@ -461,11 +502,14 @@ pub async fn container_stats(container_id: String) -> Result<String, String> {
     }
 
     Ok(String::from_utf8_lossy(&output.stdout).to_string())
+    }
+    .await.map_err(|e: String| crate::error::ColimaError::from(e))
 }
 
 /// Get all container stats (one-shot)
 #[tauri::command]
-pub async fn all_container_stats() -> Result<String, String> {
+pub async fn all_container_stats() -> Result<String, crate::error::ColimaError> {
+    async move {
     let output = docker_output(vec!["stats".into(), "--no-stream".into(), "--format".into(), "json".into()]).await?;
 
     if !output.status.success() {
@@ -476,11 +520,14 @@ pub async fn all_container_stats() -> Result<String, String> {
     }
 
     Ok(String::from_utf8_lossy(&output.stdout).to_string())
+    }
+    .await.map_err(|e: String| crate::error::ColimaError::from(e))
 }
 
 /// Get running processes inside a container
 #[tauri::command]
-pub async fn container_top(container_id: String) -> Result<String, String> {
+pub async fn container_top(container_id: String) -> Result<String, crate::error::ColimaError> {
+    async move {
     let output = docker_output(vec!["top".into(), container_id]).await?;
 
     if !output.status.success() {
@@ -491,11 +538,14 @@ pub async fn container_top(container_id: String) -> Result<String, String> {
     }
 
     Ok(String::from_utf8_lossy(&output.stdout).to_string())
+    }
+    .await.map_err(|e: String| crate::error::ColimaError::from(e))
 }
 
 /// Execute a command inside a running container
 #[tauri::command]
-pub async fn container_exec(container_id: String, command: String) -> Result<String, String> {
+pub async fn container_exec(container_id: String, command: String) -> Result<String, crate::error::ColimaError> {
+    async move {
     // Security validation (applies to both Tauri IPC and HTTP routes)
     if !crate::validation::is_valid_container_id(&container_id) {
         return Err("Invalid container ID format".to_string());
@@ -523,20 +573,14 @@ pub async fn container_exec(container_id: String, command: String) -> Result<Str
     };
 
     Ok(combined)
+    }
+    .await.map_err(|e: String| crate::error::ColimaError::from(e))
 }
 
 /// Run a new container from an image
 #[tauri::command]
-pub async fn run_container(
-    image: String,
-    name: String,
-    ports: Vec<String>,
-    env_vars: Vec<String>,
-    volumes: Vec<String>,
-    detach: bool,
-    remove_on_exit: bool,
-    extra_args: Vec<String>,
-) -> Result<String, String> {
+pub async fn run_container(     image: String,     name: String,     ports: Vec<String>,     env_vars: Vec<String>,     volumes: Vec<String>,     detach: bool,     remove_on_exit: bool,     extra_args: Vec<String>, ) -> Result<String, crate::error::ColimaError> {
+    async move {
     // Security validation (applies to both Tauri IPC and HTTP routes)
     for arg in &extra_args {
         let arg_lower = arg.to_lowercase();
@@ -601,11 +645,14 @@ pub async fn run_container(
     }
 
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+    }
+    .await.map_err(|e: String| crate::error::ColimaError::from(e))
 }
 
 /// Rename a container
 #[tauri::command]
-pub async fn rename_container(container_id: String, new_name: String) -> Result<String, String> {
+pub async fn rename_container(container_id: String, new_name: String) -> Result<String, crate::error::ColimaError> {
+    async move {
     let output = docker_output(vec!["rename".into(), container_id, new_name.clone()]).await?;
 
     if !output.status.success() {
@@ -616,11 +663,14 @@ pub async fn rename_container(container_id: String, new_name: String) -> Result<
     }
 
     Ok(format!("Container renamed to {}", new_name))
+    }
+    .await.map_err(|e: String| crate::error::ColimaError::from(e))
 }
 
 /// Pause a container
 #[tauri::command]
-pub async fn pause_container(container_id: String) -> Result<String, String> {
+pub async fn pause_container(container_id: String) -> Result<String, crate::error::ColimaError> {
+    async move {
     let output = docker_output(vec!["pause".into(), container_id.clone()]).await?;
 
     if !output.status.success() {
@@ -631,11 +681,14 @@ pub async fn pause_container(container_id: String) -> Result<String, String> {
     }
 
     Ok(format!("Container {} paused", container_id))
+    }
+    .await.map_err(|e: String| crate::error::ColimaError::from(e))
 }
 
 /// Unpause a container
 #[tauri::command]
-pub async fn unpause_container(container_id: String) -> Result<String, String> {
+pub async fn unpause_container(container_id: String) -> Result<String, crate::error::ColimaError> {
+    async move {
     let output = docker_output(vec!["unpause".into(), container_id.clone()]).await?;
 
     if !output.status.success() {
@@ -646,14 +699,15 @@ pub async fn unpause_container(container_id: String) -> Result<String, String> {
     }
 
     Ok(format!("Container {} unpaused", container_id))
+    }
+    .await.map_err(|e: String| crate::error::ColimaError::from(e))
 }
 
 /// Diagnostic command to debug Docker connectivity issues from inside the app.
 /// Reports: resolved paths, socket detection, DOCKER_HOST, PATH, and test results.
 #[tauri::command]
-pub async fn docker_diagnose(
-    state: tauri::State<'_, std::sync::Arc<tokio::sync::RwLock<crate::docker_state::DockerState>>>,
-) -> Result<serde_json::Value, String> {
+pub async fn docker_diagnose(     state: tauri::State<'_, std::sync::Arc<tokio::sync::RwLock<crate::docker_state::DockerState>>>, ) -> Result<serde_json::Value, crate::error::ColimaError> {
+    async move {
     let docker_path = crate::path_util::resolve_binary("docker");
     let colima_path = crate::path_util::resolve_binary("colima");
     let docker_host = crate::path_util::detect_docker_host();
@@ -714,4 +768,6 @@ pub async fn docker_diagnose(
         "path": env_path,
         "cli_test": cli_result,
     }))
+    }
+    .await.map_err(|e: String| crate::error::ColimaError::from(e))
 }

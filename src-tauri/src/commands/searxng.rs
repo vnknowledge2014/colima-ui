@@ -41,12 +41,8 @@ const DEFAULT_SEARXNG_INSTANCES: &[&str] = &[
 ];
 
 #[tauri::command]
-pub async fn searxng_search(
-    query: String,
-    instances: Option<Vec<String>>,
-    max_results: Option<usize>,
-    timeout_secs: Option<u64>,
-) -> Result<Vec<SearchResult>, String> {
+pub async fn searxng_search(     query: String,     instances: Option<Vec<String>>,     max_results: Option<usize>,     timeout_secs: Option<u64>, ) -> Result<Vec<SearchResult>, crate::error::ColimaError> {
+    async move {
     let instances: Vec<String> = instances
         .filter(|v| !v.is_empty())
         .unwrap_or_else(|| {
@@ -137,6 +133,8 @@ pub async fn searxng_search(
     }
 
     Err(last_error)
+    }
+    .await.map_err(|e: String| crate::error::ColimaError::from(e))
 }
 
 /// DuckDuckGo Lite HTML scraping fallback
@@ -249,11 +247,8 @@ async fn jina_reader_fetch(url: &str, max_length: usize) -> Result<String, Strin
 // then fall back to direct HTML scraping + html2md pipeline.
 
 #[tauri::command]
-pub async fn fetch_page_as_markdown(
-    url: String,
-    max_length: Option<usize>,
-    mode: Option<String>,
-) -> Result<String, String> {
+pub async fn fetch_page_as_markdown(     url: String,     max_length: Option<usize>,     mode: Option<String>, ) -> Result<String, crate::error::ColimaError> {
+    async move {
     let max_length = max_length.unwrap_or(8000);
     let mode = mode.unwrap_or_else(|| "full".to_string());
 
@@ -300,6 +295,8 @@ pub async fn fetch_page_as_markdown(
     } else {
         Ok(result)
     }
+    }
+    .await.map_err(|e: String| crate::error::ColimaError::from(e))
 }
 
 // ===== Content Extraction (Readability equivalent) =====

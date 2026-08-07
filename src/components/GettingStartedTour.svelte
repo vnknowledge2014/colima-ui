@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import Icon from "./Icon.svelte";
+  import TourTooltip from "./TourTooltip.svelte";
 
   let { onComplete } = $props<{
     onComplete: () => void;
@@ -159,54 +159,13 @@
   {/if}
 
   <!-- Tooltip -->
-  <div
-    class="tour-tooltip"
-    style="left: {tooltipPos.left}px; top: {tooltipPos.top}px;"
-  >
-    <div class="tour-tooltip-title">
-      {step.title}
-    </div>
-    <div class="tour-tooltip-body">
-      {step.body}
-    </div>
-    <div class="tour-tooltip-footer">
-      <!-- Step dots -->
-      <div class="tour-dots">
-        {#each TOUR_STEPS as _, i}
-          <div class="tour-dot {i === currentStep ? 'active' : i < currentStep ? 'done' : ''}"></div>
-        {/each}
-      </div>
-
-      <!-- Actions -->
-      <div class="tour-tooltip-actions">
-        <button
-          class="btn btn-ghost"
-          style="font-size: var(--text-xs); padding: 4px 10px;"
-          onclick={onComplete}
-        >
-          Skip
-        </button>
-        {#if currentStep > 0}
-          <button
-            class="btn btn-ghost"
-            style="font-size: var(--text-xs); padding: 4px 10px;"
-            onclick={handlePrev}
-          >
-            ← Back
-          </button>
-        {/if}
-        <button
-          class="btn btn-primary"
-          style="font-size: var(--text-xs); padding: 4px 12px;"
-          onclick={handleNext}
-        >
-          {#if currentStep < TOUR_STEPS.length - 1}
-            Next →
-          {:else}
-            <Icon name="Check" size={12} style="vertical-align: middle;" /> Finish
-          {/if}
-        </button>
-      </div>
-    </div>
-  </div>
+  <TourTooltip
+    {step}
+    {currentStep}
+    totalSteps={TOUR_STEPS.length}
+    {tooltipPos}
+    {onComplete}
+    {handlePrev}
+    {handleNext}
+  />
 </div>

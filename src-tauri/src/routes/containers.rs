@@ -15,7 +15,7 @@ pub async fn api_list_containers(
     let all = q.all;
     match containers::list_containers_cli(all).await {
         Ok(list) => ok(list),
-        Err(e) => err(e),
+        Err(e) => err(e.to_string()),
     }
 }
 
@@ -25,7 +25,7 @@ pub async fn api_start_container(
 ) -> (StatusCode, Json<ApiResponse<String>>) {
     match containers::start_container(q.container_id).await {
         Ok(msg) => ok(msg),
-        Err(e) => err(e),
+        Err(e) => err(e.to_string()),
     }
 }
 
@@ -35,7 +35,7 @@ pub async fn api_stop_container(
 ) -> (StatusCode, Json<ApiResponse<String>>) {
     match containers::stop_container(q.container_id).await {
         Ok(msg) => ok(msg),
-        Err(e) => err(e),
+        Err(e) => err(e.to_string()),
     }
 }
 
@@ -45,7 +45,7 @@ pub async fn api_restart_container(
 ) -> (StatusCode, Json<ApiResponse<String>>) {
     match containers::restart_container(q.container_id).await {
         Ok(msg) => ok(msg),
-        Err(e) => err(e),
+        Err(e) => err(e.to_string()),
     }
 }
 
@@ -55,7 +55,7 @@ pub async fn api_remove_container(
 ) -> (StatusCode, Json<ApiResponse<String>>) {
     match containers::remove_container(q.container_id, q.force).await {
         Ok(msg) => ok(msg),
-        Err(e) => err(e),
+        Err(e) => err(e.to_string()),
     }
 }
 
@@ -65,7 +65,7 @@ pub async fn api_container_logs(
 ) -> (StatusCode, Json<ApiResponse<String>>) {
     match containers::container_logs(q.container_id, q.lines).await {
         Ok(logs) => ok(logs),
-        Err(e) => err(e),
+        Err(e) => err(e.to_string()),
     }
 }
 
@@ -75,7 +75,7 @@ pub async fn api_inspect_container(
 ) -> (StatusCode, Json<ApiResponse<String>>) {
     match containers::inspect_container(q.container_id).await {
         Ok(info) => ok(info),
-        Err(e) => err(e),
+        Err(e) => err(e.to_string()),
     }
 }
 
@@ -85,7 +85,7 @@ pub async fn api_container_stats(
 ) -> (StatusCode, Json<ApiResponse<String>>) {
     match containers::container_stats(q.container_id).await {
         Ok(out) => ok(out),
-        Err(e) => err(e),
+        Err(e) => err(e.to_string()),
     }
 }
 
@@ -93,7 +93,7 @@ pub async fn api_container_stats(
 pub async fn api_all_container_stats() -> (StatusCode, Json<ApiResponse<String>>) {
     match containers::all_container_stats().await {
         Ok(out) => ok(out),
-        Err(e) => err(e),
+        Err(e) => err(e.to_string()),
     }
 }
 
@@ -103,7 +103,7 @@ pub async fn api_container_top(
 ) -> (StatusCode, Json<ApiResponse<String>>) {
     match containers::container_top(q.container_id).await {
         Ok(out) => ok(out),
-        Err(e) => err(e),
+        Err(e) => err(e.to_string()),
     }
 }
 
@@ -114,7 +114,7 @@ pub async fn api_container_exec(
     // Validation now happens inside command function
     match containers::container_exec(body.container_id, body.command).await {
         Ok(out) => ok(out),
-        Err(e) => err(e),
+        Err(e) => err(e.to_string()),
     }
 }
 
@@ -136,7 +136,7 @@ pub async fn api_run_container(
     .await
     {
         Ok(out) => ok(out),
-        Err(e) => err(e),
+        Err(e) => err(e.to_string()),
     }
 }
 
@@ -146,7 +146,7 @@ pub async fn api_rename_container(
 ) -> (StatusCode, Json<ApiResponse<String>>) {
     match containers::rename_container(body.container_id, body.new_name).await {
         Ok(out) => ok(out),
-        Err(e) => err(e),
+        Err(e) => err(e.to_string()),
     }
 }
 
@@ -156,7 +156,7 @@ pub async fn api_pause_container(
 ) -> (StatusCode, Json<ApiResponse<String>>) {
     match containers::pause_container(q.container_id).await {
         Ok(out) => ok(out),
-        Err(e) => err(e),
+        Err(e) => err(e.to_string()),
     }
 }
 
@@ -166,6 +166,6 @@ pub async fn api_unpause_container(
 ) -> (StatusCode, Json<ApiResponse<String>>) {
     match containers::unpause_container(q.container_id).await {
         Ok(out) => ok(out),
-        Err(e) => err(e),
+        Err(e) => err(e.to_string()),
     }
 }

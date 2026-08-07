@@ -57,7 +57,8 @@ fn get_version(cmd: &str, args: &[&str]) -> Option<String> {
 /// Runs on a blocking thread with a 5s timeout to prevent app startup hangs
 /// when Docker/Colima daemons are unresponsive.
 #[tauri::command]
-pub async fn check_system() -> Result<SystemInfo, String> {
+pub async fn check_system() -> Result<SystemInfo, crate::error::ColimaError> {
+    async move {
     let result = tokio::time::timeout(
         std::time::Duration::from_secs(5),
         tokio::task::spawn_blocking(|| {
@@ -93,11 +94,14 @@ pub async fn check_system() -> Result<SystemInfo, String> {
             })
         }
     }
+    }
+    .await.map_err(|e: String| crate::error::ColimaError::from(e))
 }
 
 /// Get Colima version string
 #[tauri::command]
-pub async fn get_colima_version() -> Result<String, String> {
+pub async fn get_colima_version() -> Result<String, crate::error::ColimaError> {
+    async move {
     let result = tokio::time::timeout(
         std::time::Duration::from_secs(5),
         tokio::task::spawn_blocking(|| {
@@ -115,11 +119,14 @@ pub async fn get_colima_version() -> Result<String, String> {
         Ok(Err(e)) => Err(format!("Task join error: {}", e)),
         Err(_) => Err("Colima version check timed out".to_string()),
     }
+    }
+    .await.map_err(|e: String| crate::error::ColimaError::from(e))
 }
 
 /// Check if an optional tool is installed
 #[tauri::command]
-pub async fn check_tool(name: String) -> Result<serde_json::Value, String> {
+pub async fn check_tool(name: String) -> Result<serde_json::Value, crate::error::ColimaError> {
+    async move {
     let allowed = ["kubectl", "kind", "helm", "krunkit", "nerdctl", "qemu-img"];
     if !allowed.contains(&name.as_str()) {
         return Err(format!("Unknown tool: {}", name));
@@ -146,6 +153,8 @@ pub async fn check_tool(name: String) -> Result<serde_json::Value, String> {
         Ok(Err(e)) => Err(format!("Task join error: {}", e)),
         Err(_) => Ok(serde_json::json!({ "installed": false, "version": "" })),
     }
+    }
+    .await.map_err(|e: String| crate::error::ColimaError::from(e))
 }
 
 // ===== Host Hardware Specs =====
@@ -278,7 +287,8 @@ pub fn detect_host_specs() -> HostSpecs {
 
 /// Get host machine hardware specifications
 #[tauri::command]
-pub async fn host_specs() -> Result<HostSpecs, String> {
+pub async fn host_specs() -> Result<HostSpecs, crate::error::ColimaError> {
+    async move {
     let result = tokio::time::timeout(
         std::time::Duration::from_secs(5),
         tokio::task::spawn_blocking(detect_host_specs),
@@ -291,13 +301,16 @@ pub async fn host_specs() -> Result<HostSpecs, String> {
         Err(_) => Err("Host specs detection timed out".to_string()),
     }
 
+    }
+    .await.map_err(|e: String| crate::error::ColimaError::from(e))
 }
 
 /// Read the bundled CONTEXT.md file and return its contents.
 /// Used by the AI agent to inject authoritative ColimaUI + Colima knowledge
 /// into the chat context (Tier 1 injection).
 #[tauri::command]
-pub async fn read_reference(app: tauri::AppHandle, path: String) -> Result<String, String> {
+pub async fn read_reference(app: tauri::AppHandle, path: String) -> Result<String, crate::error::ColimaError> {
+    async move {
     use tauri::Manager;
     let resource_path = app
         .path()
@@ -307,10 +320,13 @@ pub async fn read_reference(app: tauri::AppHandle, path: String) -> Result<Strin
         .join(&path);
     std::fs::read_to_string(&resource_path)
         .map_err(|e| format!("Failed to read reference from {:?}: {e}", resource_path))
+    }
+    .await.map_err(|e: String| crate::error::ColimaError::from(e))
 }
 
 #[tauri::command]
-pub async fn get_app_context(app: tauri::AppHandle) -> Result<String, String> {
+pub async fn get_app_context(app: tauri::AppHandle) -> Result<String, crate::error::ColimaError> {
+    async move {
     use tauri::Manager;
     let resources_dir = app
         .path()
@@ -379,19 +395,20 @@ pub async fn get_app_context(app: tauri::AppHandle) -> Result<String, String> {
     }
 
     Ok(context)
+    }
+    .await.map_err(|e: String| crate::error::ColimaError::from(e))
 }
 
 #[tauri::command]
-pub async fn set_resource_saver(
-    enabled: bool,
-    threshold: u64,
-    state: tauri::State<'_, Arc<RwLock<ResourceSaverState>>>
-) -> Result<(), String> {
+pub async fn set_resource_saver(     enabled: bool,     threshold: u64,     state: tauri::State<'_, Arc<RwLock<ResourceSaverState>>> ) -> Result<(), crate::error::ColimaError> {
+    async move {
     let mut s = state.write().await;
     s.enabled = enabled;
     s.idle_minutes_threshold = threshold;
     s.idle_minutes_count = 0; // reset on setting change
     Ok(())
+    }
+    .await.map_err(|e: String| crate::error::ColimaError::from(e))
 }
 
 pub fn start_resource_saver_daemon(state: Arc<RwLock<ResourceSaverState>>) {

@@ -33,7 +33,8 @@ async fn docker_output(args: Vec<String>) -> Result<std::process::Output, String
 
 /// List Docker Compose projects
 #[tauri::command]
-pub async fn list_compose_projects() -> Result<Vec<ComposeProject>, String> {
+pub async fn list_compose_projects() -> Result<Vec<ComposeProject>, crate::error::ColimaError> {
+    async move {
     let output = docker_output(vec!["compose".into(), "ls".into(), "--format".into(), "json".into(), "-a".into()]).await?;
 
     if !output.status.success() {
@@ -59,11 +60,14 @@ pub async fn list_compose_projects() -> Result<Vec<ComposeProject>, String> {
     });
 
     Ok(projects)
+    }
+    .await.map_err(|e: String| crate::error::ColimaError::from(e))
 }
 
 /// Start a Docker Compose project
 #[tauri::command]
-pub async fn compose_up(project_dir: String, detach: bool) -> Result<String, String> {
+pub async fn compose_up(project_dir: String, detach: bool) -> Result<String, crate::error::ColimaError> {
+    async move {
     let mut args = vec!["compose".to_string()];
     if !project_dir.is_empty() {
         args.push("-f".to_string());
@@ -84,11 +88,14 @@ pub async fn compose_up(project_dir: String, detach: bool) -> Result<String, Str
     }
 
     Ok("Compose project started".to_string())
+    }
+    .await.map_err(|e: String| crate::error::ColimaError::from(e))
 }
 
 /// Stop a Docker Compose project
 #[tauri::command]
-pub async fn compose_down(project_name: String) -> Result<String, String> {
+pub async fn compose_down(project_name: String) -> Result<String, crate::error::ColimaError> {
+    async move {
     let output = docker_output(vec!["compose".into(), "-p".into(), project_name.clone(), "down".into()]).await?;
 
     if !output.status.success() {
@@ -99,11 +106,14 @@ pub async fn compose_down(project_name: String) -> Result<String, String> {
     }
 
     Ok(format!("Compose project '{}' stopped", project_name))
+    }
+    .await.map_err(|e: String| crate::error::ColimaError::from(e))
 }
 
 /// Restart a Docker Compose project
 #[tauri::command]
-pub async fn compose_restart(project_name: String) -> Result<String, String> {
+pub async fn compose_restart(project_name: String) -> Result<String, crate::error::ColimaError> {
+    async move {
     let output = docker_output(vec!["compose".into(), "-p".into(), project_name.clone(), "restart".into()]).await?;
 
     if !output.status.success() {
@@ -114,11 +124,14 @@ pub async fn compose_restart(project_name: String) -> Result<String, String> {
     }
 
     Ok(format!("Compose project '{}' restarted", project_name))
+    }
+    .await.map_err(|e: String| crate::error::ColimaError::from(e))
 }
 
 /// Get compose project logs
 #[tauri::command]
-pub async fn compose_logs(project_name: String, lines: u32) -> Result<String, String> {
+pub async fn compose_logs(project_name: String, lines: u32) -> Result<String, crate::error::ColimaError> {
+    async move {
     let tail = lines.to_string();
     let output = docker_output(vec![
         "compose".into(), "-p".into(), project_name, "logs".into(),
@@ -135,11 +148,14 @@ pub async fn compose_logs(project_name: String, lines: u32) -> Result<String, St
     };
 
     Ok(combined)
+    }
+    .await.map_err(|e: String| crate::error::ColimaError::from(e))
 }
 
 /// List services in a compose project
 #[tauri::command]
-pub async fn compose_ps(project_name: String) -> Result<String, String> {
+pub async fn compose_ps(project_name: String) -> Result<String, crate::error::ColimaError> {
+    async move {
     let output = docker_output(vec![
         "compose".into(), "-p".into(), project_name, "ps".into(), "--format".into(), "json".into(),
     ]).await?;
@@ -152,4 +168,6 @@ pub async fn compose_ps(project_name: String) -> Result<String, String> {
     }
 
     Ok(String::from_utf8_lossy(&output.stdout).to_string())
+    }
+    .await.map_err(|e: String| crate::error::ColimaError::from(e))
 }

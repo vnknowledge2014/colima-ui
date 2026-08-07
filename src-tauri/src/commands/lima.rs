@@ -19,7 +19,8 @@ pub struct LimaInstance {
 
 /// List Lima instances
 #[tauri::command]
-pub async fn lima_list() -> Result<Vec<LimaInstance>, String> {
+pub async fn lima_list() -> Result<Vec<LimaInstance>, crate::error::ColimaError> {
+    async move {
     let output = limactl_cmd()
         .args(["list", "--json"])
         .output()
@@ -59,6 +60,8 @@ pub async fn lima_list() -> Result<Vec<LimaInstance>, String> {
         .collect();
 
     Ok(instances)
+    }
+    .await.map_err(|e: String| crate::error::ColimaError::from(e))
 }
 
 fn format_bytes_lima(bytes: i64) -> String {
@@ -73,7 +76,8 @@ fn format_bytes_lima(bytes: i64) -> String {
 
 /// Start a Lima instance
 #[tauri::command]
-pub async fn lima_start(name: String) -> Result<String, String> {
+pub async fn lima_start(name: String) -> Result<String, crate::error::ColimaError> {
+    async move {
     let output = limactl_cmd()
         .args(["start", &name])
         .output()
@@ -87,11 +91,14 @@ pub async fn lima_start(name: String) -> Result<String, String> {
     }
 
     Ok(format!("Lima instance '{}' started", name))
+    }
+    .await.map_err(|e: String| crate::error::ColimaError::from(e))
 }
 
 /// Stop a Lima instance
 #[tauri::command]
-pub async fn lima_stop(name: String) -> Result<String, String> {
+pub async fn lima_stop(name: String) -> Result<String, crate::error::ColimaError> {
+    async move {
     let output = limactl_cmd()
         .args(["stop", &name])
         .output()
@@ -105,11 +112,14 @@ pub async fn lima_stop(name: String) -> Result<String, String> {
     }
 
     Ok(format!("Lima instance '{}' stopped", name))
+    }
+    .await.map_err(|e: String| crate::error::ColimaError::from(e))
 }
 
 /// Delete a Lima instance
 #[tauri::command]
-pub async fn lima_delete(name: String, force: bool) -> Result<String, String> {
+pub async fn lima_delete(name: String, force: bool) -> Result<String, crate::error::ColimaError> {
+    async move {
     let mut args = vec!["delete"];
     if force {
         args.push("--force");
@@ -129,11 +139,14 @@ pub async fn lima_delete(name: String, force: bool) -> Result<String, String> {
     }
 
     Ok(format!("Lima instance '{}' deleted", name))
+    }
+    .await.map_err(|e: String| crate::error::ColimaError::from(e))
 }
 
 /// Get Lima instance info (shell)
 #[tauri::command]
-pub async fn lima_info(name: String) -> Result<String, String> {
+pub async fn lima_info(name: String) -> Result<String, crate::error::ColimaError> {
+    async move {
     let output = limactl_cmd()
         .args(["info"])
         .output()
@@ -148,11 +161,14 @@ pub async fn lima_info(name: String) -> Result<String, String> {
 
     let _ = name; // info is global, name kept for API consistency
     Ok(String::from_utf8_lossy(&output.stdout).to_string())
+    }
+    .await.map_err(|e: String| crate::error::ColimaError::from(e))
 }
 
 /// Execute a command inside a Lima VM
 #[tauri::command]
-pub async fn lima_shell(name: String, command: String) -> Result<String, String> {
+pub async fn lima_shell(name: String, command: String) -> Result<String, crate::error::ColimaError> {
+    async move {
     // Security validation (applies to both Tauri IPC and HTTP routes)
     if !crate::validation::is_valid_k8s_name(&name) {
         return Err("Invalid VM name".to_string());
@@ -174,17 +190,22 @@ pub async fn lima_shell(name: String, command: String) -> Result<String, String>
     }
 
     Ok(format!("{}{}", stdout, stderr))
+    }
+    .await.map_err(|e: String| crate::error::ColimaError::from(e))
 }
 
 /// List available Lima templates
 #[tauri::command]
-pub async fn lima_templates() -> Result<String, String> {
+pub async fn lima_templates() -> Result<String, crate::error::ColimaError> {
+    async move {
     let output = limactl_cmd()
         .args(["start", "--list-templates"])
         .output()
         .map_err(|e| format!("Failed to list templates: {}", e))?;
 
     Ok(String::from_utf8_lossy(&output.stdout).to_string())
+    }
+    .await.map_err(|e: String| crate::error::ColimaError::from(e))
 }
 
 /// Create a new Lima VM and auto-start it

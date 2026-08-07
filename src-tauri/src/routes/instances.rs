@@ -20,7 +20,7 @@ pub async fn api_start_instance(
 ) -> (StatusCode, Json<ApiResponse<String>>) {
     match colima::start_instance(config).await {
         Ok(msg) => ok(msg),
-        Err(e) => err(e),
+        Err(e) => err(e.to_string()),
     }
 }
 
@@ -32,7 +32,7 @@ pub async fn api_stop_instance(
     // HTTP route does CLI-only stop (no Bollard state to reconnect).
     match colima::stop_instance_cli(q.profile, q.force).await {
         Ok(msg) => ok(msg),
-        Err(e) => err(e),
+        Err(e) => err(e.to_string()),
     }
 }
 
@@ -43,7 +43,7 @@ pub async fn api_delete_instance(
     // Same note as stop: command uses Tauri state; route does CLI-only.
     match colima::delete_instance_cli(q.profile, q.force).await {
         Ok(msg) => ok(msg),
-        Err(e) => err(e),
+        Err(e) => err(e.to_string()),
     }
 }
 
@@ -53,7 +53,7 @@ pub async fn api_instance_status(
 ) -> (StatusCode, Json<ApiResponse<colima::InstanceStatus>>) {
     match colima::instance_status(q.profile).await {
         Ok(status) => ok(status),
-        Err(e) => err(e),
+        Err(e) => err(e.to_string()),
     }
 }
 
@@ -63,7 +63,7 @@ pub async fn api_ssh_command(
 ) -> (StatusCode, Json<ApiResponse<Vec<String>>>) {
     match colima::get_ssh_command(q.profile).await {
         Ok(args) => ok(args),
-        Err(e) => err(e),
+        Err(e) => err(e.to_string()),
     }
 }
 

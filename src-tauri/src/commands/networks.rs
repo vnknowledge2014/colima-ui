@@ -42,7 +42,8 @@ async fn docker_output(args: Vec<String>) -> Result<std::process::Output, String
 
 /// List all Docker networks
 #[tauri::command]
-pub async fn list_networks() -> Result<Vec<DockerNetwork>, String> {
+pub async fn list_networks() -> Result<Vec<DockerNetwork>, crate::error::ColimaError> {
+    async move {
     let output = docker_output(vec!["network".into(), "ls".into(), "--format".into(), "json".into(), "--no-trunc".into()]).await?;
 
     if !output.status.success() {
@@ -64,15 +65,14 @@ pub async fn list_networks() -> Result<Vec<DockerNetwork>, String> {
         .collect();
 
     Ok(networks)
+    }
+    .await.map_err(|e: String| crate::error::ColimaError::from(e))
 }
 
 /// Create a Docker network
 #[tauri::command]
-pub async fn create_network(
-    name: String,
-    driver: String,
-    subnet: String,
-) -> Result<String, String> {
+pub async fn create_network(     name: String,     driver: String,     subnet: String, ) -> Result<String, crate::error::ColimaError> {
+    async move {
     let mut args = vec!["network".to_string(), "create".to_string()];
 
     if !driver.is_empty() {
@@ -97,11 +97,14 @@ pub async fn create_network(
     }
 
     Ok(format!("Network '{}' created", name))
+    }
+    .await.map_err(|e: String| crate::error::ColimaError::from(e))
 }
 
 /// Remove a Docker network
 #[tauri::command]
-pub async fn remove_network(name: String) -> Result<String, String> {
+pub async fn remove_network(name: String) -> Result<String, crate::error::ColimaError> {
+    async move {
     let output = docker_output(vec!["network".into(), "rm".into(), name.clone()]).await?;
 
     if !output.status.success() {
@@ -112,11 +115,14 @@ pub async fn remove_network(name: String) -> Result<String, String> {
     }
 
     Ok(format!("Network '{}' removed", name))
+    }
+    .await.map_err(|e: String| crate::error::ColimaError::from(e))
 }
 
 /// Inspect a Docker network (raw JSON)
 #[tauri::command]
-pub async fn inspect_network(name: String) -> Result<String, String> {
+pub async fn inspect_network(name: String) -> Result<String, crate::error::ColimaError> {
+    async move {
     let output = docker_output(vec!["network".into(), "inspect".into(), name]).await?;
 
     if !output.status.success() {
@@ -127,11 +133,14 @@ pub async fn inspect_network(name: String) -> Result<String, String> {
     }
 
     Ok(String::from_utf8_lossy(&output.stdout).to_string())
+    }
+    .await.map_err(|e: String| crate::error::ColimaError::from(e))
 }
 
 /// Prune unused Docker networks
 #[tauri::command]
-pub async fn prune_networks() -> Result<String, String> {
+pub async fn prune_networks() -> Result<String, crate::error::ColimaError> {
+    async move {
     let output = docker_output(vec!["network".into(), "prune".into(), "-f".into()]).await?;
 
     if !output.status.success() {
@@ -142,4 +151,6 @@ pub async fn prune_networks() -> Result<String, String> {
     }
 
     Ok(String::from_utf8_lossy(&output.stdout).to_string())
+    }
+    .await.map_err(|e: String| crate::error::ColimaError::from(e))
 }

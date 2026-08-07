@@ -75,13 +75,17 @@ fn colima_cmd() -> Command {
 /// List all Colima instances
 /// Uses the fast filesystem reader (shared with API server) for consistency.
 #[tauri::command]
-pub async fn list_instances() -> Result<Vec<ColimaInstance>, String> {
+pub async fn list_instances() -> Result<Vec<ColimaInstance>, crate::error::ColimaError> {
+    async move {
     Ok(crate::instance_reader::list_instances_fast())
+    }
+    .await.map_err(|e: String| crate::error::ColimaError::from(e))
 }
 
 /// Start a Colima instance with given configuration
 #[tauri::command]
-pub async fn start_instance(config: StartConfig) -> Result<String, String> {
+pub async fn start_instance(config: StartConfig) -> Result<String, crate::error::ColimaError> {
+    async move {
     // `colima start` blocks for 60-120s — run on thread pool to avoid starving tokio
     tokio::task::spawn_blocking(move || {
         let mut args = vec!["start".to_string()];
@@ -160,6 +164,8 @@ pub async fn start_instance(config: StartConfig) -> Result<String, String> {
     })
     .await
     .map_err(|e| format!("Task join error: {}", e))?
+    }
+    .await.map_err(|e: String| crate::error::ColimaError::from(e))
 }
 
 /// Stop a Colima instance (CLI-only, no Tauri state).
@@ -228,12 +234,8 @@ pub async fn delete_instance_cli(profile: String, force: bool) -> Result<String,
 
 /// Stop a Colima instance
 #[tauri::command]
-pub async fn stop_instance(
-    app: tauri::AppHandle,
-    docker_state: tauri::State<'_, std::sync::Arc<tokio::sync::RwLock<crate::docker_state::DockerState>>>,
-    profile: String,
-    force: bool,
-) -> Result<String, String> {
+pub async fn stop_instance(     app: tauri::AppHandle,     docker_state: tauri::State<'_, std::sync::Arc<tokio::sync::RwLock<crate::docker_state::DockerState>>>,     profile: String,     force: bool, ) -> Result<String, crate::error::ColimaError> {
+    async move {
     // Proactively clear Docker state BEFORE stopping — user may navigate to Docker
     // tabs while colima stop is still running (fire-and-forget pattern in the UI).
     // If we clear after, Bollard queries succeed during the shutdown window.
@@ -281,16 +283,14 @@ pub async fn stop_instance(
     })
     .await
     .map_err(|e| format!("Task join error: {}", e))?
+    }
+    .await.map_err(|e: String| crate::error::ColimaError::from(e))
 }
 
 /// Delete a Colima instance
 #[tauri::command]
-pub async fn delete_instance(
-    app: tauri::AppHandle,
-    docker_state: tauri::State<'_, std::sync::Arc<tokio::sync::RwLock<crate::docker_state::DockerState>>>,
-    profile: String,
-    force: bool,
-) -> Result<String, String> {
+pub async fn delete_instance(     app: tauri::AppHandle,     docker_state: tauri::State<'_, std::sync::Arc<tokio::sync::RwLock<crate::docker_state::DockerState>>>,     profile: String,     force: bool, ) -> Result<String, crate::error::ColimaError> {
+    async move {
     {
         let mut lock = docker_state.write().await;
         lock.docker = None;
@@ -335,11 +335,14 @@ pub async fn delete_instance(
     })
     .await
     .map_err(|e| format!("Task join error: {}", e))?
+    }
+    .await.map_err(|e: String| crate::error::ColimaError::from(e))
 }
 
 /// Get extended status of an instance
 #[tauri::command]
-pub async fn instance_status(profile: String) -> Result<InstanceStatus, String> {
+pub async fn instance_status(profile: String) -> Result<InstanceStatus, crate::error::ColimaError> {
+    async move {
     let result = tokio::time::timeout(
         std::time::Duration::from_secs(10),
         tokio::task::spawn_blocking(move || {
@@ -378,22 +381,28 @@ pub async fn instance_status(profile: String) -> Result<InstanceStatus, String> 
         Ok(Err(e)) => Err(format!("Task join error: {}", e)),
         Err(_) => Err("colima status timed out (daemon may be unresponsive)".to_string()),
     }
+    }
+    .await.map_err(|e: String| crate::error::ColimaError::from(e))
 }
 
 /// SSH into a Colima instance (returns the command to execute)
 #[tauri::command]
-pub async fn get_ssh_command(profile: String) -> Result<Vec<String>, String> {
+pub async fn get_ssh_command(profile: String) -> Result<Vec<String>, crate::error::ColimaError> {
+    async move {
     let mut args = vec!["ssh".to_string()];
     if profile != "default" && !profile.is_empty() {
         args.push("--profile".to_string());
         args.push(profile);
     }
     Ok(args)
+    }
+    .await.map_err(|e: String| crate::error::ColimaError::from(e))
 }
 
 /// Kubernetes operations
 #[tauri::command]
-pub async fn kubernetes_action(profile: String, action: String) -> Result<String, String> {
+pub async fn kubernetes_action(profile: String, action: String) -> Result<String, crate::error::ColimaError> {
+    async move {
     let valid_actions = ["start", "stop", "delete", "reset"];
     if !valid_actions.contains(&action.as_str()) {
         return Err(format!("Invalid kubernetes action: {}", action));
@@ -432,6 +441,8 @@ pub async fn kubernetes_action(profile: String, action: String) -> Result<String
     })
     .await
     .map_err(|e| format!("Task join error: {}", e))?
+    }
+    .await.map_err(|e: String| crate::error::ColimaError::from(e))
 }
 
 // ===== Diagnostic Log Collection for AI Agent =====
@@ -439,7 +450,8 @@ pub async fn kubernetes_action(profile: String, action: String) -> Result<String
 // and inspects lock/pid/socket files to enable deep diagnostics.
 
 #[tauri::command]
-pub async fn collect_diagnostic_logs(profile: String) -> Result<String, String> {
+pub async fn collect_diagnostic_logs(profile: String) -> Result<String, crate::error::ColimaError> {
+    async move {
     tokio::task::spawn_blocking(move || {
         let home = std::env::var("HOME").unwrap_or_else(|_| "/Users/unknown".to_string());
         let profile_dir = if profile.is_empty() || profile == "default" {
@@ -534,10 +546,13 @@ pub async fn collect_diagnostic_logs(profile: String) -> Result<String, String> 
     })
     .await
     .map_err(|e| format!("Task join error: {}", e))?
+    }
+    .await.map_err(|e: String| crate::error::ColimaError::from(e))
 }
 
 #[tauri::command]
-pub async fn create_worker_node(master_profile: String, worker_profile: String, cpu: u32, memory: u32) -> Result<String, String> {
+pub async fn create_worker_node(master_profile: String, worker_profile: String, cpu: u32, memory: u32) -> Result<String, crate::error::ColimaError> {
+    async move {
     tokio::task::spawn_blocking(move || {
         // 1. Get Master IP
         let list_output = std::process::Command::new(crate::path_util::resolve_binary("colima"))
@@ -599,4 +614,6 @@ pub async fn create_worker_node(master_profile: String, worker_profile: String, 
     })
     .await
     .map_err(|e| format!("Task join error: {}", e))?
+    }
+    .await.map_err(|e: String| crate::error::ColimaError::from(e))
 }

@@ -35,7 +35,7 @@ pub async fn api_list_images() -> (StatusCode, Json<ApiResponse<Vec<crate::comma
     .await
     {
         Ok(list) => ok(list),
-        Err(e) => err(e),
+        Err(e) => err(e.to_string()),
     }
 }
 
@@ -46,7 +46,7 @@ pub async fn api_remove_image(
     let force = q.force.unwrap_or(false);
     match containers::remove_image(q.image_id, force).await {
         Ok(out) => ok(out),
-        Err(e) => err(e),
+        Err(e) => err(e.to_string()),
     }
 }
 
@@ -56,7 +56,7 @@ pub async fn api_pull_image(
 ) -> (StatusCode, Json<ApiResponse<String>>) {
     match containers::pull_image(q.image_name).await {
         Ok(out) => ok(out),
-        Err(e) => err(e),
+        Err(e) => err(e.to_string()),
     }
 }
 
@@ -64,7 +64,7 @@ pub async fn api_pull_image(
 pub async fn api_prune_images() -> (StatusCode, Json<ApiResponse<String>>) {
     match containers::prune_images().await {
         Ok(out) => ok(out),
-        Err(e) => err(e),
+        Err(e) => err(e.to_string()),
     }
 }
 
@@ -74,7 +74,7 @@ pub async fn api_inspect_image(
 ) -> (StatusCode, Json<ApiResponse<String>>) {
     match containers::inspect_image(q.image_id).await {
         Ok(out) => ok(out),
-        Err(e) => err(e),
+        Err(e) => err(e.to_string()),
     }
 }
 
@@ -82,6 +82,6 @@ pub async fn api_inspect_image(
 pub async fn api_tag_image(Json(body): Json<ImageTagBody>) -> (StatusCode, Json<ApiResponse<String>>) {
     match containers::tag_image(body.source, body.target).await {
         Ok(out) => ok(out),
-        Err(e) => err(e),
+        Err(e) => err(e.to_string()),
     }
 }

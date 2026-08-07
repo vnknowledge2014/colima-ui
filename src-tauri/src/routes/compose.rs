@@ -10,7 +10,7 @@ use crate::routes::payloads::*;
 pub async fn api_list_compose() -> (StatusCode, Json<ApiResponse<Vec<compose::ComposeProject>>>) {
     match compose::list_compose_projects().await {
         Ok(out) => ok(out),
-        Err(e) => err(e),
+        Err(e) => err(e.to_string()),
     }
 }
 
@@ -20,7 +20,7 @@ pub async fn api_compose_up(
 ) -> (StatusCode, Json<ApiResponse<String>>) {
     match compose::compose_up(body.project_dir, body.detach).await {
         Ok(out) => ok(out),
-        Err(e) => err(e),
+        Err(e) => err(e.to_string()),
     }
 }
 
@@ -30,7 +30,7 @@ pub async fn api_compose_down(
 ) -> (StatusCode, Json<ApiResponse<String>>) {
     match compose::compose_down(body.project_name).await {
         Ok(out) => ok(out),
-        Err(e) => err(e),
+        Err(e) => err(e.to_string()),
     }
 }
 
@@ -40,7 +40,7 @@ pub async fn api_compose_restart(
 ) -> (StatusCode, Json<ApiResponse<String>>) {
     match compose::compose_restart(body.project_name).await {
         Ok(out) => ok(out),
-        Err(e) => err(e),
+        Err(e) => err(e.to_string()),
     }
 }
 
@@ -50,7 +50,7 @@ pub async fn api_compose_logs(
 ) -> (StatusCode, Json<ApiResponse<String>>) {
     match compose::compose_logs(q.project_name, q.lines).await {
         Ok(out) => ok(out),
-        Err(e) => err(e),
+        Err(e) => err(e.to_string()),
     }
 }
 
@@ -60,6 +60,6 @@ pub async fn api_compose_ps(
 ) -> (StatusCode, Json<ApiResponse<String>>) {
     match compose::compose_ps(q.project_name).await {
         Ok(out) => ok(out),
-        Err(e) => err(e),
+        Err(e) => err(e.to_string()),
     }
 }

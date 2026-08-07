@@ -51,7 +51,7 @@ pub async fn api_check_homebrew() -> (StatusCode, Json<ApiResponse<HomebrewStatu
     .await
     {
         Ok(status) => ok(status),
-        Err(e) => err(e),
+        Err(e) => err(e.to_string()),
     }
 }
 
@@ -114,7 +114,7 @@ pub async fn api_check_tool(Query(q): Query<ToolQuery>) -> (StatusCode, Json<Api
     .await
     {
         Ok(status) => ok(status),
-        Err(e) => err(e),
+        Err(e) => err(e.to_string()),
     }
 }
 
@@ -122,7 +122,7 @@ pub async fn api_check_tool(Query(q): Query<ToolQuery>) -> (StatusCode, Json<Api
 pub async fn api_get_platform() -> (StatusCode, Json<ApiResponse<PlatformInfo>>) {
     match run_blocking(|| Ok(detect_platform())).await {
         Ok(info) => ok(info),
-        Err(e) => err(e),
+        Err(e) => err(e.to_string()),
     }
 }
 
@@ -130,7 +130,7 @@ pub async fn api_get_platform() -> (StatusCode, Json<ApiResponse<PlatformInfo>>)
 pub async fn api_host_specs() -> (StatusCode, Json<ApiResponse<system::HostSpecs>>) {
     match run_blocking(|| Ok(system::detect_host_specs())).await {
         Ok(specs) => ok(specs),
-        Err(e) => err(e),
+        Err(e) => err(e.to_string()),
     }
 }
 
@@ -202,7 +202,7 @@ pub async fn api_install_dep(
     .await
     {
         Ok(result) => ok(result),
-        Err(e) => err(e),
+        Err(e) => err(e.to_string()),
     }
 }
 
@@ -212,7 +212,7 @@ pub async fn api_system_prune(Query(q): Query<PruneQuery>) -> (StatusCode, Json<
     let all = q.all.unwrap_or(false);
     match containers::system_prune(all).await {
         Ok(out) => ok(out),
-        Err(e) => err(e),
+        Err(e) => err(e.to_string()),
     }
 }
 
@@ -221,7 +221,7 @@ pub async fn api_system_prune(Query(q): Query<PruneQuery>) -> (StatusCode, Json<
 pub async fn api_system_df() -> (StatusCode, Json<ApiResponse<String>>) {
     match containers::system_df().await {
         Ok(out) => ok(out),
-        Err(e) => err(e),
+        Err(e) => err(e.to_string()),
     }
 }
 
@@ -229,7 +229,7 @@ pub async fn api_system_df() -> (StatusCode, Json<ApiResponse<String>>) {
 pub async fn api_docker_df() -> (StatusCode, Json<ApiResponse<String>>) {
     match containers::system_df().await {
         Ok(out) => ok(out),
-        Err(e) => err(e),
+        Err(e) => err(e.to_string()),
     }
 }
 
@@ -243,7 +243,7 @@ pub async fn api_docker_prune(
     }
     match containers::system_prune(true).await {
         Ok(out) => ok(out),
-        Err(e) => err(e),
+        Err(e) => err(e.to_string()),
     }
 }
 

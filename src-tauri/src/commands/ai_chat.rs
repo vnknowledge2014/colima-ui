@@ -24,7 +24,8 @@ pub struct AiChatHistoryMessage {
 }
 
 #[tauri::command]
-pub async fn ai_chat_load_history() -> Result<Vec<AiChatHistoryMessage>, String> {
+pub async fn ai_chat_load_history() -> Result<Vec<AiChatHistoryMessage>, crate::error::ColimaError> {
+    async move {
     let conn = crate::commands::knowledge_bank::get_db().lock().unwrap();
     let mut stmt = conn
         .prepare("SELECT id, role, content FROM chat_messages ORDER BY created_at ASC")
@@ -43,10 +44,13 @@ pub async fn ai_chat_load_history() -> Result<Vec<AiChatHistoryMessage>, String>
         .collect();
 
     Ok(messages)
+    }
+    .await.map_err(|e: String| crate::error::ColimaError::from(e))
 }
 
 #[tauri::command]
-pub async fn ai_chat_save_message(message: AiChatHistoryMessage) -> Result<(), String> {
+pub async fn ai_chat_save_message(message: AiChatHistoryMessage) -> Result<(), crate::error::ColimaError> {
+    async move {
     let conn = crate::commands::knowledge_bank::get_db().lock().unwrap();
     conn.execute(
         "INSERT INTO chat_messages (id, role, content) VALUES (?1, ?2, ?3)
@@ -55,14 +59,19 @@ pub async fn ai_chat_save_message(message: AiChatHistoryMessage) -> Result<(), S
     )
     .map_err(|e| e.to_string())?;
     Ok(())
+    }
+    .await.map_err(|e: String| crate::error::ColimaError::from(e))
 }
 
 #[tauri::command]
-pub async fn ai_chat_clear_history() -> Result<(), String> {
+pub async fn ai_chat_clear_history() -> Result<(), crate::error::ColimaError> {
+    async move {
     let conn = crate::commands::knowledge_bank::get_db().lock().unwrap();
     conn.execute("DELETE FROM chat_messages", [])
         .map_err(|e| e.to_string())?;
     Ok(())
+    }
+    .await.map_err(|e: String| crate::error::ColimaError::from(e))
 }
 
 /// Shared HTTP client — connection pooling across requests
@@ -81,7 +90,8 @@ fn http_client() -> reqwest::Client {
 
 /// Proxy AI chat requests to various LLM providers via reqwest (no subprocess overhead)
 #[tauri::command]
-pub async fn ai_chat(request: AiChatRequest) -> Result<String, String> {
+pub async fn ai_chat(request: AiChatRequest) -> Result<String, crate::error::ColimaError> {
+    async move {
     match request.provider.as_str() {
         "anthropic" => call_anthropic(&request).await,
         "openai" => call_openai(&request).await,
@@ -97,15 +107,14 @@ pub async fn ai_chat(request: AiChatRequest) -> Result<String, String> {
         }
         _ => Err(format!("Unknown provider: {}", request.provider)),
     }
+    }
+    .await.map_err(|e: String| crate::error::ColimaError::from(e))
 }
 
 /// List available models for a provider dynamically
 #[tauri::command]
-pub async fn ai_list_models(
-    provider: String,
-    api_key: String,
-    endpoint: String,
-) -> Result<String, String> {
+pub async fn ai_list_models(     provider: String,     api_key: String,     endpoint: String, ) -> Result<String, crate::error::ColimaError> {
+    async move {
     match provider.as_str() {
         "ollama-local" => list_ollama_models("http://localhost:11434", "").await,
         "ollama-cloud" => {
@@ -121,6 +130,8 @@ pub async fn ai_list_models(
         "openai" => list_openai_models(&api_key, &endpoint).await,
         _ => Ok("[]".to_string()),
     }
+    }
+    .await.map_err(|e: String| crate::error::ColimaError::from(e))
 }
 
 // ===== Model listing =====

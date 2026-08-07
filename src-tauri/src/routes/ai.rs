@@ -37,7 +37,7 @@ pub async fn api_ai_chat(
 
     match crate::commands::ai_chat::ai_chat(request).await {
         Ok(response) => ok(response),
-        Err(e) => err(e),
+        Err(e) => err(e.to_string()),
     }
 }
 
@@ -51,7 +51,7 @@ pub async fn api_ai_list_models(
 
     match crate::commands::ai_chat::ai_list_models(provider, api_key, endpoint).await {
         Ok(models) => ok(models),
-        Err(e) => err(e),
+        Err(e) => err(e.to_string()),
     }
 }
 
@@ -87,7 +87,7 @@ pub async fn api_ai_search(
             Json(ApiResponse {
                 success: false,
                 data: None,
-                error: Some(e),
+                error: Some(e.to_string()),
             }),
         ),
     }
@@ -103,7 +103,7 @@ pub async fn api_ai_fetch_page(
 
     match crate::commands::searxng::fetch_page_as_markdown(url, max_length, mode).await {
         Ok(md) => ok(md),
-        Err(e) => err(e),
+        Err(e) => err(e.to_string()),
     }
 }
 
