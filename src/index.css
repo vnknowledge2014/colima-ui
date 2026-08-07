@@ -1,22 +1,4 @@
-/* ===== Font Loading (with swap fallback for Tauri webview) ===== */
-@font-face {
-  font-family: 'Inter';
-  font-style: normal;
-  font-weight: 300 700;
-  font-display: swap;
-  src: url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
-  src: local('Inter'), local('Inter-Regular'),
-       url('https://fonts.gstatic.com/s/inter/v18/UcCO3FwrK3iLTeHuS_nVMrMxCp50SjIw2boKoduKmMEVuLyfAZ9hiA.woff2') format('woff2');
-}
-
-@font-face {
-  font-family: 'JetBrains Mono';
-  font-style: normal;
-  font-weight: 400 500;
-  font-display: swap;
-  src: local('JetBrains Mono'), local('JetBrainsMono-Regular'),
-       url('https://fonts.gstatic.com/s/jetbrainsmono/v18/tDbY2o-flEEny0FZhsfKu5WU4zr3E_BX0PnT8RD8yKxjPVmNaGc.woff2') format('woff2');
-}
+/* ===== Fonts are loaded via @fontsource in main.ts ===== */
 
 /* ===== Design Tokens ===== */
 :root {
