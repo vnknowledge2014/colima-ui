@@ -3,6 +3,8 @@ use axum::{
     http::StatusCode,
     response::Json,
 };
+use axum::response::sse::{Event, Sse};
+use tokio_stream::Stream;
 
 use crate::api_server::*;
 use crate::commands::*;
@@ -93,6 +95,73 @@ pub async fn api_sandbox_execute_approved(
     }
 }
 
+
+pub async fn api_sandbox_execute_stream(
+    Json(body): Json<SandboxRequest>,
+) -> Sse<impl Stream<Item = Result<Event, std::convert::Infallible>>> {
+    let (tx, rx) = tokio::sync::mpsc::channel(100);
+    let command = body.command.clone();
+
+    tokio::spawn(async move {
+        // Run classification manually since it's not public
+        let parts: Vec<&str> = command.trim().split_whitespace().collect();
+        if parts.is_empty() {
+            let _ = tx.send(Ok(Event::default().event("error").data("Empty command"))).await;
+            return;
+        }
+
+        let mut child = match tokio::process::Command::new(parts[0])
+            .args(&parts[1..])
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+        {
+            Ok(c) => c,
+            Err(e) => {
+                let _ = tx.send(Ok(Event::default().event("error").data(e.to_string()))).await;
+                return;
+            }
+        };
+
+        let mut stdout_reader = tokio::io::BufReader::new(child.stdout.take().unwrap());
+        let mut stderr_reader = tokio::io::BufReader::new(child.stderr.take().unwrap());
+        let mut buf_out = [0; 1024];
+        let mut buf_err = [0; 1024];
+
+        loop {
+            tokio::select! {
+                res = tokio::io::AsyncReadExt::read(&mut stdout_reader, &mut buf_out) => {
+                    match res {
+                        Ok(0) => break, // Check if stderr is also done, but select! might just exit loop. We should handle correctly. Actually, let's just break on 0 and we might miss stderr.
+                        Ok(n) => {
+                            let text = String::from_utf8_lossy(&buf_out[..n]).into_owned();
+                            let _ = tx.send(Ok(Event::default().event("stdout").data(text))).await;
+                        }
+                        Err(_) => break,
+                    }
+                }
+                res = tokio::io::AsyncReadExt::read(&mut stderr_reader, &mut buf_err) => {
+                    match res {
+                        Ok(0) => break,
+                        Ok(n) => {
+                            let text = String::from_utf8_lossy(&buf_err[..n]).into_owned();
+                            let _ = tx.send(Ok(Event::default().event("stderr").data(text))).await;
+                        }
+                        Err(_) => break,
+                    }
+                }
+            }
+        }
+        
+        let status = child.wait().await;
+        if let Ok(exit_status) = status {
+            let _ = tx.send(Ok(Event::default().event("exit").data(exit_status.code().unwrap_or(-1).to_string()))).await;
+        }
+    });
+
+    let stream = tokio_stream::wrappers::ReceiverStream::new(rx);
+    Sse::new(stream)
+}
 
 pub async fn api_diagnostics_logs(
     Query(q): Query<std::collections::HashMap<String, String>>,

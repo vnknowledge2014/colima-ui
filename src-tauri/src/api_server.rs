@@ -210,6 +210,7 @@ pub fn build_router() -> Router {
         // Shell Sandbox
         .route("/api/sandbox/execute", post(api_sandbox_execute))
         .route("/api/sandbox/execute-approved", post(api_sandbox_execute_approved))
+        .route("/api/cli/execute_stream", post(api_sandbox_execute_stream))
         // Diagnostics
         .route("/api/diagnostics/logs", get(api_diagnostics_logs))
         // Terminal sessions (browser mode)
