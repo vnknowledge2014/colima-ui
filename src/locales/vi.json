@@ -1,0 +1,47 @@
+{
+  "getting_started": {
+    "title": "Chào mừng đến với Colima UI",
+    "language_select": "Chọn Ngôn Ngữ",
+    "next": "Tiếp tục"
+  },
+  "sidebar": {
+    "overview": "Tổng quan",
+    "dashboard": "Bảng điều khiển",
+    "instances": "Máy ảo Colima",
+    "docker": "Docker",
+    "containers": "Containers",
+    "images": "Images",
+    "volumes": "Volumes",
+    "networks": "Networks",
+    "compose": "Compose",
+    "clusters_vms": "Cụm & Máy ảo",
+    "kubernetes": "Kubernetes",
+    "linux_vms": "Máy ảo Linux",
+    "ai_tools": "AI & Công cụ",
+    "local_ai_models": "Mô hình AI Cục bộ",
+    "ai_chat": "Trợ lý AI",
+    "terminal": "Terminal",
+    "settings": "Cài đặt"
+  },
+  "dashboard": {
+    "title": "Bảng Điều Khiển",
+    "vm_instances": "Số Máy Ảo",
+    "running_vms": "Đang Chạy",
+    "stopped_vms": "Đã Dừng",
+    "total_cpus": "Tổng CPU",
+    "total_memory": "Tổng RAM",
+    "total_disk": "Tổng Ổ Cứng",
+    "containers": "Containers",
+    "running": "Đang chạy",
+    "stopped": "Đã dừng",
+    "images": "Images",
+    "volumes": "Volumes",
+    "networks": "Networks",
+    "compose_projects": "Dự án Compose",
+    "kubernetes_contexts": "K8s Contexts"
+  },
+  "settings": {
+    "title": "Cài đặt",
+    "language": "Ngôn ngữ"
+  }
+}

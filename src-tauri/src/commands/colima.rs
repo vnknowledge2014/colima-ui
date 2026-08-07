@@ -162,6 +162,70 @@ pub async fn start_instance(config: StartConfig) -> Result<String, String> {
     .map_err(|e| format!("Task join error: {}", e))?
 }
 
+/// Stop a Colima instance (CLI-only, no Tauri state).
+/// Used by HTTP route handlers which don't have access to Tauri managed state.
+pub async fn stop_instance_cli(profile: String, force: bool) -> Result<String, String> {
+    tokio::task::spawn_blocking(move || {
+        let mut args = vec!["stop".to_string()];
+        if profile != "default" && !profile.is_empty() {
+            args.push("--profile".to_string());
+            args.push(profile.clone());
+        }
+        if force {
+            args.push("--force".to_string());
+        }
+
+        let args_ref: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
+        let output = colima_cmd()
+            .args(&args_ref)
+            .output()
+            .map_err(|e| format!("Failed to stop colima: {}", e))?;
+
+        if !output.status.success() {
+            return Err(format!(
+                "colima stop failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            ));
+        }
+
+        Ok(format!("Instance '{}' stopped", profile))
+    })
+    .await
+    .map_err(|e| format!("Task join error: {}", e))?
+}
+
+/// Delete a Colima instance (CLI-only, no Tauri state).
+/// Used by HTTP route handlers which don't have access to Tauri managed state.
+pub async fn delete_instance_cli(profile: String, force: bool) -> Result<String, String> {
+    tokio::task::spawn_blocking(move || {
+        let mut args = vec!["delete".to_string()];
+        if profile != "default" && !profile.is_empty() {
+            args.push("--profile".to_string());
+            args.push(profile.clone());
+        }
+        if force {
+            args.push("--force".to_string());
+        }
+
+        let args_ref: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
+        let output = colima_cmd()
+            .args(&args_ref)
+            .output()
+            .map_err(|e| format!("Failed to delete colima: {}", e))?;
+
+        if !output.status.success() {
+            return Err(format!(
+                "colima delete failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            ));
+        }
+
+        Ok(format!("Instance '{}' deleted", profile))
+    })
+    .await
+    .map_err(|e| format!("Task join error: {}", e))?
+}
+
 /// Stop a Colima instance
 #[tauri::command]
 pub async fn stop_instance(
@@ -467,6 +531,71 @@ pub async fn collect_diagnostic_logs(profile: String) -> Result<String, String> 
         }
 
         Ok(report)
+    })
+    .await
+    .map_err(|e| format!("Task join error: {}", e))?
+}
+
+#[tauri::command]
+pub async fn create_worker_node(master_profile: String, worker_profile: String, cpu: u32, memory: u32) -> Result<String, String> {
+    tokio::task::spawn_blocking(move || {
+        // 1. Get Master IP
+        let list_output = std::process::Command::new(crate::path_util::resolve_binary("colima"))
+            .args(["list", "-j"])
+            .output()
+            .map_err(|e| format!("Failed to list instances: {}", e))?;
+        let stdout = String::from_utf8_lossy(&list_output.stdout);
+        let mut master_ip = String::new();
+        for line in stdout.lines() {
+            if let Ok(instance) = serde_json::from_str::<ColimaInstance>(line) {
+                if instance.name == master_profile {
+                    master_ip = instance.address;
+                    break;
+                }
+            }
+        }
+        if master_ip.is_empty() {
+            return Err(format!("Could not find master node '{}' or its IP address", master_profile));
+        }
+
+        // 2. Get Master Token
+        let token_output = std::process::Command::new(crate::path_util::resolve_binary("colima"))
+            .args(["ssh", "-p", &master_profile, "--", "sudo", "cat", "/var/lib/rancher/k3s/server/node-token"])
+            .output()
+            .map_err(|e| format!("Failed to get node token: {}", e))?;
+        let token = String::from_utf8_lossy(&token_output.stdout).trim().to_string();
+        if token.is_empty() {
+            return Err("Failed to retrieve node token from master. Is kubernetes enabled?".to_string());
+        }
+
+        // 3. Start Worker Node
+        let args = vec![
+            "start".to_string(),
+            "-p".to_string(),
+            worker_profile,
+            "--kubernetes".to_string(),
+            "--cpu".to_string(),
+            cpu.to_string(),
+            "--memory".to_string(),
+            memory.to_string(),
+            "--network-address".to_string(),
+            "--k3s-arg".to_string(),
+            format!("--server=https://{}:6443", master_ip),
+            "--k3s-arg".to_string(),
+            format!("--token={}", token),
+        ];
+
+        let output = std::process::Command::new(crate::path_util::resolve_binary("colima"))
+            .args(args)
+            .output()
+            .map_err(|e| format!("Failed to start worker node: {}", e))?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(format!("Worker node start failed: {}", stderr));
+        }
+
+        Ok("Worker node created and joined successfully".to_string())
     })
     .await
     .map_err(|e| format!("Task join error: {}", e))?

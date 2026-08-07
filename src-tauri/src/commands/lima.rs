@@ -153,6 +153,14 @@ pub async fn lima_info(name: String) -> Result<String, String> {
 /// Execute a command inside a Lima VM
 #[tauri::command]
 pub async fn lima_shell(name: String, command: String) -> Result<String, String> {
+    // Security validation (applies to both Tauri IPC and HTTP routes)
+    if !crate::validation::is_valid_k8s_name(&name) {
+        return Err("Invalid VM name".to_string());
+    }
+    if crate::validation::contains_shell_injection(&command) {
+        return Err("Command contains forbidden characters (shell injection blocked)".to_string());
+    }
+
     let output = limactl_cmd()
         .args(["shell", &name, "--", "sh", "-c", &command])
         .output()
@@ -177,4 +185,57 @@ pub async fn lima_templates() -> Result<String, String> {
         .map_err(|e| format!("Failed to list templates: {}", e))?;
 
     Ok(String::from_utf8_lossy(&output.stdout).to_string())
+}
+
+/// Create a new Lima VM and auto-start it
+pub async fn lima_create(
+    name: String,
+    template: String,
+    cpus: u32,
+    memory: u32,
+    disk: u32,
+) -> Result<String, String> {
+    let name_start = name.clone();
+    tokio::task::spawn_blocking(move || {
+        let mut args = vec![
+            "create".to_string(),
+            format!("--name={}", name),
+            format!("--cpus={}", cpus),
+            format!("--memory={}", memory),
+            format!("--disk={}", disk),
+            "--tty=false".to_string(),
+        ];
+        if !template.is_empty() {
+            args.push(format!("template:{}", template));
+        }
+        let arg_refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
+        let output = limactl_cmd()
+            .args(&arg_refs)
+            .output()
+            .map_err(|e| format!("Failed to create Lima VM: {}", e))?;
+
+        if !output.status.success() {
+            return Err(format!(
+                "limactl create failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            ));
+        }
+
+        // Auto-start after create
+        let start_output = limactl_cmd()
+            .args(["start", &name_start])
+            .output()
+            .map_err(|e| format!("Failed to start Lima VM: {}", e))?;
+
+        if !start_output.status.success() {
+            return Err(format!(
+                "limactl start failed: {}",
+                String::from_utf8_lossy(&start_output.stderr)
+            ));
+        }
+
+        Ok(format!("VM '{}' created and started", name_start))
+    })
+    .await
+    .map_err(|e| format!("Task join error: {}", e))?
 }

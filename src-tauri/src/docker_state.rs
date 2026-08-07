@@ -12,7 +12,7 @@ use tokio::sync::RwLock;
 /// and Colima doesn't create /var/run/docker.sock (which Bollard defaults to).
 fn connect_bollard() -> Option<Docker> {
     // Try Colima socket detection first
-    if let Some(host) = crate::path_util::detect_docker_host() {
+    if let Some((host, _)) = crate::path_util::detect_docker_host() {
         // host is like "unix:///Users/mike/.colima/default/docker.sock"
         let socket_path = host.trim_start_matches("unix://");
         if let Ok(d) = Docker::connect_with_unix(socket_path, 5, bollard::API_DEFAULT_VERSION) {

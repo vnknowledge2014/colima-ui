@@ -9,6 +9,9 @@ use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex};
 use std::thread;
 
+/// Maximum buffer size per terminal session (1MB). Fix #13.
+const MAX_BUFFER_BYTES: usize = 1024 * 1024;
+
 /// Thread-safe output buffer shared between reader thread and main thread.
 type OutputBuffer = Arc<Mutex<Vec<u8>>>;
 
@@ -106,6 +109,11 @@ impl SessionManager {
                         Ok(n) => {
                             let mut buf = buf_clone.lock().unwrap();
                             buf.extend_from_slice(&tmp[..n]);
+                            // Fix #13: Cap buffer size — discard oldest data
+                            if buf.len() > MAX_BUFFER_BYTES {
+                                let excess = buf.len() - MAX_BUFFER_BYTES;
+                                buf.drain(..excess);
+                            }
                         }
                         Err(_) => break,
                     }
@@ -126,6 +134,11 @@ impl SessionManager {
                         Ok(n) => {
                             let mut buf = buf_clone2.lock().unwrap();
                             buf.extend_from_slice(&tmp[..n]);
+                            // Fix #13: Cap buffer size — discard oldest data
+                            if buf.len() > MAX_BUFFER_BYTES {
+                                let excess = buf.len() - MAX_BUFFER_BYTES;
+                                buf.drain(..excess);
+                            }
                         }
                         Err(_) => break,
                     }

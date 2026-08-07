@@ -111,6 +111,18 @@ pub fn fix_path_env() {
     // Store for per-Command application in late-spawned threads
     let _ = COMPUTED_PATH.set(new_path.clone());
 
+    // Fix #17: Guard against accidental use from multi-threaded context.
+    // This function MUST be called exactly once from main(), before any threads exist.
+    #[cfg(debug_assertions)]
+    {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        static CALLED: AtomicBool = AtomicBool::new(false);
+        assert!(
+            !CALLED.swap(true, Ordering::SeqCst),
+            "fix_path_env() must only be called once, from main() before the async runtime starts"
+        );
+    }
+
     // SAFETY: Called from main() before any threads are spawned (before tauri::Builder).
     // No concurrent readers/writers of the environment exist at this point.
     unsafe { env::set_var("PATH", &new_path) };
@@ -157,11 +169,10 @@ pub fn resolve_binary(name: &str) -> String {
 /// 1. DOCKER_HOST env var is NOT inherited from the user's shell
 /// 2. Colima doesn't create /var/run/docker.sock (no root access)
 /// 3. Bollard's connect_with_defaults() only checks /var/run/docker.sock
-pub fn detect_docker_host() -> Option<String> {
-    // First check if DOCKER_HOST is already set (e.g. from shell)
+pub fn detect_docker_host() -> Option<(String, String)> {
     if let Ok(host) = std::env::var("DOCKER_HOST") {
         if !host.is_empty() {
-            return Some(host);
+            return Some((host, "default".to_string()));
         }
     }
 
@@ -193,7 +204,7 @@ pub fn detect_docker_host() -> Option<String> {
                 // Found running instance — return its docker socket
                 let sock = colima_path.join(&name).join("docker.sock");
                 if sock.exists() {
-                    return Some(format!("unix://{}", sock.display()));
+                    return Some((format!("unix://{}", sock.display()), name.clone()));
                 }
             }
         }
@@ -202,7 +213,7 @@ pub fn detect_docker_host() -> Option<String> {
     // Fallback: check the colima-level docker.sock symlink
     let fallback = colima_path.join("docker.sock");
     if fallback.exists() {
-        return Some(format!("unix://{}", fallback.display()));
+        return Some((format!("unix://{}", fallback.display()), "default".to_string()));
     }
 
     None

@@ -1,15 +1,26 @@
+pub mod routes;
 mod api_server;
-mod commands;
+pub mod commands;
 mod docker_state;
-mod instance_reader;
-mod path_util;
+pub mod instance_reader;
+pub mod path_util;
 mod poller;
 mod terminal_session;
+pub mod adapters;
+pub mod services;
+
+// Extracted from api_server.rs for single-responsibility
+pub mod auth;
+pub mod sse;
+pub mod validation;
+pub mod platform;
+pub mod helpers;
 
 use commands::ai_chat;
 use commands::colima;
 use commands::compose;
-use commands::docker;
+use commands::containers;
+use commands::runtime;
 use commands::knowledge_bank;
 use commands::kubernetes;
 use commands::lima;
@@ -29,7 +40,7 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
-        .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_http::init())
         .manage(PollerState::default())
         .setup(|app| {
             // Initialize Knowledge Bank (SQLite)
@@ -52,9 +63,17 @@ pub fn run() {
             tauri::async_runtime::spawn(async move {
                 docker_state::start_docker_watcher(app_handle, docker_state).await;
             });
+            
+            // Resource Saver Mode
+            let resource_saver_state = Arc::new(RwLock::new(commands::system::ResourceSaverState::default()));
+            app.manage(resource_saver_state.clone());
+            commands::system::start_resource_saver_daemon(resource_saver_state);
+            
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            // Runtime info
+            runtime::get_runtime_info,
             // Colima commands
             colima::list_instances,
             colima::start_instance,
@@ -64,31 +83,32 @@ pub fn run() {
             colima::get_ssh_command,
             colima::kubernetes_action,
             colima::collect_diagnostic_logs,
+            colima::create_worker_node,
             // Docker commands
-            docker::list_containers,
-            docker::start_container,
-            docker::stop_container,
-            docker::restart_container,
-            docker::remove_container,
-            docker::container_logs,
-            docker::list_images,
-            docker::inspect_container,
-            docker::remove_image,
-            docker::pull_image,
-            docker::prune_images,
-            docker::inspect_image,
-            docker::tag_image,
-            docker::system_prune,
-            docker::system_df,
-            docker::container_stats,
-            docker::all_container_stats,
-            docker::container_top,
-            docker::container_exec,
-            docker::run_container,
-            docker::rename_container,
-            docker::pause_container,
-            docker::unpause_container,
-            docker::docker_diagnose,
+            containers::list_containers,
+            containers::start_container,
+            containers::stop_container,
+            containers::restart_container,
+            containers::remove_container,
+            containers::container_logs,
+            containers::list_images,
+            containers::inspect_container,
+            containers::remove_image,
+            containers::pull_image,
+            containers::prune_images,
+            containers::inspect_image,
+            containers::tag_image,
+            containers::system_prune,
+            containers::system_df,
+            containers::container_stats,
+            containers::all_container_stats,
+            containers::container_top,
+            containers::container_exec,
+            containers::run_container,
+            containers::rename_container,
+            containers::pause_container,
+            containers::unpause_container,
+            containers::docker_diagnose,
             // Volume commands
             volumes::list_volumes,
             volumes::create_volume,
@@ -112,6 +132,7 @@ pub fn run() {
             system::check_tool,
             system::host_specs,
             system::get_app_context,
+            system::read_reference,
             // Compose commands
             compose::list_compose_projects,
             compose::compose_up,
@@ -142,6 +163,9 @@ pub fn run() {
             // AI Chat
             ai_chat::ai_chat,
             ai_chat::ai_list_models,
+            ai_chat::ai_chat_load_history,
+            ai_chat::ai_chat_save_message,
+            ai_chat::ai_chat_clear_history,
             // AI Diagnostics — SearXNG + HTML→MD
             searxng::searxng_search,
             searxng::fetch_page_as_markdown,
@@ -149,11 +173,30 @@ pub fn run() {
             knowledge_bank::kb_query,
             knowledge_bank::kb_feedback,
             knowledge_bank::kb_save_solution,
+            knowledge_bank::kb_learn,
             knowledge_bank::kb_save_anti_pattern,
+            knowledge_bank::add_memory,
+            knowledge_bank::search_memory,
+            knowledge_bank::get_all_memories,
+            knowledge_bank::update_memory,
+            knowledge_bank::delete_memory,
+            knowledge_bank::save_preset_snapshot,
+            knowledge_bank::load_preset_snapshot,
+            knowledge_bank::list_all_preset_snapshots,
+            knowledge_bank::get_setting,
+            knowledge_bank::set_setting,
+            knowledge_bank::get_all_settings,
+            knowledge_bank::get_preset,
+            knowledge_bank::get_all_presets,
+            knowledge_bank::save_preset,
+            knowledge_bank::delete_preset,
             // Shell Sandbox
             shell_sandbox::sandbox_classify,
             shell_sandbox::sandbox_execute,
             shell_sandbox::sandbox_execute_approved,
+            // System and API Server
+            api_server::get_platform,
+            system::set_resource_saver,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

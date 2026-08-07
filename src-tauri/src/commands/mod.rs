@@ -1,12 +1,14 @@
+pub mod agent_loop;
 pub mod ai_chat;
 pub mod colima;
 pub mod compose;
-pub mod docker;
+pub mod containers;
 pub mod knowledge_bank;
 pub mod kubernetes;
 pub mod lima;
 pub mod models;
 pub mod networks;
+pub mod runtime;
 pub mod searxng;
 pub mod shell_sandbox;
 pub mod system;

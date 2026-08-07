@@ -1,0 +1,47 @@
+{
+  "getting_started": {
+    "title": "欢迎使用 Colima UI",
+    "language_select": "选择语言",
+    "next": "下一步"
+  },
+  "sidebar": {
+    "overview": "概览",
+    "dashboard": "仪表盘",
+    "instances": "Colima 实例",
+    "docker": "Docker",
+    "containers": "容器",
+    "images": "镜像",
+    "volumes": "数据卷",
+    "networks": "网络",
+    "compose": "Compose",
+    "clusters_vms": "集群与虚拟机",
+    "kubernetes": "Kubernetes",
+    "linux_vms": "Linux 虚拟机",
+    "ai_tools": "AI 与工具",
+    "local_ai_models": "本地 AI 模型",
+    "ai_chat": "AI 助手",
+    "terminal": "终端",
+    "settings": "设置"
+  },
+  "dashboard": {
+    "title": "仪表盘",
+    "vm_instances": "虚拟机实例",
+    "running_vms": "运行中",
+    "stopped_vms": "已停止",
+    "total_cpus": "总 CPU",
+    "total_memory": "总内存",
+    "total_disk": "总磁盘",
+    "containers": "容器",
+    "running": "运行中",
+    "stopped": "已停止",
+    "images": "镜像",
+    "volumes": "数据卷",
+    "networks": "网络",
+    "compose_projects": "Compose 项目",
+    "kubernetes_contexts": "K8s 上下文"
+  },
+  "settings": {
+    "title": "设置",
+    "language": "语言"
+  }
+}

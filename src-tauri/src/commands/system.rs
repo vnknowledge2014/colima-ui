@@ -1,7 +1,35 @@
-use serde::Serialize;
+use serde::{Serialize, Deserialize};
+use std::collections::HashMap;
+use std::sync::Arc;
+use tokio::sync::RwLock;
 use std::process::Command;
 use crate::path_util;
 
+#[derive(Debug, Clone)]
+pub struct ResourceSaverState {
+    pub enabled: bool,
+    pub idle_minutes_threshold: u64,
+    pub idle_minutes_count: u64,
+}
+
+impl Default for ResourceSaverState {
+    fn default() -> Self {
+        Self { enabled: false, idle_minutes_threshold: 15, idle_minutes_count: 0 }
+    }
+}
+
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct PluginsConfig {
+    pub plugins: HashMap<String, PluginDef>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct PluginDef {
+    pub description: String,
+    pub command: Option<String>,
+    pub prompt: Option<String>,
+}
 
 #[derive(Debug, Clone, Serialize)]
 pub struct SystemInfo {
@@ -92,15 +120,19 @@ pub async fn get_colima_version() -> Result<String, String> {
 /// Check if an optional tool is installed
 #[tauri::command]
 pub async fn check_tool(name: String) -> Result<serde_json::Value, String> {
-    let allowed = ["kubectl", "kind", "helm", "krunkit", "nerdctl"];
+    let allowed = ["kubectl", "kind", "helm", "krunkit", "nerdctl", "qemu-img"];
     if !allowed.contains(&name.as_str()) {
         return Err(format!("Unknown tool: {}", name));
     }
     let result = tokio::time::timeout(
         std::time::Duration::from_secs(5),
         tokio::task::spawn_blocking(move || {
-            let version = get_version(&name, &["version"])
-                .or_else(|| get_version(&name, &["--version"]));
+            let version = if name == "kubectl" {
+                get_version(&name, &["version", "--client"])
+            } else {
+                get_version(&name, &["version"])
+                    .or_else(|| get_version(&name, &["--version"]))
+            };
             serde_json::json!({
                 "installed": version.is_some(),
                 "version": version.unwrap_or_default()
@@ -265,18 +297,149 @@ pub async fn host_specs() -> Result<HostSpecs, String> {
 /// Used by the AI agent to inject authoritative ColimaUI + Colima knowledge
 /// into the chat context (Tier 1 injection).
 #[tauri::command]
-pub async fn get_app_context(app: tauri::AppHandle) -> Result<String, String> {
+pub async fn read_reference(app: tauri::AppHandle, path: String) -> Result<String, String> {
     use tauri::Manager;
-    // Tauri's resource_dir() resolves to Contents/Resources/ on macOS.
-    // Files from "resources/*" in tauri.conf.json are bundled inside
-    // Contents/Resources/resources/ (preserving the source subdirectory).
     let resource_path = app
         .path()
         .resource_dir()
         .map_err(|e| format!("Cannot resolve resource dir: {e}"))?
         .join("resources")
-        .join("CONTEXT.md");
-
+        .join(&path);
     std::fs::read_to_string(&resource_path)
-        .map_err(|e| format!("Failed to read CONTEXT.md from {:?}: {e}", resource_path))
+        .map_err(|e| format!("Failed to read reference from {:?}: {e}", resource_path))
+}
+
+#[tauri::command]
+pub async fn get_app_context(app: tauri::AppHandle) -> Result<String, String> {
+    use tauri::Manager;
+    let resources_dir = app
+        .path()
+        .resource_dir()
+        .map_err(|e| format!("Cannot resolve resource dir: {e}"))?
+        .join("resources");
+
+    let mut context = String::new();
+
+    if let Ok(sys) = std::fs::read_to_string(resources_dir.join("system_prompt.md")) {
+        context.push_str(&sys);
+        context.push_str("\n\n");
+    }
+
+    if let Ok(router) = std::fs::read_to_string(resources_dir.join("router.md")) {
+        context.push_str(&router);
+        context.push_str("\n\n");
+    }
+
+    let skills_dir = resources_dir.join("skills");
+    if let Ok(entries) = std::fs::read_dir(skills_dir) {
+        for entry in entries.flatten() {
+            if entry.path().is_dir() {
+                let skill_file = entry.path().join("SKILL.md");
+                if let Ok(skill_content) = std::fs::read_to_string(&skill_file) {
+                    context.push_str(&skill_content);
+                    context.push_str("\n\n");
+                }
+            }
+        }
+    }
+
+    if let Ok(home) = app.path().home_dir() {
+        let plugins_file = home.join(".colima-ui").join("plugins.yaml");
+        if let Ok(content) = std::fs::read_to_string(&plugins_file) {
+            if let Ok(config) = serde_yml::from_str::<PluginsConfig>(&content) {
+                if !config.plugins.is_empty() {
+                    context.push_str("## Custom User Plugins / Skills\n\n");
+                    context.push_str("The user has defined the following custom skills/shortcuts in their `~/.colima-ui/plugins.yaml`. You MUST prioritize them when applicable.\n\n");
+                    
+                    for (name, plugin) in config.plugins {
+                        context.push_str(&format!("### {}\n", name));
+                        context.push_str(&format!("- **Description**: {}\n", plugin.description));
+                        
+                        if let Some(prompt) = plugin.prompt {
+                            context.push_str(&format!("- **Prompt/Trigger**: {}\n", prompt));
+                        }
+                        
+                        if let Some(cmd) = plugin.command {
+                            let parts: Vec<&str> = cmd.split_whitespace().collect();
+                            if !parts.is_empty() {
+                                let c = parts[0];
+                                let a: Vec<String> = parts[1..].iter().map(|s| format!("\"{}\"", s)).collect();
+                                let args_str = format!("[{}]", a.join(", "));
+                                context.push_str(&format!(
+                                    "- **Action**: `{}` (Run via `[EVENT_APPROVE: cli-exec | {{\"command\": \"{}\", \"args\": {}}}]`)\n", 
+                                    cmd, c, args_str
+                                ));
+                            }
+                        }
+                        context.push_str("\n");
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(context)
+}
+
+#[tauri::command]
+pub async fn set_resource_saver(
+    enabled: bool,
+    threshold: u64,
+    state: tauri::State<'_, Arc<RwLock<ResourceSaverState>>>
+) -> Result<(), String> {
+    let mut s = state.write().await;
+    s.enabled = enabled;
+    s.idle_minutes_threshold = threshold;
+    s.idle_minutes_count = 0; // reset on setting change
+    Ok(())
+}
+
+pub fn start_resource_saver_daemon(state: Arc<RwLock<ResourceSaverState>>) {
+    tauri::async_runtime::spawn(async move {
+        loop {
+            tokio::time::sleep(tokio::time::Duration::from_secs(60)).await;
+            
+            let mut s = state.write().await;
+            if !s.enabled { continue; }
+            
+            let resolved = crate::path_util::resolve_binary("docker");
+            let mut cmd = std::process::Command::new(&resolved);
+            cmd.args(["stats", "--no-stream", "--format", "{{.CPUPerc}}"]);
+            crate::path_util::apply_path_to_cmd(&mut cmd);
+            
+            let mut is_idle = true;
+            if let Ok(output) = cmd.output() {
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                let mut total_cpu = 0.0;
+                for line in stdout.lines() {
+                    let clean = line.replace("%", "").trim().to_string();
+                    if let Ok(val) = clean.parse::<f64>() {
+                        total_cpu += val;
+                    }
+                }
+                // If total CPU > 1%, it's not idle
+                if total_cpu > 1.0 {
+                    is_idle = false;
+                }
+            } else {
+                // If docker fails, assume not idle to be safe, or assume colima is already off
+                is_idle = false; 
+            }
+            
+            if is_idle {
+                s.idle_minutes_count += 1;
+                if s.idle_minutes_count >= s.idle_minutes_threshold {
+                    // Trigger auto-pause
+                    let colima = crate::path_util::resolve_binary("colima");
+                    let mut stop_cmd = std::process::Command::new(&colima);
+                    stop_cmd.arg("stop");
+                    crate::path_util::apply_path_to_cmd(&mut stop_cmd);
+                    let _ = stop_cmd.spawn();
+                    s.idle_minutes_count = 0; // reset after action
+                }
+            } else {
+                s.idle_minutes_count = 0;
+            }
+        }
+    });
 }

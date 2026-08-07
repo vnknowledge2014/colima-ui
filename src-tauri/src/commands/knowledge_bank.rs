@@ -1,4 +1,4 @@
-use rusqlite::{Connection, params};
+use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
 use std::sync::Mutex;
 
@@ -7,7 +7,12 @@ use std::sync::Mutex;
 static DB: std::sync::OnceLock<Mutex<Connection>> = std::sync::OnceLock::new();
 
 fn db() -> &'static Mutex<Connection> {
-    DB.get().expect("Knowledge bank not initialized. Call init_knowledge_bank() first.")
+    DB.get()
+        .expect("Knowledge bank not initialized. Call init_knowledge_bank() first.")
+}
+
+pub fn get_db() -> &'static Mutex<Connection> {
+    db()
 }
 
 /// Initialize the knowledge bank — called once from lib.rs setup()
@@ -20,7 +25,8 @@ pub fn init_knowledge_bank() {
     let conn = Connection::open(&db_path).expect("Failed to open knowledge.db");
 
     // Create tables
-    conn.execute_batch("
+    conn.execute_batch(
+        "
         CREATE TABLE IF NOT EXISTS solutions (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             error_pattern TEXT NOT NULL,
@@ -42,18 +48,85 @@ pub fn init_knowledge_bank() {
             reason TEXT DEFAULT '',
             created_at TEXT DEFAULT (datetime('now'))
         );
-    ").expect("Failed to create knowledge bank tables");
+
+        CREATE TABLE IF NOT EXISTS agent_memory (
+            id TEXT PRIMARY KEY,
+            type TEXT NOT NULL,
+            content TEXT NOT NULL,
+            created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now'))
+        );
+
+        CREATE VIRTUAL TABLE IF NOT EXISTS agent_memory_fts USING fts5(
+            content,
+            content='agent_memory',
+            content_rowid='rowid'
+        );
+
+        CREATE TABLE IF NOT EXISTS chat_messages (
+            id TEXT PRIMARY KEY,
+            role TEXT NOT NULL,
+            content TEXT NOT NULL,
+            created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now'))
+        );
+
+        CREATE TABLE IF NOT EXISTS app_settings (
+            setting_key TEXT PRIMARY KEY,
+            setting_value TEXT NOT NULL,
+            updated_at TEXT DEFAULT (datetime('now'))
+        );
+
+        CREATE TABLE IF NOT EXISTS user_presets (
+            id TEXT PRIMARY KEY,
+            config_json TEXT NOT NULL,
+            updated_at TEXT DEFAULT (datetime('now'))
+        );
+
+        CREATE TABLE IF NOT EXISTS preset_container_snapshots (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            preset_id TEXT NOT NULL,
+            instance_profile TEXT NOT NULL,
+            snapshot_time INTEGER NOT NULL,
+            containers_json TEXT NOT NULL,
+            is_manual_override INTEGER DEFAULT 0
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_preset_snapshot ON preset_container_snapshots(preset_id, instance_profile);
+
+
+        CREATE TRIGGER IF NOT EXISTS agent_memory_ai_fts AFTER INSERT ON agent_memory
+        BEGIN
+            INSERT INTO agent_memory_fts(rowid, content) VALUES (new.rowid, new.content);
+        END;
+
+        CREATE TRIGGER IF NOT EXISTS agent_memory_ad_fts AFTER DELETE ON agent_memory
+        BEGIN
+            INSERT INTO agent_memory_fts(agent_memory_fts, rowid, content) VALUES ('delete', old.rowid, old.content);
+        END;
+
+        CREATE TRIGGER IF NOT EXISTS agent_memory_au_fts AFTER UPDATE OF content ON agent_memory
+        BEGIN
+            INSERT INTO agent_memory_fts(agent_memory_fts, rowid, content) VALUES ('delete', old.rowid, old.content);
+            INSERT INTO agent_memory_fts(rowid, content) VALUES (new.rowid, new.content);
+        END;
+    ",
+    )
+    .expect("Failed to create knowledge bank tables");
 
     // Seed builtin solutions (only if empty)
-    let count: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM solutions WHERE source = 'builtin'", [], |r| r.get(0)
-    ).unwrap_or(0);
+    let count: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM solutions WHERE source = 'builtin'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap_or(0);
 
     if count == 0 {
         seed_builtins(&conn);
     }
 
-    DB.set(Mutex::new(conn)).expect("Knowledge bank already initialized");
+    DB.set(Mutex::new(conn))
+        .expect("Knowledge bank already initialized");
 }
 
 // ===== Seed Data =====
@@ -254,7 +327,7 @@ pub struct KBAntiPattern {
 pub struct KBQueryResult {
     pub solutions: Vec<KBMatch>,
     pub anti_patterns: Vec<KBAntiPattern>,
-    pub context_text: String,  // Pre-formatted for AI injection
+    pub context_text: String, // Pre-formatted for AI injection
 }
 
 // ===== Tauri Commands =====
@@ -271,21 +344,23 @@ pub async fn kb_query(error_text: String) -> Result<KBQueryResult, String> {
          FROM solutions ORDER BY (likes - dislikes) DESC, likes DESC"
     ).map_err(|e| format!("DB query: {}", e))?;
 
-    let all_solutions: Vec<KBMatch> = stmt.query_map([], |row| {
-        Ok(KBMatch {
-            id: row.get(0)?,
-            error_pattern: row.get(1)?,
-            error_category: row.get(2)?,
-            solution_text: row.get(3)?,
-            root_cause: row.get(4)?,
-            commands: row.get(5)?,
-            likes: row.get(6)?,
-            dislikes: row.get(7)?,
-            source: row.get(8)?,
+    let all_solutions: Vec<KBMatch> = stmt
+        .query_map([], |row| {
+            Ok(KBMatch {
+                id: row.get(0)?,
+                error_pattern: row.get(1)?,
+                error_category: row.get(2)?,
+                solution_text: row.get(3)?,
+                root_cause: row.get(4)?,
+                commands: row.get(5)?,
+                likes: row.get(6)?,
+                dislikes: row.get(7)?,
+                source: row.get(8)?,
+            })
         })
-    }).map_err(|e| format!("DB map: {}", e))?
-    .filter_map(|r| r.ok())
-    .collect();
+        .map_err(|e| format!("DB map: {}", e))?
+        .filter_map(|r| r.ok())
+        .collect();
 
     // Match using regex patterns
     let mut solutions: Vec<KBMatch> = Vec::new();
@@ -303,22 +378,25 @@ pub async fn kb_query(error_text: String) -> Result<KBQueryResult, String> {
     }
 
     // Find matching anti-patterns
-    let mut ap_stmt = conn.prepare(
-        "SELECT id, error_pattern, bad_suggestion, reason FROM anti_patterns"
-    ).map_err(|e| format!("DB query: {}", e))?;
+    let mut ap_stmt = conn
+        .prepare("SELECT id, error_pattern, bad_suggestion, reason FROM anti_patterns")
+        .map_err(|e| format!("DB query: {}", e))?;
 
-    let all_aps: Vec<KBAntiPattern> = ap_stmt.query_map([], |row| {
-        Ok(KBAntiPattern {
-            id: row.get(0)?,
-            error_pattern: row.get(1)?,
-            bad_suggestion: row.get(2)?,
-            reason: row.get(3)?,
+    let all_aps: Vec<KBAntiPattern> = ap_stmt
+        .query_map([], |row| {
+            Ok(KBAntiPattern {
+                id: row.get(0)?,
+                error_pattern: row.get(1)?,
+                bad_suggestion: row.get(2)?,
+                reason: row.get(3)?,
+            })
         })
-    }).map_err(|e| format!("DB map: {}", e))?
-    .filter_map(|r| r.ok())
-    .collect();
+        .map_err(|e| format!("DB map: {}", e))?
+        .filter_map(|r| r.ok())
+        .collect();
 
-    let anti_patterns: Vec<KBAntiPattern> = all_aps.into_iter()
+    let anti_patterns: Vec<KBAntiPattern> = all_aps
+        .into_iter()
         .filter(|ap| {
             if let Ok(re) = regex_lite::Regex::new(&format!("(?i){}", ap.error_pattern)) {
                 re.is_match(&error_lower) || re.is_match(&error_text)
@@ -334,7 +412,11 @@ pub async fn kb_query(error_text: String) -> Result<KBQueryResult, String> {
         context.push_str("## 📚 Knowledge Bank — Previously Known Solutions\n\n");
         for (i, sol) in solutions.iter().take(3).enumerate() {
             let score = sol.likes - sol.dislikes;
-            let badge = if sol.source == "learned" { "🧠 Learned" } else { "📖 Built-in" };
+            let badge = if sol.source == "learned" {
+                "🧠 Learned"
+            } else {
+                "📖 Built-in"
+            };
             context.push_str(&format!(
                 "### Solution {} ({}, score: {}👍)\n**Category:** {}\n**Root Cause:** {}\n**Fix:**\n{}\n\n",
                 i + 1, badge, score, sol.error_category, sol.root_cause, sol.solution_text
@@ -356,23 +438,38 @@ pub async fn kb_query(error_text: String) -> Result<KBQueryResult, String> {
     for sol in &solutions {
         let _ = conn.execute(
             "UPDATE solutions SET last_used_at = datetime('now') WHERE id = ?1",
-            params![sol.id]
+            params![sol.id],
         );
     }
 
-    Ok(KBQueryResult { solutions, anti_patterns, context_text: context })
+    Ok(KBQueryResult {
+        solutions,
+        anti_patterns,
+        context_text: context,
+    })
 }
 
-/// Record feedback (like/dislike) for a solution
+/// Record feedback (like/dislike) for a solution.
+/// Uses two fixed, literal SQL statements (no string interpolation of SQL
+/// fragments) so the query text can never be influenced by caller input.
 #[tauri::command]
 pub async fn kb_feedback(solution_id: i64, is_like: bool) -> Result<String, String> {
     let conn = db().lock().map_err(|e| format!("DB lock: {}", e))?;
-    let column = if is_like { "likes" } else { "dislikes" };
-    conn.execute(
-        &format!("UPDATE solutions SET {} = {} + 1 WHERE id = ?1", column, column),
-        params![solution_id]
-    ).map_err(|e| format!("DB update: {}", e))?;
-    Ok(if is_like { "Solution liked".to_string() } else { "Solution disliked".to_string() })
+    if is_like {
+        conn.execute(
+            "UPDATE solutions SET likes = likes + 1 WHERE id = ?1",
+            params![solution_id],
+        )
+        .map_err(|e| format!("DB update: {}", e))?;
+        Ok("Solution liked".to_string())
+    } else {
+        conn.execute(
+            "UPDATE solutions SET dislikes = dislikes + 1 WHERE id = ?1",
+            params![solution_id],
+        )
+        .map_err(|e| format!("DB update: {}", e))?;
+        Ok("Solution disliked".to_string())
+    }
 }
 
 /// Save a new learned solution from AI response
@@ -392,6 +489,18 @@ pub async fn kb_save_solution(
     Ok(conn.last_insert_rowid())
 }
 
+/// Agentic Context Engineering: Save a new learned solution directly from AI's [LEARN: ...] tool
+#[tauri::command]
+pub async fn kb_learn(error_pattern: String, solution_text: String) -> Result<i64, String> {
+    kb_save_solution(
+        error_pattern,
+        "Agentic Learning".to_string(),
+        solution_text,
+        "Auto-distilled by reasoning loop".to_string(),
+    )
+    .await
+}
+
 /// Save an anti-pattern (approach that didn't work)
 #[tauri::command]
 pub async fn kb_save_anti_pattern(
@@ -402,7 +511,338 @@ pub async fn kb_save_anti_pattern(
     let conn = db().lock().map_err(|e| format!("DB lock: {}", e))?;
     conn.execute(
         "INSERT INTO anti_patterns (error_pattern, bad_suggestion, reason) VALUES (?1, ?2, ?3)",
-        params![error_pattern, bad_suggestion, reason]
-    ).map_err(|e| format!("DB insert: {}", e))?;
+        params![error_pattern, bad_suggestion, reason],
+    )
+    .map_err(|e| format!("DB insert: {}", e))?;
     Ok(conn.last_insert_rowid())
+}
+
+fn stable_id(input: &str) -> String {
+    use sha2::{Digest, Sha256};
+    let mut hasher = Sha256::new();
+    hasher.update(input);
+    let result = hasher.finalize();
+    let mut hex = String::with_capacity(16);
+    for byte in result.iter().take(8) {
+        use std::fmt::Write;
+        write!(&mut hex, "{:02x}", byte).unwrap();
+    }
+    hex
+}
+
+pub fn add_agent_memory(conn: &Connection, memory_type: &str, content: &str) -> rusqlite::Result<()> {
+    let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+    let id = stable_id(&format!("mem|{}", nanos));
+    conn.execute(
+        "INSERT INTO agent_memory (id, type, content) VALUES (?1, ?2, ?3)",
+        params![&id, memory_type, content],
+    )?;
+    Ok(())
+}
+
+pub fn search_agent_memory(conn: &Connection, query: &str, limit: u32) -> rusqlite::Result<Vec<String>> {
+    let clean_query = query.chars().map(|c| if c.is_alphanumeric() { c } else { ' ' }).collect::<String>();
+    let tokens: Vec<&str> = clean_query.split_whitespace().collect();
+    if tokens.is_empty() {
+        return Ok(Vec::new());
+    }
+    
+    // e.g. "foo bar" -> "foo OR bar"
+    let fts_query = tokens.join(" OR ");
+    
+    let mut stmt = conn.prepare(
+        "SELECT content FROM agent_memory_fts 
+         WHERE agent_memory_fts MATCH ?1 
+         ORDER BY bm25(agent_memory_fts) 
+         LIMIT ?2",
+    )?;
+    
+    let results: rusqlite::Result<Vec<String>, _> = stmt
+        .query_map(params![fts_query, limit], |row| row.get(0))?
+        .collect();
+        
+    results
+}
+
+#[tauri::command]
+pub async fn add_memory(memory_type: String, content: String) -> Result<String, String> {
+    let conn = db().lock().map_err(|e| format!("DB lock: {}", e))?;
+    add_agent_memory(&conn, &memory_type, &content).map_err(|e| format!("DB insert: {}", e))?;
+    Ok("Memory added".to_string())
+}
+
+#[tauri::command]
+pub async fn search_memory(query: String, limit: u32) -> Result<Vec<String>, String> {
+    let conn = db().lock().map_err(|e| format!("DB lock: {}", e))?;
+    search_agent_memory(&conn, &query, limit).map_err(|e| format!("DB search: {}", e))
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentMemoryItem {
+    pub id: String,
+    pub memory_type: String,
+    pub content: String,
+    pub created_at: i64,
+}
+
+#[tauri::command]
+pub async fn get_all_memories() -> Result<Vec<AgentMemoryItem>, String> {
+    let conn = db().lock().map_err(|e| format!("DB lock: {}", e))?;
+    let mut stmt = conn
+        .prepare("SELECT id, type, content, created_at FROM agent_memory ORDER BY created_at DESC")
+        .map_err(|e| format!("DB prepare: {}", e))?;
+    
+    let results: Result<Vec<AgentMemoryItem>, _> = stmt
+        .query_map([], |row| {
+            Ok(AgentMemoryItem {
+                id: row.get(0)?,
+                memory_type: row.get(1)?,
+                content: row.get(2)?,
+                created_at: row.get(3)?,
+            })
+        })
+        .map_err(|e| format!("DB query_map: {}", e))?
+        .collect();
+
+    results.map_err(|e| format!("DB collect: {}", e))
+}
+
+#[tauri::command]
+pub async fn update_memory(id: String, content: String) -> Result<String, String> {
+    let conn = db().lock().map_err(|e| format!("DB lock: {}", e))?;
+    conn.execute(
+        "UPDATE agent_memory SET content = ?1 WHERE id = ?2",
+        params![content, id],
+    )
+    .map_err(|e| format!("DB update: {}", e))?;
+    Ok("Memory updated".to_string())
+}
+
+#[tauri::command]
+pub async fn delete_memory(id: String) -> Result<String, String> {
+    let conn = db().lock().map_err(|e| format!("DB lock: {}", e))?;
+    conn.execute(
+        "DELETE FROM agent_memory WHERE id = ?1",
+        params![id],
+    )
+    .map_err(|e| format!("DB delete: {}", e))?;
+    Ok("Memory deleted".to_string())
+}
+
+#[tauri::command]
+pub async fn save_preset_snapshot(
+    preset_id: String,
+    instance_profile: String,
+    containers_json: String,
+    is_manual_override: bool,
+) -> Result<String, String> {
+    let conn = db().lock().map_err(|e| format!("DB lock: {}", e))?;
+    let snapshot_time = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as i64;
+
+    conn.execute(
+        "INSERT INTO preset_container_snapshots 
+         (preset_id, instance_profile, snapshot_time, containers_json, is_manual_override) 
+         VALUES (?1, ?2, ?3, ?4, ?5)",
+        params![
+            preset_id,
+            instance_profile,
+            snapshot_time,
+            containers_json,
+            if is_manual_override { 1 } else { 0 }
+        ],
+    )
+    .map_err(|e| format!("DB insert snapshot: {}", e))?;
+
+    Ok("Snapshot saved".to_string())
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PresetSnapshot {
+    pub id: i64,
+    pub preset_id: String,
+    pub instance_profile: String,
+    pub snapshot_time: i64,
+    pub containers_json: String,
+    pub is_manual_override: bool,
+}
+
+#[tauri::command]
+pub async fn load_preset_snapshot(
+    preset_id: String,
+    instance_profile: String,
+) -> Result<Option<PresetSnapshot>, String> {
+    let conn = db().lock().map_err(|e| format!("DB lock: {}", e))?;
+    
+    // Get the most recent snapshot for this preset and instance profile
+    let mut stmt = conn
+        .prepare(
+            "SELECT id, preset_id, instance_profile, snapshot_time, containers_json, is_manual_override 
+             FROM preset_container_snapshots 
+             WHERE preset_id = ?1 AND instance_profile = ?2 
+             ORDER BY snapshot_time DESC LIMIT 1"
+        )
+        .map_err(|e| format!("DB prepare: {}", e))?;
+
+    let mut iter = stmt
+        .query_map(params![preset_id, instance_profile], |row| {
+            Ok(PresetSnapshot {
+                id: row.get(0)?,
+                preset_id: row.get(1)?,
+                instance_profile: row.get(2)?,
+                snapshot_time: row.get(3)?,
+                containers_json: row.get(4)?,
+                is_manual_override: row.get::<_, i64>(5)? != 0,
+            })
+        })
+        .map_err(|e| format!("DB query_map: {}", e))?;
+
+    if let Some(Ok(snapshot)) = iter.next() {
+        Ok(Some(snapshot))
+    } else {
+        Ok(None)
+    }
+}
+
+/// Return the latest snapshot for every preset of a given instance profile.
+/// Used by the Containers UI to build a container → preset ownership map.
+#[tauri::command]
+pub async fn list_all_preset_snapshots(
+    instance_profile: String,
+) -> Result<Vec<PresetSnapshot>, String> {
+    let conn = db().lock().map_err(|e| format!("DB lock: {}", e))?;
+
+    // For each preset_id, pick the row with the highest snapshot_time
+    let mut stmt = conn
+        .prepare(
+            "SELECT s.id, s.preset_id, s.instance_profile, s.snapshot_time, s.containers_json, s.is_manual_override
+             FROM preset_container_snapshots s
+             INNER JOIN (
+                 SELECT preset_id, MAX(snapshot_time) AS max_time
+                 FROM preset_container_snapshots
+                 WHERE instance_profile = ?1
+                 GROUP BY preset_id
+             ) latest ON s.preset_id = latest.preset_id AND s.snapshot_time = latest.max_time
+             WHERE s.instance_profile = ?1"
+        )
+        .map_err(|e| format!("DB prepare: {}", e))?;
+
+    let rows = stmt
+        .query_map(params![instance_profile], |row| {
+            Ok(PresetSnapshot {
+                id: row.get(0)?,
+                preset_id: row.get(1)?,
+                instance_profile: row.get(2)?,
+                snapshot_time: row.get(3)?,
+                containers_json: row.get(4)?,
+                is_manual_override: row.get::<_, i64>(5)? != 0,
+            })
+        })
+        .map_err(|e| format!("DB query_map: {}", e))?;
+
+    let mut results = Vec::new();
+    for row in rows {
+        if let Ok(snap) = row {
+            results.push(snap);
+        }
+    }
+    Ok(results)
+}
+
+// ===== Settings & Presets (Migrated from LocalStorage) =====
+
+#[tauri::command]
+pub async fn get_setting(key: String) -> Result<Option<String>, String> {
+    let conn = db().lock().map_err(|e| format!("DB lock: {}", e))?;
+    let mut stmt = conn.prepare("SELECT setting_value FROM app_settings WHERE setting_key = ?1")
+        .map_err(|e| format!("DB prepare: {}", e))?;
+    let mut iter = stmt.query_map(params![key], |row| row.get(0))
+        .map_err(|e| format!("DB query_map: {}", e))?;
+    if let Some(Ok(val)) = iter.next() {
+        Ok(Some(val))
+    } else {
+        Ok(None)
+    }
+}
+
+#[tauri::command]
+pub async fn set_setting(key: String, value: String) -> Result<String, String> {
+    let conn = db().lock().map_err(|e| format!("DB lock: {}", e))?;
+    conn.execute(
+        "INSERT INTO app_settings (setting_key, setting_value, updated_at) VALUES (?1, ?2, datetime('now'))
+         ON CONFLICT(setting_key) DO UPDATE SET setting_value = excluded.setting_value, updated_at = datetime('now')",
+        params![key, value],
+    )
+    .map_err(|e| format!("DB execute: {}", e))?;
+    Ok("Setting saved".to_string())
+}
+
+#[tauri::command]
+pub async fn get_all_settings() -> Result<std::collections::HashMap<String, String>, String> {
+    let conn = db().lock().map_err(|e| format!("DB lock: {}", e))?;
+    let mut stmt = conn.prepare("SELECT setting_key, setting_value FROM app_settings")
+        .map_err(|e| format!("DB prepare: {}", e))?;
+    let iter = stmt.query_map([], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+    })
+    .map_err(|e| format!("DB query_map: {}", e))?;
+    
+    let mut map = std::collections::HashMap::new();
+    for row in iter.filter_map(|r| r.ok()) {
+        map.insert(row.0, row.1);
+    }
+    Ok(map)
+}
+
+#[tauri::command]
+pub async fn get_preset(id: String) -> Result<Option<String>, String> {
+    let conn = db().lock().map_err(|e| format!("DB lock: {}", e))?;
+    let mut stmt = conn.prepare("SELECT config_json FROM user_presets WHERE id = ?1")
+        .map_err(|e| format!("DB prepare: {}", e))?;
+    let mut iter = stmt.query_map(params![id], |row| row.get(0))
+        .map_err(|e| format!("DB query_map: {}", e))?;
+    if let Some(Ok(val)) = iter.next() {
+        Ok(Some(val))
+    } else {
+        Ok(None)
+    }
+}
+
+#[tauri::command]
+pub async fn get_all_presets() -> Result<std::collections::HashMap<String, String>, String> {
+    let conn = db().lock().map_err(|e| format!("DB lock: {}", e))?;
+    let mut stmt = conn.prepare("SELECT id, config_json FROM user_presets")
+        .map_err(|e| format!("DB prepare: {}", e))?;
+    let iter = stmt.query_map([], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+    })
+    .map_err(|e| format!("DB query_map: {}", e))?;
+    
+    let mut map = std::collections::HashMap::new();
+    for row in iter.filter_map(|r| r.ok()) {
+        map.insert(row.0, row.1);
+    }
+    Ok(map)
+}
+
+#[tauri::command]
+pub async fn save_preset(id: String, config_json: String) -> Result<String, String> {
+    let conn = db().lock().map_err(|e| format!("DB lock: {}", e))?;
+    conn.execute(
+        "INSERT INTO user_presets (id, config_json, updated_at) VALUES (?1, ?2, datetime('now'))
+         ON CONFLICT(id) DO UPDATE SET config_json = excluded.config_json, updated_at = datetime('now')",
+        params![id, config_json],
+    )
+    .map_err(|e| format!("DB execute: {}", e))?;
+    Ok("Preset saved".to_string())
+}
+
+#[tauri::command]
+pub async fn delete_preset(id: String) -> Result<String, String> {
+    let conn = db().lock().map_err(|e| format!("DB lock: {}", e))?;
+    conn.execute("DELETE FROM user_presets WHERE id = ?1", params![id])
+        .map_err(|e| format!("DB delete: {}", e))?;
+    Ok("Preset deleted".to_string())
 }

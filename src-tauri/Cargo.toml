@@ -1,9 +1,10 @@
 [package]
 name = "colima-ui"
-version = "0.1.9"
-description = "A Tauri App"
-authors = ["you"]
+version = "0.1.10"
+description = "A modern desktop & web GUI for Colima — manage Docker, Kubernetes, and Linux VMs"
+authors = ["vnknowledge2014"]
 edition = "2021"
+default-run = "colima-ui"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -20,15 +21,13 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 tauri = { version = "2", features = ["tray-icon"] }
 tauri-plugin-opener = "2"
-tauri-plugin-shell = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["full"] }
 axum = "0.8"
 tower-http = { version = "0.6", features = ["cors"] }
-serde_yaml = "0.9"
+serde_yml = "0.0.12"
 libc = "0.2"
-lazy_static = "1.4"
 bollard = "0.18"
 futures-util = "0.3"
 tokio-stream = { version = "0.1", features = ["sync"] }
@@ -38,4 +37,17 @@ scraper = "0.20"
 html2md = "0.2"
 rusqlite = { version = "0.32", features = ["bundled"] }
 regex-lite = "0.1"
+tauri-plugin-http = "2.5.9"
+rand = "0.8"
+sha2 = "0.11.0"
+async-trait = "0.1"
+clap = { version = "4", features = ["derive"], optional = true }
 
+[features]
+default = []
+cli = ["clap"]
+
+[[bin]]
+name = "colimaui"
+path = "src/bin/cli.rs"
+required-features = ["cli"]

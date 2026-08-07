@@ -80,7 +80,7 @@ fn read_instance(colima_home: &Path, profile: &str) -> Option<ColimaInstance> {
     // Read and parse the colima.yaml config
     let config: ColimaConfig = if config_path.exists() {
         let content = std::fs::read_to_string(&config_path).ok()?;
-        serde_yaml::from_str(&content).unwrap_or_default()
+        serde_yml::from_str(&content).unwrap_or_default()
     } else {
         // No config file — if lima dir also doesn't exist, this is a stale/deleted profile
         if !lima_dir.exists() {
@@ -140,6 +140,7 @@ fn read_instance(colima_home: &Path, profile: &str) -> Option<ColimaInstance> {
 /// Check if k3s is actually running for a profile via kubectl context check.
 /// This is the fallback when colima.yaml says `kubernetes.enabled: false`
 /// but K3s might actually be running (config out of sync).
+/// Fix #11: Uses --request-timeout=3s to avoid blocking instance listing.
 fn check_k3s_via_kubectl(profile: &str) -> bool {
     let context_name = if profile == "default" {
         "colima".to_string()
@@ -151,6 +152,7 @@ fn check_k3s_via_kubectl(profile: &str) -> bool {
         .args([
             "--context",
             &context_name,
+            "--request-timeout=3s",
             "get",
             "nodes",
             "-o",

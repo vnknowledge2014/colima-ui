@@ -16,6 +16,55 @@ pub struct AiChatRequest {
     pub endpoint: String, // custom endpoint for ollama-cloud
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AiChatHistoryMessage {
+    pub id: String,
+    pub role: String,
+    pub content: String,
+}
+
+#[tauri::command]
+pub async fn ai_chat_load_history() -> Result<Vec<AiChatHistoryMessage>, String> {
+    let conn = crate::commands::knowledge_bank::get_db().lock().unwrap();
+    let mut stmt = conn
+        .prepare("SELECT id, role, content FROM chat_messages ORDER BY created_at ASC")
+        .map_err(|e| e.to_string())?;
+
+    let messages = stmt
+        .query_map([], |row| {
+            Ok(AiChatHistoryMessage {
+                id: row.get(0)?,
+                role: row.get(1)?,
+                content: row.get(2)?,
+            })
+        })
+        .map_err(|e| e.to_string())?
+        .filter_map(Result::ok)
+        .collect();
+
+    Ok(messages)
+}
+
+#[tauri::command]
+pub async fn ai_chat_save_message(message: AiChatHistoryMessage) -> Result<(), String> {
+    let conn = crate::commands::knowledge_bank::get_db().lock().unwrap();
+    conn.execute(
+        "INSERT INTO chat_messages (id, role, content) VALUES (?1, ?2, ?3)
+         ON CONFLICT(id) DO UPDATE SET content = excluded.content",
+        rusqlite::params![message.id, message.role, message.content],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn ai_chat_clear_history() -> Result<(), String> {
+    let conn = crate::commands::knowledge_bank::get_db().lock().unwrap();
+    conn.execute("DELETE FROM chat_messages", [])
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 /// Shared HTTP client — connection pooling across requests
 fn http_client() -> reqwest::Client {
     use std::sync::OnceLock;
@@ -67,9 +116,9 @@ pub async fn ai_list_models(
             };
             list_ollama_models(&ep, &api_key).await
         }
-        "gemini" => list_gemini_models(&api_key).await,
-        "anthropic" => list_anthropic_models(&api_key).await,
-        "openai" => list_openai_models(&api_key).await,
+        "gemini" => list_gemini_models(&api_key, &endpoint).await,
+        "anthropic" => list_anthropic_models(&api_key, &endpoint).await,
+        "openai" => list_openai_models(&api_key, &endpoint).await,
         _ => Ok("[]".to_string()),
     }
 }
@@ -105,11 +154,13 @@ async fn list_ollama_models(base_url: &str, api_key: &str) -> Result<String, Str
     serde_json::to_string(&models).map_err(|e| format!("Serialize error: {}", e))
 }
 
-async fn list_gemini_models(api_key: &str) -> Result<String, String> {
-    let url = format!(
-        "https://generativelanguage.googleapis.com/v1beta/models?key={}",
-        api_key
-    );
+async fn list_gemini_models(api_key: &str, endpoint: &str) -> Result<String, String> {
+    let base = if endpoint.is_empty() {
+        "https://generativelanguage.googleapis.com/v1beta"
+    } else {
+        endpoint.trim_end_matches('/')
+    };
+    let url = format!("{}/models?key={}", base, api_key);
 
     let resp = http_client()
         .get(&url)
@@ -149,13 +200,20 @@ async fn list_gemini_models(api_key: &str) -> Result<String, String> {
     serde_json::to_string(&models).map_err(|e| format!("Serialize error: {}", e))
 }
 
-async fn list_anthropic_models(api_key: &str) -> Result<String, String> {
+async fn list_anthropic_models(api_key: &str, endpoint: &str) -> Result<String, String> {
     if api_key.is_empty() {
         return Ok("[]".to_string());
     }
+    
+    let base = if endpoint.is_empty() {
+        "https://api.anthropic.com/v1"
+    } else {
+        endpoint.trim_end_matches('/')
+    };
+    let url = format!("{}/models", base);
 
     let resp = http_client()
-        .get("https://api.anthropic.com/v1/models")
+        .get(&url)
         .header("x-api-key", api_key)
         .header("anthropic-version", "2023-06-01")
         .send()
@@ -182,13 +240,20 @@ async fn list_anthropic_models(api_key: &str) -> Result<String, String> {
     serde_json::to_string(&models).map_err(|e| format!("Serialize error: {}", e))
 }
 
-async fn list_openai_models(api_key: &str) -> Result<String, String> {
+async fn list_openai_models(api_key: &str, endpoint: &str) -> Result<String, String> {
     if api_key.is_empty() {
         return Ok("[]".to_string());
     }
+    
+    let base = if endpoint.is_empty() {
+        "https://api.openai.com/v1"
+    } else {
+        endpoint.trim_end_matches('/')
+    };
+    let url = format!("{}/models", base);
 
     let resp = http_client()
-        .get("https://api.openai.com/v1/models")
+        .get(&url)
         .header("Authorization", format!("Bearer {}", api_key))
         .send()
         .await
@@ -258,8 +323,15 @@ async fn call_anthropic(req: &AiChatRequest) -> Result<String, String> {
         "messages": messages
     });
 
+    let base = if req.endpoint.is_empty() {
+        "https://api.anthropic.com/v1"
+    } else {
+        req.endpoint.trim_end_matches('/')
+    };
+    let url = format!("{}/messages", base);
+
     let resp = http_client()
-        .post("https://api.anthropic.com/v1/messages")
+        .post(&url)
         .header("Content-Type", "application/json")
         .header("x-api-key", &req.api_key)
         .header("anthropic-version", "2023-06-01")
@@ -312,8 +384,15 @@ async fn call_openai(req: &AiChatRequest) -> Result<String, String> {
         "max_tokens": 4096
     });
 
+    let base = if req.endpoint.is_empty() {
+        "https://api.openai.com/v1"
+    } else {
+        req.endpoint.trim_end_matches('/')
+    };
+    let url = format!("{}/chat/completions", base);
+
     let resp = http_client()
-        .post("https://api.openai.com/v1/chat/completions")
+        .post(&url)
         .header("Content-Type", "application/json")
         .header("Authorization", format!("Bearer {}", req.api_key))
         .json(&body)
@@ -377,9 +456,14 @@ async fn call_gemini(req: &AiChatRequest) -> Result<String, String> {
         });
     }
 
+    let base = if req.endpoint.is_empty() {
+        "https://generativelanguage.googleapis.com/v1beta"
+    } else {
+        req.endpoint.trim_end_matches('/')
+    };
     let url = format!(
-        "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent?key={}",
-        req.model, req.api_key
+        "{}/models/{}:generateContent?key={}",
+        base, req.model, req.api_key
     );
 
     let resp = http_client()

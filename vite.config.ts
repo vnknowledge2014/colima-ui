@@ -1,18 +1,18 @@
 import { defineConfig } from "vite";
-import react from "@vitejs/plugin-react";
+import { svelte } from "@sveltejs/vite-plugin-svelte";
 
 // @ts-expect-error process is a nodejs global
 const host = process.env.TAURI_DEV_HOST;
 
 // https://vite.dev/config/
 export default defineConfig(async () => ({
-  plugins: [react()],
+  plugins: [svelte()],
   build: {
     rollupOptions: {
       output: {
         manualChunks(id: string) {
-          if (id.includes('node_modules/react/') || id.includes('node_modules/react-dom/') || id.includes('node_modules/jotai/')) {
-            return 'vendor-react';
+          if (id.includes('node_modules/svelte/')) {
+            return 'vendor-svelte';
           }
           if (id.includes('node_modules/@xterm/')) {
             return 'vendor-xterm';

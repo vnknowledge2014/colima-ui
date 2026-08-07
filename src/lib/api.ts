@@ -670,3 +670,122 @@ export interface SearchResult {
   content: string;
   engine: string;
 }
+
+// ===== System Methods (convenience facade) =====
+
+export const sysMethods = {
+  checkSystem: () =>
+    call<SystemInfo>("check_system", undefined, "GET", "/api/system/check"),
+  systemDf: () =>
+    call<string>("system_df", undefined, "GET", "/api/docker/df"),
+  systemPrune: (all = true) =>
+    call<string>("system_prune", { all }, "POST", "/api/docker/prune"),
+  hostSpecs: () =>
+    call<HostSpecs>("host_specs", undefined, "GET", "/api/system/host-specs"),
+  checkTool: (name: string) =>
+    call<{ installed: boolean; version: string }>(
+      "check_tool", { name }, "GET", "/api/system/check-tool", { name }
+    ),
+  getPlatform: () =>
+    call<PlatformInfo>("get_platform", undefined, "GET", "/api/system/platform"),
+  checkHomebrew: () =>
+    call<{ installed: boolean; version: string }>(
+      "check_homebrew", undefined, "GET", "/api/system/homebrew"
+    ),
+  installDep: (name: "colima" | "docker" | "lima", method = "brew") =>
+    call<{ success: boolean; output: string }>(
+      "install_dependency", { name, method }, "POST", "/api/system/install", undefined, { name, method }
+    ),
+  configureAutostart: (enable: boolean) =>
+    call<string>(
+      "configure_autostart", { enable }, "POST", "/api/system/autostart", undefined, { enable }
+    ),
+  setResourceSaver: (enabled: boolean, idleMinutes: number) =>
+    call<string>(
+      "set_resource_saver", { enabled, idle_minutes: idleMinutes }, "POST", "/api/system/resource-saver", undefined, { enabled, idle_minutes: idleMinutes }
+    ),
+  getRuntimeInfo: () =>
+    call<string>("get_runtime_info", undefined, "GET", "/api/system/runtime"),
+  // Preset snapshots
+  savePresetSnapshot: (presetId: string, profile: string, snapshotJson: string, isAuto = false) =>
+    call<string>("save_preset_snapshot", { preset_id: presetId, profile, snapshot_json: snapshotJson, is_auto: isAuto }, "POST", "/api/presets/snapshot", undefined, { preset_id: presetId, profile, snapshot_json: snapshotJson, is_auto: isAuto }),
+  loadPresetSnapshot: (presetId: string, profile: string) =>
+    call<string>("load_preset_snapshot", { preset_id: presetId, profile }, "GET", "/api/presets/snapshot", { preset_id: presetId, profile }),
+  listAllPresetSnapshots: (profile: string) =>
+    call<string>("list_all_preset_snapshots", { profile }, "GET", "/api/presets/snapshots", { profile }),
+};
+
+// ===== API Token (for SSE/browser mode auth) =====
+
+let _cachedToken = "";
+
+export async function getApiToken(): Promise<string> {
+  if (_cachedToken) return _cachedToken;
+  if (isTauri()) {
+    const invoke = await getInvoke();
+    if (invoke) {
+      try {
+        _cachedToken = (await invoke("get_platform")) as string;
+        // Platform returns object, not token — try fetching from HTTP
+      } catch { /* fall through */ }
+    }
+  }
+  // Fetch token from the public auth endpoint
+  try {
+    const res = await fetch(`${API_BASE}/api/auth/token`);
+    const json = await res.json();
+    if (json.token) {
+      _cachedToken = json.token;
+      return _cachedToken;
+    }
+  } catch { /* ignore */ }
+  return _cachedToken;
+}
+
+// ===== Settings API =====
+
+export const settingsApi = {
+  getAll: () =>
+    call<Record<string, string>>("get_all_settings", undefined, "GET", "/api/settings"),
+  get: (key: string) =>
+    call<string | null>("get_setting", { key }, "GET", "/api/settings", { key }),
+  set: (key: string, value: string) =>
+    call<string>("set_setting", { key, value }, "POST", "/api/settings", undefined, { key, value }),
+};
+
+// ===== Knowledge Bank API =====
+
+export interface AgentMemoryItem {
+  id: string;
+  memory_type: string;
+  content: string;
+  created_at: string;
+}
+
+export const knowledgeBankApi = {
+  query: (errorText: string) =>
+    call<any>("kb_query", { error_text: errorText }, "POST", "/api/kb/query", undefined, { error_text: errorText }),
+  searchMemory: (query: string, limit = 10) =>
+    call<string[]>("search_memory", { query, limit }, "POST", "/api/kb/search", undefined, { query, limit }),
+  getAllMemories: () =>
+    call<AgentMemoryItem[]>("get_all_memories", undefined, "GET", "/api/kb/memories"),
+  updateMemory: (id: string, content: string) =>
+    call<string>("update_memory", { id, content }, "POST", "/api/kb/memories/update", undefined, { id, content }),
+  deleteMemory: (id: string) =>
+    call<string>("delete_memory", { id }, "POST", "/api/kb/memories/delete", undefined, { id }),
+  collectDiagnosticLogs: (profile: string) =>
+    call<string>("collect_diagnostic_logs", { profile }, "GET", "/api/diagnostics/logs", { profile }),
+};
+
+// ===== Shell Sandbox API =====
+
+export const sandboxApi = {
+  execute: (command: string) =>
+    call<{ stdout: string; stderr: string; exit_code: number }>(
+      "sandbox_execute", { command }, "POST", "/api/sandbox/execute", undefined, { command }
+    ),
+  executeApproved: (command: string) =>
+    call<{ stdout: string; stderr: string; exit_code: number }>(
+      "sandbox_execute_approved", { command }, "POST", "/api/sandbox/execute-approved", undefined, { command }
+    ),
+};

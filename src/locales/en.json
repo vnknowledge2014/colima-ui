@@ -1,0 +1,47 @@
+{
+  "getting_started": {
+    "title": "Welcome to Colima UI",
+    "language_select": "Select Language",
+    "next": "Next"
+  },
+  "sidebar": {
+    "overview": "Overview",
+    "dashboard": "Dashboard",
+    "instances": "Colima Instances",
+    "docker": "Docker",
+    "containers": "Containers",
+    "images": "Images",
+    "volumes": "Volumes",
+    "networks": "Networks",
+    "compose": "Compose",
+    "clusters_vms": "Clusters & VMs",
+    "kubernetes": "Kubernetes",
+    "linux_vms": "Linux VMs",
+    "ai_tools": "AI & Tools",
+    "local_ai_models": "Local AI Models",
+    "ai_chat": "AI Assistant",
+    "terminal": "Terminal",
+    "settings": "Settings"
+  },
+  "dashboard": {
+    "title": "Dashboard",
+    "vm_instances": "VM Instances",
+    "running_vms": "Running VMs",
+    "stopped_vms": "Stopped VMs",
+    "total_cpus": "Total CPUs",
+    "total_memory": "Total Memory",
+    "total_disk": "Total Disk",
+    "containers": "Containers",
+    "running": "Running",
+    "stopped": "Stopped",
+    "images": "Images",
+    "volumes": "Volumes",
+    "networks": "Networks",
+    "compose_projects": "Compose Projects",
+    "kubernetes_contexts": "K8s Contexts"
+  },
+  "settings": {
+    "title": "Settings",
+    "language": "Language"
+  }
+}

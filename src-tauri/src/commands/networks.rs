@@ -1,5 +1,4 @@
 use serde::{Deserialize, Serialize};
-use std::process::Command;
 
 /// Docker network info
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -21,22 +20,13 @@ pub struct DockerNetwork {
     pub labels: String,
 }
 
-fn docker_cmd() -> Command {
-    let resolved = crate::path_util::resolve_binary("docker");
-    let mut cmd = Command::new(&resolved);
-    crate::path_util::apply_path_to_cmd(&mut cmd);
-    if let Some(host) = crate::path_util::detect_docker_host() {
-        cmd.env("DOCKER_HOST", host);
-    }
-    cmd
-}
 
 /// Run a Docker CLI command on a blocking thread pool with a 10s timeout.
 async fn docker_output(args: Vec<String>) -> Result<std::process::Output, String> {
     let result = tokio::time::timeout(
         std::time::Duration::from_secs(10),
         tokio::task::spawn_blocking(move || {
-            docker_cmd()
+            crate::commands::runtime::get_runtime_cmd()
                 .args(args.iter().map(|s| s.as_str()).collect::<Vec<&str>>())
                 .output()
                 .map_err(|e| format!("Failed to run docker command: {}", e))
