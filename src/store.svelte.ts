@@ -1,4 +1,4 @@
-import type { ColimaInstance, DockerContainer, DockerImage, DockerVolume, DockerNetwork, LimaInstance } from "./lib/api";
+import type { ColimaInstance, DockerContainer, DockerImage, DockerVolume, DockerNetwork, LimaInstance, SystemInfo } from "./lib/api";
 
 export const dockerState = $state({
   containers: [] as DockerContainer[],
@@ -20,11 +20,13 @@ export const dashboardState = $state({
   k8sStatus: { connected: false, pods: 0, namespaces: 0, kindClusters: 0 },
   linuxVMs: [] as LimaInstance[],
   lastFetch: 0,
+  systemInfo: null as SystemInfo | null,
 });
 
 export const uiState = $state({
   aiPanelOpen: false,
   currentPage: "dashboard",
+  globalError: null as string | null,
 });
 
 export function isEventCooldownActive() {
