@@ -1,0 +1,47 @@
+{
+  "getting_started": {
+    "title": "Colima UI へようこそ",
+    "language_select": "言語を選択",
+    "next": "次へ"
+  },
+  "sidebar": {
+    "overview": "概要",
+    "dashboard": "ダッシュボード",
+    "instances": "Colima インスタンス",
+    "docker": "Docker",
+    "containers": "コンテナ",
+    "images": "イメージ",
+    "volumes": "ボリューム",
+    "networks": "ネットワーク",
+    "compose": "Compose",
+    "clusters_vms": "クラスター & VM",
+    "kubernetes": "Kubernetes",
+    "linux_vms": "Linux VM",
+    "ai_tools": "AI & ツール",
+    "local_ai_models": "ローカルAIモデル",
+    "ai_chat": "AIアシスタント",
+    "terminal": "ターミナル",
+    "settings": "設定"
+  },
+  "dashboard": {
+    "title": "ダッシュボード",
+    "vm_instances": "VMインスタンス",
+    "running_vms": "実行中のVM",
+    "stopped_vms": "停止中のVM",
+    "total_cpus": "合計CPU",
+    "total_memory": "合計メモリ",
+    "total_disk": "合計ディスク",
+    "containers": "コンテナ",
+    "running": "実行中",
+    "stopped": "停止",
+    "images": "イメージ",
+    "volumes": "ボリューム",
+    "networks": "ネットワーク",
+    "compose_projects": "Composeプロジェクト",
+    "kubernetes_contexts": "K8sコンテキスト"
+  },
+  "settings": {
+    "title": "設定",
+    "language": "言語"
+  }
+}

@@ -1,11 +1,13 @@
 import en from '../locales/en.json';
 import vi from '../locales/vi.json';
 import zh from '../locales/zh.json';
+import ja from '../locales/ja.json';
 
 const dictionaries: Record<string, any> = {
   en,
   vi,
-  zh
+  zh,
+  ja
 };
 
 // Global reactive state for current language
