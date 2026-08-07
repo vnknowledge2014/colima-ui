@@ -2,7 +2,7 @@
  * Global Toast Notification System
  * 
  * Module-level event emitter that allows any component (even unmounted ones)
- * to show toast notifications. The toast UI is rendered in App.tsx which
+ * to show toast notifications. The toast UI is rendered in App.svelte which
  * never unmounts, ensuring notifications are always visible.
  */
 
@@ -35,7 +35,7 @@ export function globalToast(type: ToastType, text: string): void {
   }
 }
 
-/** Subscribe to toast events (used by App.tsx) */
+/** Subscribe to toast events (used by App.svelte) */
 export function onToast(fn: ToastListener): () => void {
   _listeners.add(fn);
   return () => _listeners.delete(fn);
