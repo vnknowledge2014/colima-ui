@@ -353,7 +353,7 @@
       {/if}
 
       <div class="dep-list">
-        {#each deps as dep, i}
+        {#each deps as dep, i (dep.name)}
           <div class="dep-row">
             <div class="dep-info">
               <div class="dep-icon {dep.status === 'installed' ? 'installed' : dep.status === 'installing' ? 'installing' : 'missing'}">
@@ -369,10 +369,12 @@
               {#if dep.status === "installed"}
                 <span class="badge badge-running">
                   <span class="badge-dot" style="animation: none;"></span>
-                  Installed
+                  <span>Installed</span>
                 </span>
               {:else if dep.status === "missing"}
-                <span class="badge badge-stopped">Missing</span>
+                <span class="badge badge-stopped">
+                  <span>Missing</span>
+                </span>
                 {#if i === 0}
                   {#if installMethod === "brew" || installMethod === "wsl-brew"}
                     <a href="https://brew.sh" target="_blank" rel="noopener noreferrer" class="btn btn-ghost" style="font-size: var(--text-xs); padding: 2px 8px; text-decoration: none;">Install ↗</a>
@@ -385,11 +387,14 @@
                   <div class="spinner" style="width: 10px; height: 10px; border-width: 1.5px;"></div> Installing...
                 </span>
               {:else if dep.status === "checking"}
-                <span class="badge" style="background: rgba(139,148,158,0.15); color: var(--text-muted);">
-                  <div class="spinner" style="width: 10px; height: 10px; border-width: 1.5px;"></div> Checking
+                <span class="badge" style="background: rgba(139, 148, 158, 0.1); color: var(--text-secondary);">
+                  <div class="spinner" style="width: 10px; height: 10px; border-width: 1.5px;"></div>
+                  <span>Checking</span>
                 </span>
               {:else if dep.status === "failed"}
-                <span class="badge badge-stopped">Failed</span>
+                <span class="badge badge-stopped">
+                  <span>Failed</span>
+                </span>
               {/if}
             </div>
           </div>
@@ -414,7 +419,7 @@
       <div style="margin-top: 20px;">
         <h3 style="font-size: var(--text-sm); color: var(--text-muted); font-weight: 600; margin-bottom: 10px;">Optional Tools</h3>
         <div class="dep-list" style="opacity: 0.85;">
-          {#each optionalTools as tool}
+          {#each optionalTools as tool (tool.name)}
             <div class="dep-row">
               <div class="dep-info">
                 <div class="dep-icon {tool.installed ? 'installed' : 'missing'}">
@@ -427,16 +432,20 @@
               </div>
               <div class="dep-status">
                 {#if tool.version}<span class="dep-version" style="max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{tool.version}</span>{/if}
-                {#if tool.checking}
-                  <span class="badge" style="background: rgba(139,148,158,0.15); color: var(--text-muted);">
-                    <div class="spinner" style="width: 10px; height: 10px; border-width: 1.5px;"></div> Checking
-                  </span>
-                {:else if tool.installed}
+                {#if tool.installed}
                   <span class="badge badge-running">
-                    <span class="badge-dot" style="animation: none;"></span> Installed
+                    <span class="badge-dot" style="animation: none;"></span>
+                    <span>Installed</span>
+                  </span>
+                {:else if !tool.checking}
+                  <span class="badge badge-stopped">
+                    <span>Missing</span>
                   </span>
                 {:else}
-                  <span class="badge" style="background: rgba(139,148,158,0.15); color: var(--text-muted);">Not installed</span>
+                  <span class="badge" style="background: rgba(139, 148, 158, 0.1); color: var(--text-secondary);">
+                    <span class="badge-dot" style="animation: none;"></span>
+                    <span>Checking</span>
+                  </span>
                 {/if}
               </div>
             </div>
