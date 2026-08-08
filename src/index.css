@@ -2,6 +2,7 @@
 
 /* ===== Design Tokens ===== */
 @import "./styles/tokens.css";
+@import "./styles/components.css";
 
 /* ===== Reset ===== */
 *, *::before, *::after {
