@@ -127,13 +127,30 @@ body {
   text-align: left;
 }
 
+.nav-item svg {
+  transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1), color 0.2s;
+}
+
 .nav-item:hover {
-  background: var(--bg-card-hover);
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text-primary);
+}
+
+.nav-item:hover svg {
+  transform: scale(1.15) rotate(-3deg);
   color: var(--text-primary);
 }
 
 .nav-item.active {
-  background: rgba(88, 166, 255, 0.1);
+  background: rgba(88, 166, 255, 0.12);
+  color: var(--accent-blue);
+}
+
+.nav-item.active:hover {
+  background: rgba(88, 166, 255, 0.18);
+}
+
+.nav-item.active:hover svg {
   color: var(--accent-blue);
 }
 
