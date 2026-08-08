@@ -8,6 +8,8 @@
   import AIPanelSettings from "../components/settings/AIPanelSettings.svelte";
   import ResourceSaverSettings from "../components/settings/ResourceSaverSettings.svelte";
 
+  let { systemInfo } = $props<{ systemInfo: SystemInfo | null }>();
+
   // Dependency state
   let diskUsage = $state<DiskUsage[]>([]);
   let pruning = $state(false);
