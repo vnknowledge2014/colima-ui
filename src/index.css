@@ -118,6 +118,13 @@ body {
   text-decoration: none;
   position: relative;
   white-space: nowrap;
+  /* Button reset */
+  background: transparent;
+  border: none;
+  outline: none;
+  appearance: none;
+  font-family: inherit;
+  text-align: left;
 }
 
 .nav-item:hover {
