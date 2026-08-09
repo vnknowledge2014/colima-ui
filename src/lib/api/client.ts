@@ -52,9 +52,15 @@ export async function call<T>(
     url += `?${params.toString()}`;
   }
 
+  const token = await getApiToken();
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (token) {
+    headers["Authorization"] = `Bearer ${token}`;
+  }
+
   const opts: RequestInit = {
     method: httpMethod,
-    headers: { "Content-Type": "application/json" },
+    headers,
   };
   if (httpBody && httpMethod === "POST") {
     opts.body = JSON.stringify(httpBody);
@@ -89,8 +95,10 @@ export async function getApiToken(): Promise<string> {
   try {
     const res = await fetch(`${API_BASE}/api/auth/token`);
     const json = await res.json();
-    if (json.token) {
-      _cachedToken = json.token;
+    // API returns { success: true, data: "token..." }
+    const token = json.token || json.data;
+    if (token) {
+      _cachedToken = token;
       return _cachedToken;
     }
   } catch { /* ignore */ }
