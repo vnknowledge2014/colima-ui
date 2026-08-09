@@ -95,14 +95,15 @@ body {
 }
 
 .sidebar-nav::-webkit-scrollbar {
-  display: none;
-  width: 0;
-  height: 0;
+  display: none !important;
+  width: 0 !important;
+  height: 0 !important;
 }
 
 .sidebar-nav::-webkit-scrollbar-thumb,
 .sidebar-nav::-webkit-scrollbar-track {
-  display: none;
+  display: none !important;
+  background: transparent !important;
 }
 
 .nav-section {
