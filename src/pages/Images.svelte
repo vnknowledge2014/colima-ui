@@ -3,6 +3,7 @@
   import { dockerApi, sysMethods } from "../lib/api";
   import { globalToast } from "../lib/globalToast";
   import { dockerState } from "../store.svelte";
+  import * as Icons from "../components/Icons.svelte";
   import { t } from "../lib/i18n.svelte";
   import { formatTimestamp, formatSize, truncateId } from "../lib/formatters";
 
@@ -241,7 +242,13 @@
     </span>
     {#if runtimeName}
       <span style="font-size: var(--text-xs); background: var(--bg-secondary); border: 1px solid var(--border-primary); padding: 2px 8px; border-radius: 12px; margin-left: 12px; color: var(--text-muted);">
-        {runtimeName === "podman" ? "🦭 Podman" : runtimeName === "containerd" ? "📦 Containerd" : "🐳 Docker"}
+        {#if runtimeName === "podman"}
+          🦭 Podman
+        {:else if runtimeName === "containerd"}
+          📦 Containerd
+        {:else}
+          {@html Icons.Docker} Docker
+        {/if}
       </span>
     {/if}
   </h1>
