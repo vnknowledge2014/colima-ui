@@ -56,6 +56,24 @@
   ]);
 </script>
 
+<style>
+  .sidebar-nav {
+    flex: 1;
+    padding: 8px;
+    overflow-y: auto;
+    /* Hide scrollbar for Firefox and IE */
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+  
+  /* Hide scrollbar for Webkit natively using global */
+  :global(.sidebar-nav::-webkit-scrollbar) {
+    display: none !important;
+    width: 0 !important;
+    height: 0 !important;
+  }
+</style>
+
 <aside class="sidebar">
   <div class="sidebar-header">
     <img src="/colima_icon.png" alt="ColimaUI" class="sidebar-logo" />
