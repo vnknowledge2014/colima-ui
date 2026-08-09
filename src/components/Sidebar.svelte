@@ -2,7 +2,7 @@
   import { onMount } from "svelte";
   import * as Icons from "./Icons.svelte";
   import { uiState } from "../store.svelte";
-  import { setAppSetting } from "../lib/settingsStore.svelte";
+  import { setAppSetting, getAppSetting } from "../lib/settingsStore.svelte";
   import { t } from "../lib/i18n.svelte";
   import type { SystemInfo } from "../lib/api";
 
