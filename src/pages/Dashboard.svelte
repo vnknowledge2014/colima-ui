@@ -329,7 +329,7 @@
               <span class="badge-dot" style="animation: none;"></span>
               <span>{systemInfo.colima_installed ? 'Installed' : 'Not Found'}</span>
             </span>
-            <span style="font-size: var(--text-sm); color: var(--text-secondary);">Colima{systemInfo.colima_version ? ` v${systemInfo.colima_version.split('\n')[0].replace(/^v/, '')}` : ''}</span>
+            <span style="font-size: var(--text-sm); color: var(--text-secondary);">Colima{systemInfo.colima_version ? ` v${systemInfo.colima_version.split('\n')[0].replace(/.*version\s*/i, "")}` : ''}</span>
           </div>
           <div style="display: flex; align-items: center; gap: 10px;">
             <span class="badge {systemInfo.docker_installed ? 'badge-running' : 'badge-stopped'}">
