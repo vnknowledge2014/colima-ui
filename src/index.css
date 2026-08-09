@@ -118,6 +118,8 @@ body {
   text-decoration: none;
   position: relative;
   white-space: nowrap;
+  width: 100%;
+  box-sizing: border-box;
   /* Button reset */
   background: transparent;
   border: none;
