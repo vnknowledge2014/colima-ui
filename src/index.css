@@ -144,8 +144,22 @@ body {
   text-align: left;
 }
 
-.nav-item svg {
+.nav-item > * {
   transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1), color 0.2s;
+}
+
+.nav-item::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%) scaleY(0);
+  width: 3px;
+  height: 60%;
+  background: var(--accent-blue);
+  border-radius: 0 4px 4px 0;
+  transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  transform-origin: center;
 }
 
 .nav-item:hover {
@@ -153,14 +167,25 @@ body {
   color: var(--text-primary);
 }
 
+.nav-item:hover > * {
+  transform: translateX(3px);
+}
+
 .nav-item:hover svg {
-  transform: scale(1.15) rotate(-3deg);
   color: var(--text-primary);
 }
 
 .nav-item.active {
   background: rgba(88, 166, 255, 0.12);
   color: var(--accent-blue);
+}
+
+.nav-item.active::before {
+  transform: translateY(-50%) scaleY(1);
+}
+
+.nav-item.active > * {
+  transform: translateX(3px);
 }
 
 .nav-item.active:hover {
