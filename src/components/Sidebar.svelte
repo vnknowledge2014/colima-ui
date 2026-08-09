@@ -96,7 +96,7 @@
               }
             }}
             data-tour-id={`nav-${item.id}`}
-            data-tooltip={uiState.sidebarCollapsed ? item.label : undefined}
+            title={uiState.sidebarCollapsed ? item.label : undefined}
           >
             {@html item.icon}
             <span class="nav-item-text">{item.label}</span>
@@ -114,20 +114,20 @@
         setAppSetting("colimaui_tour_complete", "false");
         onStartTour();
       }}
-      data-tooltip="Restart tour"
+      title="Restart tour"
     >
       <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
         <path d="M2 3h6a4 4 0 0 1 4 4v14"/><path d="M22 3h-6a4 4 0 0 0-4 4v14"/><polyline points="6 7 2 3 6 -1"/>
       </svg>
       <span class="nav-item-text">Tour Guide</span>
     </button>
-    <div class="nav-item version-info" style="font-size: var(--text-xs); color: var(--text-muted); cursor: default;" data-tooltip={uiState.sidebarCollapsed ? formatTime() : undefined}>
+    <div class="nav-item version-info" style="font-size: var(--text-xs); color: var(--text-muted); cursor: default;" title={uiState.sidebarCollapsed ? formatTime() : undefined}>
       <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
         <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
       </svg>
       <span class="nav-item-text">{formatTime()}</span>
     </div>
-    <div class="nav-item version-info" style="font-size: var(--text-xs); color: var(--text-muted); cursor: default;" data-tooltip={uiState.sidebarCollapsed ? (systemInfo?.colima_version ? `Colima v${systemInfo.colima_version.split('\n')[0].replace(/.*version\s*/i, '')}` : 'Colima not detected') : undefined}>
+    <div class="nav-item version-info" style="font-size: var(--text-xs); color: var(--text-muted); cursor: default;" title={uiState.sidebarCollapsed ? (systemInfo?.colima_version ? `Colima v${systemInfo.colima_version.split('\n')[0].replace(/.*version\s*/i, '')}` : 'Colima not detected') : undefined}>
       <span class="nav-item-text">
       {systemInfo?.colima_version
         ? `Colima v${systemInfo.colima_version.split("\n")[0].replace(/.*version\s*/i, "")}`
@@ -143,7 +143,7 @@
     <button class="nav-item toggle-btn" onclick={() => {
       uiState.sidebarCollapsed = !uiState.sidebarCollapsed;
       setAppSetting("colimaui_sidebar_collapsed", uiState.sidebarCollapsed ? "true" : "false");
-    }} style="margin-top: 8px; justify-content: center; color: var(--text-muted);" data-tooltip={uiState.sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}>
+    }} style="margin-top: 8px; justify-content: center; color: var(--text-muted);" title={uiState.sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}>
       {#if uiState.sidebarCollapsed}
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="13 17 18 12 13 7"/><polyline points="6 17 11 12 6 7"/></svg>
       {:else}
