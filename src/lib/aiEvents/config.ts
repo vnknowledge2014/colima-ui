@@ -49,7 +49,7 @@ export const configRegistry: Record<string, EventHandler> = {
     category: "SAFE",
     description: "Get all application settings and configuration including AI provider/model",
     handler: async () => {
-      if (!(window as any).__TAURI_INTERNALS__) return "[SIMULATED] Returning all settings...";
+      if (!((window as any).__TAURI_INTERNALS__ || (window as any).isTauri)) return "[SIMULATED] Returning all settings...";
       const { invoke } = await import("@tauri-apps/api/core");
       const settings = await invoke("get_all_settings");
       return JSON.stringify(settings, null, 2);
@@ -59,7 +59,7 @@ export const configRegistry: Record<string, EventHandler> = {
     category: "NORMAL",
     description: "Update application settings and configuration",
     handler: async (p) => {
-      if (!(window as any).__TAURI_INTERNALS__) return "[SIMULATED] Config updated.";
+      if (!((window as any).__TAURI_INTERNALS__ || (window as any).isTauri)) return "[SIMULATED] Config updated.";
       const { invoke } = await import("@tauri-apps/api/core");
       const updates = p;
       if (updates.provider) await invoke("set_setting", { key: "ai_provider", value: updates.provider });
@@ -82,7 +82,7 @@ export const configRegistry: Record<string, EventHandler> = {
     category: "SAFE",
     description: "List all saved custom presets",
     handler: async () => {
-      if (!(window as any).__TAURI_INTERNALS__) return "[SIMULATED] Returning presets...";
+      if (!((window as any).__TAURI_INTERNALS__ || (window as any).isTauri)) return "[SIMULATED] Returning presets...";
       const { invoke } = await import("@tauri-apps/api/core");
       const presets = await invoke("get_all_presets");
       return JSON.stringify(presets, null, 2);
@@ -92,7 +92,7 @@ export const configRegistry: Record<string, EventHandler> = {
     category: "NORMAL",
     description: "Save a custom instance preset",
     handler: async (p) => {
-      if (!(window as any).__TAURI_INTERNALS__) return "[SIMULATED] Preset saved.";
+      if (!((window as any).__TAURI_INTERNALS__ || (window as any).isTauri)) return "[SIMULATED] Preset saved.";
       const { invoke } = await import("@tauri-apps/api/core");
       if (!p.id) return "Error: Missing preset id";
       await invoke("save_preset", { id: p.id, configJson: JSON.stringify(p) });
@@ -103,7 +103,7 @@ export const configRegistry: Record<string, EventHandler> = {
     category: "DANGEROUS",
     description: "Delete a custom instance preset",
     handler: async (p) => {
-      if (!(window as any).__TAURI_INTERNALS__) return "[SIMULATED] Preset deleted.";
+      if (!((window as any).__TAURI_INTERNALS__ || (window as any).isTauri)) return "[SIMULATED] Preset deleted.";
       const { invoke } = await import("@tauri-apps/api/core");
       if (!p.id) return "Error: Missing preset id";
       await invoke("delete_preset", { id: p.id });
@@ -115,7 +115,7 @@ export const configRegistry: Record<string, EventHandler> = {
     category: "NORMAL",
     description: "Execute a command through the App CLI gateway",
     handler: async (p) => {
-      if ((window as any).__TAURI_INTERNALS__) {
+      if ((window as any).__TAURI_INTERNALS__ || (window as any).isTauri) {
         const { invoke } = await import("@tauri-apps/api/core");
         try {
           const result = await invoke("execute_shell", { command: p.command, args: p.args || [] });

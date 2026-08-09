@@ -1,7 +1,7 @@
 // ===== Runtime Detection =====
 
 export const isTauri = (): boolean => {
-  return !!(window as any).__TAURI_INTERNALS__;
+  return (!!((window as any).__TAURI_INTERNALS__ || (window as any).isTauri) || !!(window as any).isTauri);
 };
 
 export const API_BASE = "http://127.0.0.1:11420";

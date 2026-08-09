@@ -3,7 +3,7 @@ import { normalizeContainer, normalizeImage } from "./normalizers";
 import { dockerState, resourceState, dashboardState, isEventCooldownActive, uiState } from "../store.svelte";
 import { getAppSetting } from "./settingsStore.svelte";
 
-const isTauri = !!(window as any).__TAURI_INTERNALS__;
+const isTauri = (!!((window as any).__TAURI_INTERNALS__ || (window as any).isTauri) || !!(window as any).isTauri);
 let _refetchRetryCount = 0;
 const MAX_REFETCH_RETRIES = 10;
 let pollInterval: ReturnType<typeof setInterval> | null = null;
