@@ -27,6 +27,7 @@ export const uiState = $state({
   aiPanelOpen: false,
   currentPage: "dashboard",
   globalError: null as string | null,
+  sidebarCollapsed: false,
 });
 
 export function isEventCooldownActive() {

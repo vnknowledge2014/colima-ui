@@ -224,6 +224,40 @@ body {
   border-top: 1px solid var(--border-subtle);
 }
 
+/* ===== Collapsed Sidebar ===== */
+.sidebar.collapsed {
+  width: 64px;
+}
+.sidebar.collapsed .sidebar-title {
+  display: none;
+}
+.sidebar.collapsed .nav-section-label {
+  opacity: 0;
+  height: 0;
+  padding: 0;
+  margin: 0;
+  overflow: hidden;
+}
+.sidebar.collapsed .nav-item {
+  justify-content: center;
+  padding-left: 0;
+  padding-right: 0;
+}
+.sidebar.collapsed .nav-item-text {
+  display: none;
+}
+.sidebar.collapsed .nav-item:hover > * {
+  transform: none; /* disable horizontal shift */
+}
+.sidebar.collapsed .nav-item.active > * {
+  transform: none; /* disable horizontal shift */
+}
+.sidebar.collapsed .version-info {
+  justify-content: center;
+  padding-left: 0;
+  padding-right: 0;
+}
+
 /* ===== Main Content ===== */
 .main-content {
   flex: 1;
