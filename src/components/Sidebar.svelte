@@ -122,17 +122,18 @@
     flex: 1;
     overflow: hidden;
     position: relative;
-    display: flex;
-    flex-direction: column;
+    /* Use block display so child can safely expand past 100% */
+    display: block; 
   }
   .sidebar-nav {
-    flex: 1;
+    height: 100%;
     padding: 8px;
-    padding-right: 28px; /* Extra padding to push the scrollbar off-screen */
-    width: calc(100% + 20px); /* Push the scrollbar outside the wrapper */
+    padding-right: 28px; /* Extra padding to offset the scrollbar */
+    width: calc(100% + 20px); /* Push scrollbar outside the wrapper bounds */
     overflow-y: auto;
     scrollbar-width: none;
     -ms-overflow-style: none;
+    flex-shrink: 0;
   }
   .sidebar-nav::-webkit-scrollbar {
     display: none !important;
