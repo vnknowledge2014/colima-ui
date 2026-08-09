@@ -92,7 +92,7 @@
   </div>
 </div>
 
-<div class="content-body" style="padding: 24px; max-width: 1200px;">
+<div class="content-body" style="padding: 24px;">
   {#if loading}
     <div style="display: flex; justify-content: center; align-items: center; height: 200px;">
       <div class="spinner"></div>

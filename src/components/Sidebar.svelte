@@ -62,31 +62,29 @@
     <h1 class="sidebar-title">ColimaUI</h1>
   </div>
 
-  <div class="sidebar-nav-wrapper">
-    <nav class="sidebar-nav" data-tour-id="sidebar-nav">
-      {#each navGroups as group}
-        <div class="nav-section">
-          <div class="nav-section-label">{group.label}</div>
-          {#each group.items as item}
-            <button
-              class="nav-item {uiState.currentPage === item.id || (item.id === 'ai-chat' && uiState.aiPanelOpen) ? 'active' : ''}"
-              onclick={() => {
-                if (item.id === "ai-chat") {
-                  uiState.aiPanelOpen = !uiState.aiPanelOpen;
-                } else {
-                  uiState.currentPage = item.id;
-                }
-              }}
-              data-tour-id={`nav-${item.id}`}
-            >
-              {@html item.icon}
-              <span>{item.label}</span>
-            </button>
-          {/each}
-        </div>
-      {/each}
-    </nav>
-  </div>
+  <nav class="sidebar-nav" data-tour-id="sidebar-nav">
+    {#each navGroups as group}
+      <div class="nav-section">
+        <div class="nav-section-label">{group.label}</div>
+        {#each group.items as item}
+          <button
+            class="nav-item {uiState.currentPage === item.id || (item.id === 'ai-chat' && uiState.aiPanelOpen) ? 'active' : ''}"
+            onclick={() => {
+              if (item.id === "ai-chat") {
+                uiState.aiPanelOpen = !uiState.aiPanelOpen;
+              } else {
+                uiState.currentPage = item.id;
+              }
+            }}
+            data-tour-id={`nav-${item.id}`}
+          >
+            {@html item.icon}
+            <span>{item.label}</span>
+          </button>
+        {/each}
+      </div>
+    {/each}
+  </nav>
 
   <div class="sidebar-footer">
     <button
@@ -116,28 +114,3 @@
     </div>
   </div>
 </aside>
-
-<style>
-  .sidebar-nav-wrapper {
-    flex: 1;
-    overflow: hidden;
-    position: relative;
-    /* Use block display so child can safely expand past 100% */
-    display: block; 
-  }
-  .sidebar-nav {
-    height: 100%;
-    padding: 8px;
-    padding-right: 28px; /* Extra padding to offset the scrollbar */
-    width: calc(100% + 20px); /* Push scrollbar outside the wrapper bounds */
-    overflow-y: auto;
-    scrollbar-width: none;
-    -ms-overflow-style: none;
-    flex-shrink: 0;
-  }
-  .sidebar-nav::-webkit-scrollbar {
-    display: none !important;
-    width: 0 !important;
-    height: 0 !important;
-  }
-</style>
