@@ -1,3 +1,4 @@
+import { isRunningInTauri } from "../env";
 export type ActionCategory = "SAFE" | "NORMAL" | "DANGEROUS";
 
 export interface EventHandler {

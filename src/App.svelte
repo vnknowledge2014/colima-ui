@@ -26,8 +26,9 @@
   
   import Sidebar from "./components/Sidebar.svelte";
   import ToastContainer from "./components/ToastContainer.svelte";
+  import { isRunningInTauri } from "./lib/env";
 
-  const isTauri = (!!((window as any).__TAURI_INTERNALS__ || (window as any).isTauri) || !!(window as any).isTauri);
+  let isTauri = $state(isRunningInTauri());
 
   let showWizard = $state(false);
   let showTour = $state(false);
@@ -42,6 +43,12 @@
   });
 
   onMount(() => {
+    setTimeout(() => {
+      if (!isTauri) {
+        isTauri = isRunningInTauri();
+      }
+    }, 250);
+
     (async () => {
       await loadAllSettings();
       cleanupPoller = startDataPoller();

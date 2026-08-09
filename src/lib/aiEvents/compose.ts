@@ -1,3 +1,4 @@
+import { isRunningInTauri } from "../env";
 // @ts-nocheck
 import { EventHandler } from "./types";
 import { 
@@ -15,7 +16,7 @@ export const composeRegistry: Record<string, EventHandler> = {
     category: "NORMAL",
     description: "Build or rebuild services in a compose project",
     handler: async (p) => {
-      if ((window as any).__TAURI_INTERNALS__ || (window as any).isTauri) {
+      if (isRunningInTauri()) {
         const { invoke } = await import("@tauri-apps/api/core");
         const args = ["compose"];
         if (p.file) args.push("-f", p.file);
@@ -31,7 +32,7 @@ export const composeRegistry: Record<string, EventHandler> = {
     category: "NORMAL",
     description: "Pull images associated with a compose project",
     handler: async (p) => {
-      if ((window as any).__TAURI_INTERNALS__ || (window as any).isTauri) {
+      if (isRunningInTauri()) {
         const { invoke } = await import("@tauri-apps/api/core");
         const args = ["compose"];
         if (p.file) args.push("-f", p.file);

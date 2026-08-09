@@ -1,3 +1,4 @@
+import { isRunningInTauri } from "../env";
 // @ts-nocheck
 import { EventHandler } from "./types";
 import { 
@@ -68,7 +69,7 @@ export const dockerRegistry: Record<string, EventHandler> = {
     category: "NORMAL",
     description: "Build a docker image from a Dockerfile",
     handler: async (p) => {
-      if ((window as any).__TAURI_INTERNALS__ || (window as any).isTauri) {
+      if (isRunningInTauri()) {
         const { invoke } = await import("@tauri-apps/api/core");
         const args = ["build"];
         if (p.tag) { args.push("-t", p.tag); }

@@ -50,21 +50,21 @@ body {
 }
 
 .sidebar-header {
-  padding: 16px;
+  padding: 16px 20px;
   display: flex;
   align-items: center;
-  justify-content: center;
-  gap: 10px;
+  justify-content: flex-start;
+  gap: 12px;
   border-bottom: 1px solid var(--border-subtle);
-  height: var(--header-height);
+  height: 68px;
   -webkit-app-region: drag;
 }
 
 /* Extra padding for macOS traffic lights in Tauri overlay mode */
 .tauri-app .sidebar-header {
-  padding-top: 40px;
+  padding-top: 44px;
   padding-bottom: 12px;
-  height: 84px;
+  height: 92px;
 }
 
 .sidebar-logo {
