@@ -33,11 +33,15 @@
   let showWizard = $state(false);
   let showTour = $state(false);
   let cleanupPoller: (() => void) | null = null;
+  // Guard: don't persist currentPage until after onMount has restored the saved tab.
+  // Without this, $effect runs immediately with the default "dashboard" value and
+  // overwrites the localStorage entry before onMount can read it.
+  let _pagePersistEnabled = false;
 
-  // Persist active tab so browser refresh restores the same page
+  // Persist active tab across browser refreshes using localStorage
   $effect(() => {
-    if (uiState.currentPage) {
-      sessionStorage.setItem("colima_active_page", uiState.currentPage);
+    if (_pagePersistEnabled && uiState.currentPage) {
+      localStorage.setItem("colima_active_page", uiState.currentPage);
     }
   });
 
@@ -50,11 +54,13 @@
   });
 
   onMount(() => {
-    // Restore saved page on load (web browser refresh)
-    const savedPage = sessionStorage.getItem("colima_active_page");
+    // Restore saved page on load — MUST happen before enabling the persist effect
+    const savedPage = localStorage.getItem("colima_active_page");
     if (savedPage && savedPage !== "dashboard") {
       uiState.currentPage = savedPage;
     }
+    // Now safe to start persisting changes
+    _pagePersistEnabled = true;
 
     setTimeout(() => {
       if (!isTauri) {
@@ -155,4 +161,9 @@
   <AiChatPanel />
   <ConfirmDialog />
 </div>
+
+<!-- ToastContainer is rendered OUTSIDE .app-layout to avoid stacking context
+     issues from backdrop-filter on modal-overlay. This guarantees
+     z-index: 99999 is always above modals and overlays. -->
+<ToastContainer />
 </ErrorBoundary>
