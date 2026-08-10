@@ -14,17 +14,17 @@
   let diskUsage = $state<DiskUsage[]>([]);
   let pruning = $state(false);
 
-  async function fetchDiskUsage() {
-
   onMount(() => {
     fetchDiskUsage();
   });
+
+  async function fetchDiskUsage() {
     try {
       const raw = await dockerApi.systemDf();
       if (!raw) return;
       const text = typeof raw === 'string' ? raw : String(raw);
       const lines = text.split("\n").filter(l => l.trim());
-      const rows: DiskUsage[] = [];
+      const rows: any[] = [];
       for (const line of lines) {
         if (line.startsWith("TYPE") || line.startsWith("---")) continue;
         const parts = line.split(/\s{2,}/);
@@ -57,17 +57,18 @@
     }
   }
 
+  // Fix: use version string presence as fallback for installed status in case backend boolean is unreliable
   const deps = $derived([
-    { name: "Colima", desc: "Container runtime manager", installed: systemInfo?.colima_installed, version: systemInfo?.colima_version },
-    { name: "Docker", desc: "Container engine client", installed: systemInfo?.docker_installed, version: systemInfo?.docker_version },
-    { name: "Lima", desc: "Linux virtual machine manager", installed: systemInfo?.lima_installed, version: systemInfo?.lima_version },
+    { name: "Colima", desc: "Container runtime manager", installed: systemInfo?.colima_installed === true || !!(systemInfo?.colima_version), version: systemInfo?.colima_version },
+    { name: "Docker", desc: "Container engine client", installed: systemInfo?.docker_installed === true || !!(systemInfo?.docker_version), version: systemInfo?.docker_version },
+    { name: "Lima", desc: "Linux virtual machine manager", installed: systemInfo?.lima_installed === true || !!(systemInfo?.lima_version), version: systemInfo?.lima_version },
   ]);
 </script>
 
 <div class="content-header">
   <div>
-    <h1 class="page-title">{t('settings.title', { default: 'Settings' })}</h1>
-    <div class="page-subtitle" style="font-size: var(--text-sm); color: var(--text-secondary); margin-top: 4px;">Configure ColimaUI, AI behavior, and resources</div>
+    <h1>{t('settings.title', { default: 'Settings' })}</h1>
+    <div class="content-header-subtitle">{t('settings.subtitle', { default: 'Configure ColimaUI, AI behavior, and resources' })}</div>
   </div>
 </div>
 
@@ -87,7 +88,8 @@
               <div style="font-weight: 500;">{t('settings.language', { default: 'Language' })}</div>
               <div style="font-size: var(--text-sm); color: var(--text-secondary); margin-top: 2px;">{t('settings.language_desc', { default: 'Change the application language' })}</div>
             </div>
-            <select class="input" style="width: 200px;" value={getLanguage()} onchange={(e) => {
+            <!-- Fix: .select adds proper arrow icon + appearance:none styling -->
+            <select class="input select" style="width: 200px;" value={getLanguage()} onchange={(e) => {
               setLanguage(e.currentTarget.value);
             }}>
               <option value="en">English</option>
@@ -112,7 +114,7 @@
           </div>
           <div style="text-align: right;">
             <span class="badge {dep.installed ? 'badge-running' : 'badge-stopped'}">
-              {dep.installed ? "Installed" : "Not Found"}
+              {dep.installed ? "INSTALLED" : "NOT FOUND"}
             </span>
             {#if dep.version}
               <div style="font-size: var(--text-xs); color: var(--text-muted); font-family: var(--font-mono); margin-top: 4px;">

@@ -34,6 +34,13 @@
   let showTour = $state(false);
   let cleanupPoller: (() => void) | null = null;
 
+  // Persist active tab so browser refresh restores the same page
+  $effect(() => {
+    if (uiState.currentPage) {
+      sessionStorage.setItem("colima_active_page", uiState.currentPage);
+    }
+  });
+
   $effect(() => {
     if (appState.isSettingsLoaded) {
       if (getAppSetting("colimaui_setup_complete") !== "true" && !showWizard && !showTour) {
@@ -43,6 +50,12 @@
   });
 
   onMount(() => {
+    // Restore saved page on load (web browser refresh)
+    const savedPage = sessionStorage.getItem("colima_active_page");
+    if (savedPage && savedPage !== "dashboard") {
+      uiState.currentPage = savedPage;
+    }
+
     setTimeout(() => {
       if (!isTauri) {
         isTauri = isRunningInTauri();

@@ -171,6 +171,25 @@
   font-weight: 600;
 }
 
+.content-header-subtitle {
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  margin-top: 2px;
+}
+
+/* When header contains subtitle, use auto height instead of fixed */
+.content-header:has(.content-header-subtitle) {
+  height: auto;
+  padding-top: 14px;
+  padding-bottom: 14px;
+}
+
+.tauri-app .content-header:has(.content-header-subtitle) {
+  padding-top: 44px;
+  padding-bottom: 14px;
+  height: auto;
+}
+
 .content-header-actions {
   display: flex;
   gap: 8px;

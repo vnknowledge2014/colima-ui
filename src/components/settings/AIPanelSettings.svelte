@@ -88,7 +88,11 @@
     } catch (e) {
       searxngStatus = "fail";
       const msg = String(e);
-      if (msg.includes("429") || msg.includes("Too Many")) {
+      if (msg.includes("Failed to fetch") || msg.includes("NetworkError") || msg.includes("fetch")) {
+        // This typically means the backend server (Rust) is not running when in web mode
+        // or the backend itself cannot reach SearXNG instances
+        searxngError = "Cannot connect to backend — is ColimaUI server running?";
+      } else if (msg.includes("429") || msg.includes("Too Many")) {
         searxngError = "Rate limited (429) — all instances busy";
       } else if (msg.includes("Connection refused") || msg.includes("connection refused")) {
         searxngError = "Connection refused — is SearXNG running?";
