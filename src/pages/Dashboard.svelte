@@ -86,7 +86,7 @@
 
 
 
-<div class="content-header">
+<div class="content-header" data-tauri-drag-region>
   <div class="header-left">
     <h1>{t('dashboard.title', { default: 'Dashboard' })}</h1>
   </div>

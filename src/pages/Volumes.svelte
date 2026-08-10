@@ -173,7 +173,7 @@
 
 </script>
 
-<div class="content-header">
+<div class="content-header" data-tauri-drag-region>
   <h1>
     {t('volumes.title', { default: 'Volumes' })}
     <span style="font-size: var(--text-sm); color: var(--text-muted); font-weight: 400; margin-left: 12px;">

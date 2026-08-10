@@ -201,13 +201,13 @@
 </script>
 
 {#if loading}
-  <div class="content-header"><h1>{t('linux_vms.loading_title', { default: 'Linux VMs' })}</h1></div>
+  <div class="content-header" data-tauri-drag-region><h1>{t('linux_vms.loading_title', { default: 'Linux VMs' })}</h1></div>
   <div class="loading-screen">
     <div class="spinner"></div>
     <span>{t('linux_vms.loading', { default: 'Loading VMs...' })}</span>
   </div>
 {:else}
-  <div class="content-header">
+  <div class="content-header" data-tauri-drag-region>
     <h1>
       {t('linux_vms.title', { default: 'Linux VMs (Lima)' })}
       <span

@@ -65,7 +65,7 @@
   ]);
 </script>
 
-<div class="content-header">
+<div class="content-header" data-tauri-drag-region>
   <div>
     <h1>{t('settings.title', { default: 'Settings' })}</h1>
     <div class="content-header-subtitle">{t('settings.subtitle', { default: 'Configure ColimaUI, AI behavior, and resources' })}</div>

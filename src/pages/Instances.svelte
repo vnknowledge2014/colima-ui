@@ -259,7 +259,7 @@ Format: {"minimal": {"cpus": N, "memory": N, "disk": N}, ...}`;
   let allPresets = $derived([...BUILT_IN_PRESETS, ...customPresets]);
 </script>
 
-<div class="content-header">
+<div class="content-header" data-tauri-drag-region>
   <h1>
     {t('instances.title', { default: 'Instances' })}
     <span style="font-size: var(--text-sm); color: var(--text-muted); font-weight: 400; margin-left: 12px;">

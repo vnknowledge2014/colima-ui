@@ -57,7 +57,7 @@ body {
   gap: 12px;
   border-bottom: 1px solid var(--border-subtle);
   height: 68px;
-  -webkit-app-region: drag;
+  -webkit-app-region: drag; /* NOTE: Electron-only, ignored by WKWebView. Drag handled by data-tauri-drag-region attribute. */
 }
 
 /* Extra padding for macOS traffic lights in Tauri overlay mode */
@@ -278,7 +278,7 @@ body {
   height: var(--header-height);
   flex-shrink: 0;
   background: var(--bg-content);
-  -webkit-app-region: drag;
+  -webkit-app-region: drag; /* NOTE: Electron-only, ignored by WKWebView. Drag handled by data-tauri-drag-region attribute. */
 }
 
 /* Extra padding for macOS overlay title bar in Tauri */
@@ -315,7 +315,7 @@ body {
 .content-header-actions {
   display: flex;
   gap: 8px;
-  -webkit-app-region: no-drag;
+  /* -webkit-app-region: no-drag; — Electron-only, not needed for Tauri WKWebView */
 }
 
 .content-body {
