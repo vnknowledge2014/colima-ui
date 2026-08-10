@@ -64,15 +64,15 @@
   ]);
 </script>
 
-<div class="page">
-  <div class="page-header" style="justify-content: space-between;">
-    <div>
-      <h1 class="page-title">{t('settings.title', { default: 'Settings' })}</h1>
-      <div class="page-subtitle">Configure ColimaUI, AI behavior, and resources</div>
-    </div>
+<div class="content-header">
+  <div>
+    <h1 class="page-title">{t('settings.title', { default: 'Settings' })}</h1>
+    <div class="page-subtitle" style="font-size: var(--text-sm); color: var(--text-secondary); margin-top: 4px;">Configure ColimaUI, AI behavior, and resources</div>
   </div>
-  
-  <div class="page-content" style="max-width: 800px; padding-bottom: 60px;">
+</div>
+
+<div class="content-body">
+  <div style="max-width: 800px; padding-bottom: 60px;">
   
     <!-- Appearance Settings -->
     <div class="card" style="margin-bottom: 24px; padding: 0;">
@@ -141,6 +141,6 @@
       <span class="badge" style="background: rgba(255, 62, 0, 0.1); color: #ff3e00;">Svelte 5</span>
       <span class="badge" style="background: rgba(63,185,80,0.1); color: var(--accent-green);">Rust</span>
     </div>
+    </div>
   </div>
-</div>
 </div>
