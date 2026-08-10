@@ -68,21 +68,23 @@ body {
 }
 
 .sidebar-logo {
-  width: 36px;
-  height: 36px;
-  border-radius: var(--radius-sm);
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-md);
   object-fit: contain;
   flex-shrink: 0;
+  box-shadow: 0 2px 8px rgba(96, 165, 250, 0.2);
 }
 
 .sidebar-title {
-  font-weight: 600;
+  font-weight: 700;
   font-size: var(--text-lg);
   white-space: nowrap;
-  background: linear-gradient(135deg, var(--accent-blue), var(--accent-purple));
+  background: linear-gradient(135deg, var(--accent-blue) 0%, var(--accent-purple) 100%);
   -webkit-background-clip: text;
   background-clip: text;
   -webkit-text-fill-color: transparent;
+  letter-spacing: -0.01em;
 }
 
 .sidebar-nav {
@@ -176,7 +178,7 @@ body {
 }
 
 .nav-item.active {
-  background: rgba(88, 166, 255, 0.12);
+  background: rgba(96, 165, 250, 0.12);
   color: var(--accent-blue);
 }
 
@@ -203,9 +205,9 @@ body {
   top: 50%;
   transform: translateY(-50%);
   width: 3px;
-  height: 16px;
-  background: var(--accent-blue);
-  border-radius: 0 2px 2px 0;
+  height: 18px;
+  background: linear-gradient(to bottom, var(--accent-blue), var(--accent-purple));
+  border-radius: 0 3px 3px 0;
 }
 
 .nav-icon {
