@@ -148,10 +148,20 @@
     
     const customPresets = JSON.parse(getAppSetting("ColimaCustomProfiles", "[]"));
     
-    await runAgent(text, config, callbacks, [...aiState.messages], appContext, customPresets);
-    
-    aiState.isProcessing = false;
-    statusText = "";
+    try {
+      await runAgent(text, config, callbacks, [...aiState.messages], appContext, customPresets);
+    } catch (e: any) {
+      // Surface agent errors as a chat bubble instead of crashing / leaking to toast
+      const msg = e?.message || String(e) || "Unknown error occurred";
+      pushAiMessage({
+        id: Date.now().toString(),
+        role: "assistant",
+        content: `⚠️ **Agent error:** ${msg}\n\nIf this persists, check your AI provider settings.`,
+      });
+    } finally {
+      aiState.isProcessing = false;
+      statusText = "";
+    }
   }
 
   function handleClear() {

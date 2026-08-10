@@ -16,11 +16,12 @@ import { aiApi } from "../lib/api";
 export async function initAiHistory() {
   try {
     const history = await aiApi.loadHistory();
-    if (history && history.length > 0) {
+    if (Array.isArray(history) && history.length > 0) {
       aiState.messages = history as AiMessage[];
     }
   } catch (e) {
-    console.error("Failed to load AI chat history:", e);
+    // Graceful degradation — chat history simply starts empty
+    console.warn("AI chat history unavailable (backend may not support it yet):", e);
   }
 }
 
@@ -28,8 +29,8 @@ export async function pushAiMessage(msg: AiMessage) {
   aiState.messages.push(msg);
   try {
     await aiApi.saveMessage(msg);
-  } catch (e) {
-    console.error("Failed to save AI chat message:", e);
+  } catch {
+    // Non-fatal — message is shown in UI regardless
   }
 }
 
@@ -38,7 +39,7 @@ export async function clearAiHistory() {
   aiState.errorCount = 0;
   try {
     await aiApi.clearHistory();
-  } catch (e) {
-    console.error("Failed to clear AI chat history:", e);
+  } catch {
+    // Non-fatal
   }
 }

@@ -283,8 +283,9 @@ Built-in Presets: ${JSON.stringify(BUILT_IN_PRESETS)}
         try {
           const refContent = await aiApi.readReference(path.trim());
           toolContext += `\n\n### Reference: ${path}\n${refContent}\n`;
-        } catch (e) {
-          toolContext += `\n(Failed to read reference ${path}: ${e})\n`;
+        } catch {
+          // readReference endpoint may not be implemented yet — skip gracefully
+          toolContext += `\n(Reference ${path} unavailable)\n`;
         }
       }
 

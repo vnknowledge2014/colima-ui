@@ -35,6 +35,22 @@ export const aiApi = {
     }),
   getAppContext: () =>
     call<string>("get_app_context", {}, "GET", "/api/ai/context"),
+
+  // ── Chat History persistence ──────────────────────────────────────────────
+  // These endpoints persist the chat log across sessions via the Rust backend.
+  // They gracefully return empty/no-op results if the backend is unavailable.
+  loadHistory: () =>
+    call<any[]>("load_ai_history", {}, "GET", "/api/ai/history").catch(() => [] as any[]),
+
+  saveMessage: (msg: { id: string; role: string; content: string }) =>
+    call<void>("save_ai_message", { msg }, "POST", "/api/ai/history/message", undefined, { msg }).catch(() => {}),
+
+  clearHistory: () =>
+    call<void>("clear_ai_history", {}, "DELETE", "/api/ai/history").catch(() => {}),
+
+  // ── Reference file reader (used by agentCore for @read_reference tool) ────
+  readReference: (path: string) =>
+    call<string>("read_reference_file", { path }, "POST", "/api/ai/read-reference", undefined, { path }),
 };
 
 export interface SearchResult {
