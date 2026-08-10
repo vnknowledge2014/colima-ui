@@ -65,12 +65,13 @@
 }
 
 .sidebar-logo {
-  width: 32px;
-  height: 32px;
+  width: 28px;
+  height: 28px;
   border-radius: var(--radius-md);
   object-fit: contain;
   flex-shrink: 0;
-  box-shadow: 0 2px 8px rgba(96, 165, 250, 0.2);
+  /* PNG has a dark background — use mix-blend-mode to make it transparent on the dark sidebar */
+  mix-blend-mode: lighten;
 }
 
 .sidebar-title {
