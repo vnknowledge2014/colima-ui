@@ -33,14 +33,12 @@
   let showWizard = $state(false);
   let showTour = $state(false);
   let cleanupPoller: (() => void) | null = null;
-  // Guard: don't persist currentPage until after onMount has restored the saved tab.
-  // Without this, $effect runs immediately with the default "dashboard" value and
-  // overwrites the localStorage entry before onMount can read it.
-  let _pagePersistEnabled = false;
 
-  // Persist active tab across browser refreshes using localStorage
+  // Sync current tab to localStorage on every navigation so the store can
+  // restore it on next load. The initial value is already set from localStorage
+  // in store.svelte.ts (module-level, before any reactivity).
   $effect(() => {
-    if (_pagePersistEnabled && uiState.currentPage) {
+    if (uiState.currentPage) {
       localStorage.setItem("colima_active_page", uiState.currentPage);
     }
   });
@@ -54,14 +52,6 @@
   });
 
   onMount(() => {
-    // Restore saved page on load — MUST happen before enabling the persist effect
-    const savedPage = localStorage.getItem("colima_active_page");
-    if (savedPage && savedPage !== "dashboard") {
-      uiState.currentPage = savedPage;
-    }
-    // Now safe to start persisting changes
-    _pagePersistEnabled = true;
-
     setTimeout(() => {
       if (!isTauri) {
         isTauri = isRunningInTauri();
