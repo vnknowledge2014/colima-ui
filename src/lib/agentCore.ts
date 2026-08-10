@@ -29,10 +29,24 @@ export async function runAgent(
 ): Promise<void> {
   const { provider, model, apiKey, endpoint } = config;
 
-  if (!apiKey && provider !== "ollama-local") {
-    callbacks.onMessage({ id: Date.now().toString(), role: "system", content: "⚠️ API Key not configured." });
+  // ── Pre-flight validation ──────────────────────────────────────────────────
+  if (!provider) {
+    callbacks.onMessage({ id: Date.now().toString(), role: "system", content: "⚠️ No AI provider configured. Go to **Settings → AI & Diagnostics** to configure one." });
     return;
   }
+  if (!model) {
+    callbacks.onMessage({ id: Date.now().toString(), role: "system", content: "⚠️ No AI model selected. Go to **Settings → AI & Diagnostics** and pick a model." });
+    return;
+  }
+  if (!apiKey && provider !== "ollama-local" && provider !== "ollama-cloud") {
+    callbacks.onMessage({ id: Date.now().toString(), role: "system", content: "⚠️ API Key not configured. Go to **Settings → AI & Diagnostics** to add your API key." });
+    return;
+  }
+  if ((provider === "ollama-cloud") && !endpoint) {
+    callbacks.onMessage({ id: Date.now().toString(), role: "system", content: "⚠️ Ollama Cloud requires an **Endpoint URL**. Go to **Settings → AI & Diagnostics** and set the endpoint (e.g. `https://your-ollama-host.com`)." });
+    return;
+  }
+  // ─────────────────────────────────────────────────────────────────────────
 
   let kbContext = "";
   try {

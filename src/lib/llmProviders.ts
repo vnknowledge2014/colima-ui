@@ -68,19 +68,25 @@ export async function chatStream(
   }
 
   const fetchFn = await getFetch();
-  const response = await fetchFn(url, {
-    method: "POST",
-    headers,
-    body: JSON.stringify(body),
-  });
-
-  if (!response.ok) {
-    throw new Error(`HTTP Error ${response.status}: ${await response.text()}`);
+  let response: Response;
+  try {
+    response = await fetchFn(url, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(body),
+    });
+  } catch (networkErr: any) {
+    // TypeError: Failed to fetch / net::ERR_NAME_NOT_RESOLVED / etc.
+    throw new Error(`Cannot connect to ${provider} at ${url.replace(/\?.*/, "")}. Check your Endpoint URL in Settings.\n(${networkErr?.message || networkErr})`);
   }
 
-  if (!response.body) throw new Error("No response body");
+  if (!response!.ok) {
+    throw new Error(`HTTP Error ${response!.status}: ${await response!.text()}`);
+  }
 
-  const reader = response.body.getReader();
+  if (!response!.body) throw new Error("No response body");
+
+  const reader = response!.body!.getReader();
   const decoder = new TextDecoder("utf-8");
 
   if (isGemini) {
