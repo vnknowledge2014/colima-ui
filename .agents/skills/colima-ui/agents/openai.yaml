@@ -1,0 +1,6 @@
+interface:
+  display_name: "Colima Ui"
+  short_description: "Repo-specific patterns and workflows for colima-ui"
+  default_prompt: "Use the colima-ui repo skill to follow existing architecture, testing, and workflow conventions."
+policy:
+  allow_implicit_invocation: true
