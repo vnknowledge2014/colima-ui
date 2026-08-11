@@ -24,6 +24,9 @@ use commands::colima;
 use commands::compose;
 use commands::containers;
 use commands::runtime;
+use commands::k8s_cluster;
+use commands::k8s_resources;
+use commands::kind;
 use commands::knowledge_bank;
 use commands::kubernetes;
 use commands::lima;
@@ -184,11 +187,40 @@ pub fn run() {
             kubernetes::k8s_pod_logs,
             kubernetes::k8s_delete_pod,
             kubernetes::k8s_describe,
+            kubernetes::k8s_exec,
+            // Resource-scoped k8s operations. These shipped as HTTP routes
+            // only, so they worked in browser mode and failed in the app.
+            k8s_resources::k8s_apply,
+            k8s_resources::k8s_yaml,
+            k8s_resources::k8s_delete_resource,
+            k8s_resources::k8s_restart,
+            k8s_resources::k8s_generic_scale,
+            k8s_resources::k8s_crds,
+            k8s_resources::k8s_crd_resources,
+            k8s_resources::k8s_pod_containers,
+            k8s_resources::k8s_container_logs,
+            // Cluster-scoped k8s operations.
+            k8s_cluster::k8s_contexts,
+            k8s_cluster::k8s_current_context,
+            k8s_cluster::k8s_set_context,
+            k8s_cluster::k8s_nodes_json,
+            k8s_cluster::k8s_events_json,
+            k8s_cluster::k8s_node_action,
+            k8s_cluster::k8s_pf_list,
+            k8s_cluster::k8s_pf_start,
+            k8s_cluster::k8s_pf_stop,
+            k8s_cluster::k8s_cluster_health,
+            k8s_cluster::k8s_benchmark,
+            // kind clusters.
+            kind::kind_list,
+            kind::kind_create,
+            kind::kind_delete,
             kubernetes::k8s_scale,
             kubernetes::k8s_nodes,
             kubernetes::k8s_events,
             kubernetes::k8s_resources,
             // Lima commands
+            lima::lima_create,
             lima::lima_list,
             lima::lima_start,
             lima::lima_stop,

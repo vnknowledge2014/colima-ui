@@ -84,6 +84,32 @@ docker system prune -a --volumes
 Nếu vẫn đầy, tăng dung lượng disk ở Settings → Colima Config. Disk chỉ có thể
 lớn lên, không thu nhỏ lại được.
 
+## Error getting credentials
+
+**Triệu chứng.** Kéo image thất bại — trong app hoặc trên dòng lệnh — với
+thông báo *error getting credentials — err: exec:
+"docker-credential-osxkeychain": executable file not found in $PATH*.
+
+**Nguyên nhân.** `~/.docker/config.json` khai `"credsStore": "osxkeychain"`,
+yêu cầu Docker CLI đọc credential của registry qua một binary helper. Helper đó
+do Docker Desktop cung cấp; gỡ Docker Desktop sẽ để lại thiết lập này mà không
+còn binary. Khi đó mọi lần pull đều lỗi, kể cả pull ẩn danh image công khai —
+CLI gọi helper trước khi biết có cần credential hay không.
+
+**Cách sửa.** Cài lại helper.
+
+```bash
+brew install docker-credential-helper
+```
+
+Lệnh này đặt `docker-credential-osxkeychain` vào `/opt/homebrew/bin` — thư
+mục ColimaUI vốn đã đưa vào PATH cấp cho tiến trình con, nên app nhận ra ngay
+mà không cần cấu hình thêm. Credential vẫn nằm trong Keychain của macOS.
+
+Xoá dòng `"credsStore"` khỏi `~/.docker/config.json` cũng khiến pull chạy
+lại, nhưng nên tránh: sau đó `docker login` sẽ ghi credential dạng văn bản
+thuần vào chính file này.
+
 ## Liên quan
 
 - [Khởi động instance Colima](start-colima)

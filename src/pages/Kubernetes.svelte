@@ -5,6 +5,7 @@
   import { t } from "../lib/i18n.svelte";
   import ContextMenu from "../components/ContextMenu.svelte";
   import KubernetesHealth from "../components/KubernetesHealth.svelte";
+  import K8sOverview from "../components/K8sOverview.svelte";
   import { confirm } from "../store/confirm.svelte";
   import { k8sState, type K8sResource } from "../store/k8s.svelte";
   import { openTerminalSession } from "../store.svelte";
@@ -56,6 +57,15 @@
 
   const RESOURCE_GROUPS = [
     {
+      label: "Cluster",
+      items: [
+        { id: "nodes", label: "Nodes", resource: "nodes" },
+        { id: "events", label: "Events", resource: "events" },
+        { id: "namespaces", label: "Namespaces", resource: "namespaces" },
+        { id: "health", label: "Health", resource: "" },
+      ],
+    },
+    {
       label: "Workloads",
       items: [
         { id: "topology", label: "Cluster Topology", resource: "topology" },
@@ -88,15 +98,6 @@
       items: [
         { id: "pv", label: "PV", resource: "persistentvolumes" },
         { id: "pvc", label: "PVC", resource: "persistentvolumeclaims" },
-      ],
-    },
-    {
-      label: "Cluster",
-      items: [
-        { id: "nodes", label: "Nodes", resource: "nodes" },
-        { id: "events", label: "Events", resource: "events" },
-        { id: "namespaces", label: "Namespaces", resource: "namespaces" },
-        { id: "health", label: "Health", resource: "" },
       ],
     },
   ];
@@ -133,15 +134,27 @@
     try {
       const ctxRaw = await k8sApi.contexts();
       const ctxList = ctxRaw.trim().split("\n").filter(Boolean);
-      if (ctxList.length > 0) k8sState.contexts = ctxList;
-      const cur = await k8sApi.currentContext();
-      k8sState.currentCtx = cur.trim();
+      // Always overwrite: when no contexts remain, drop stale entries
+      // instead of keeping the previous list (e.g. an OrbStack context
+      // lingering after the instance was removed).
+      k8sState.contexts = ctxList;
+      try {
+        const cur = await k8sApi.currentContext();
+        k8sState.currentCtx = cur.trim();
+      } catch {
+        // No current context (e.g. kubeconfig cleaned up after the last
+        // cluster was deleted) — clear the stale value so the UI does not
+        // keep showing a context that no longer exists.
+        k8sState.currentCtx = "";
+      }
       kubectlMissing = false;
     } catch (e) {
       if (String(e).includes("not installed")) {
         kubectlMissing = true;
         k8sState.connected = false;
         k8sState.loading = false;
+        k8sState.contexts = [];
+        k8sState.currentCtx = "";
         return;
       }
     }
@@ -505,22 +518,34 @@
 
   <div class="content-body" style="display: flex; gap: 0;">
     <!-- Resource sidebar -->
-    <div style="width: 180px; min-width: 180px; border-right: 1px solid var(--border-primary); padding-right: 12px; margin-right: 16px; overflow-y: auto;">
+    <div style="width: 180px; min-width: 180px; border-right: 1px solid var(--border-primary); padding: 8px 0 16px; margin-right: 16px; overflow-y: auto;">
+      <div style="margin-bottom: 16px;">
+        <button onclick={() => { k8sState.activeResource = "overview"; k8sState.items = []; filter = ""; }} class="k8s-nav-item" style="background: {activeResource === 'overview' ? 'rgba(88,166,255,0.12)' : 'transparent'}; color: {activeResource === 'overview' ? 'var(--accent-blue)' : 'var(--text-secondary)'}; font-weight: {activeResource === 'overview' ? 600 : 400};">
+          Overview
+        </button>
+      </div>
       {#each RESOURCE_GROUPS as group}
-        <div style="margin-bottom: 12px;">
-          <div style="font-size: var(--text-xs); color: var(--text-muted); font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 4px; padding: 0 8px;">{group.label}</div>
+        {@const groupActive = group.items.some(i => i.id === activeResource)}
+        <div style="margin-bottom: 16px;">
+          <div class="k8s-group-label" style="color: {groupActive ? 'var(--accent-blue)' : 'var(--text-muted)'};">
+            <span class="k8s-group-bar" style="background: {groupActive ? 'var(--accent-blue)' : 'transparent'}; box-shadow: {groupActive ? '0 0 6px var(--accent-blue)' : 'none'};"></span>
+            {group.label}
+          </div>
           {#each group.items as item}
-            <button onclick={() => { k8sState.activeResource = item.id; k8sState.items = []; filter = ""; }} style="display: block; width: 100%; text-align: left; padding: 5px 8px; background: {activeResource === item.id ? 'rgba(88,166,255,0.1)' : 'transparent'}; border: none; border-radius: 6px; cursor: pointer; font-size: var(--text-sm); color: {activeResource === item.id ? 'var(--accent-blue)' : 'var(--text-secondary)'}; font-weight: {activeResource === item.id ? 600 : 400}; transition: all 150ms;">
+            <button onclick={() => { k8sState.activeResource = item.id; k8sState.items = []; filter = ""; }} class="k8s-nav-item" style="background: {activeResource === item.id ? 'rgba(88,166,255,0.12)' : 'transparent'}; color: {activeResource === item.id ? 'var(--accent-blue)' : 'var(--text-secondary)'}; font-weight: {activeResource === item.id ? 600 : 400};">
               {item.label}
             </button>
           {/each}
         </div>
       {/each}
       {#if crdTypes.length > 0}
-        <div style="margin-bottom: 12px;">
-          <div style="font-size: var(--text-xs); color: var(--text-muted); font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 4px; padding: 0 8px;">Custom Resources ({crdTypes.length})</div>
+        <div style="margin-bottom: 16px;">
+          <div class="k8s-group-label" style="color: {crdTypes.some(c => c.id === activeResource) ? 'var(--accent-purple)' : 'var(--text-muted)'};">
+            <span class="k8s-group-bar" style="background: {crdTypes.some(c => c.id === activeResource) ? 'var(--accent-purple)' : 'transparent'}; box-shadow: {crdTypes.some(c => c.id === activeResource) ? '0 0 6px var(--accent-purple)' : 'none'};"></span>
+            Custom Resources ({crdTypes.length})
+          </div>
           {#each crdTypes as crd}
-            <button onclick={() => { k8sState.activeResource = crd.id; k8sState.items = []; filter = ""; }} title="{crd.label} ({crd.group})" style="display: block; width: 100%; text-align: left; padding: 5px 8px; background: {activeResource === crd.id ? 'rgba(88,166,255,0.1)' : 'transparent'}; border: none; border-radius: 6px; cursor: pointer; font-size: var(--text-sm); color: {activeResource === crd.id ? 'var(--accent-blue)' : 'var(--text-secondary)'}; font-weight: {activeResource === crd.id ? 600 : 400}; transition: all 150ms; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+            <button onclick={() => { k8sState.activeResource = crd.id; k8sState.items = []; filter = ""; }} title="{crd.label} ({crd.group})" class="k8s-nav-item" style="background: {activeResource === crd.id ? 'rgba(88,166,255,0.12)' : 'transparent'}; color: {activeResource === crd.id ? 'var(--accent-blue)' : 'var(--text-secondary)'}; font-weight: {activeResource === crd.id ? 600 : 400}; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
               {crd.label}
             </button>
           {/each}
@@ -531,7 +556,9 @@
     <!-- Main content -->
     <div style="flex: 1; min-width: 0;">
       <!-- Main view goes here -->
-      {#if activeResource === "health"}
+      {#if activeResource === "overview"}
+        <K8sOverview />
+      {:else if activeResource === "health"}
         <KubernetesHealth />
       {:else}
         <!-- Filter bar -->
@@ -876,5 +903,40 @@
     outline: 2px solid var(--accent-blue);
     outline-offset: -2px;
     border-radius: var(--radius-sm);
+  }
+
+  .k8s-group-label {
+    position: relative;
+    display: flex;
+    align-items: center;
+    font-size: var(--text-xs);
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin-bottom: 4px;
+    padding: 4px 8px 6px 16px;
+  }
+  .k8s-group-bar {
+    position: absolute;
+    left: 8px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 3px;
+    height: 10px;
+    border-radius: 2px;
+  }
+  .k8s-nav-item {
+    display: block;
+    width: 100%;
+    text-align: left;
+    padding: 6px 8px 6px 16px;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: var(--text-sm);
+    transition: all 150ms;
+  }
+  .k8s-nav-item:hover {
+    background: var(--bg-card-hover);
   }
 </style>

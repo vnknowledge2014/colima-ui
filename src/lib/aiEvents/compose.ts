@@ -1,4 +1,5 @@
 import { isRunningInTauri } from "../env";
+import { runSandboxed } from "./shell";
 // @ts-nocheck
 import { EventHandler } from "./types";
 import { 
@@ -17,13 +18,11 @@ export const composeRegistry: Record<string, EventHandler> = {
     description: "Build or rebuild services in a compose project",
     handler: async (p) => {
       if (isRunningInTauri()) {
-        const { invoke } = await import("@tauri-apps/api/core");
         const args = ["compose"];
         if (p.file) args.push("-f", p.file);
         if (p.dir) args.push("--project-directory", p.dir);
         args.push("build");
-        const result = await invoke("execute_shell", { command: "docker", args });
-        return String(result);
+        return await runSandboxed("docker", args);
       }
       return `[SIMULATED] Compose build for ${p.dir || "current dir"}`;
     }
@@ -33,13 +32,11 @@ export const composeRegistry: Record<string, EventHandler> = {
     description: "Pull images associated with a compose project",
     handler: async (p) => {
       if (isRunningInTauri()) {
-        const { invoke } = await import("@tauri-apps/api/core");
         const args = ["compose"];
         if (p.file) args.push("-f", p.file);
         if (p.dir) args.push("--project-directory", p.dir);
         args.push("pull");
-        const result = await invoke("execute_shell", { command: "docker", args });
-        return String(result);
+        return await runSandboxed("docker", args);
       }
       return `[SIMULATED] Compose pull for ${p.dir || "current dir"}`;
     }

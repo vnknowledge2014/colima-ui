@@ -225,6 +225,10 @@ pub async fn lima_templates() -> Result<String, crate::error::ColimaError> {
 }
 
 /// Create a new Lima VM and auto-start it
+///
+/// The `#[tauri::command]` attribute was missing, so this was reachable over
+/// HTTP but not over IPC — creating a VM failed in the desktop app only.
+#[tauri::command]
 pub async fn lima_create(
     name: String,
     template: String,

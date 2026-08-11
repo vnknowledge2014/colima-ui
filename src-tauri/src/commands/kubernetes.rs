@@ -414,6 +414,73 @@ pub async fn k8s_describe(     namespace: String,     resource_type: String,    
     .await.map_err(|e: String| crate::error::ColimaError::from(e))
 }
 
+/// Open a pod shell in the OS terminal.
+///
+/// This is the *secondary* path. The primary one is an in-app Terminal tab
+/// backed by a real pty, which is why this command briefly disappeared — the
+/// frontend call site in `k8s.ts` outlived its registration and every click
+/// returned "Command k8s_exec not found". It is registered again because
+/// handing the session to Terminal.app is still the escape hatch when the
+/// embedded terminal gets something wrong.
+///
+/// Names are validated before they reach a command line: they are interpolated
+/// into an AppleScript string on macOS, so an unchecked name would be an
+/// injection.
+#[tauri::command]
+pub async fn k8s_exec(
+    namespace: String,
+    pod: String,
+    container: String,
+) -> Result<String, crate::error::ColimaError> {
+    async move {
+        if !crate::validation::is_valid_k8s_name(&namespace) {
+            return Err(format!("Invalid namespace: {namespace}"));
+        }
+        if !crate::validation::is_valid_k8s_name(&pod) {
+            return Err(format!("Invalid pod name: {pod}"));
+        }
+        if !container.is_empty() && !crate::validation::is_valid_k8s_name(&container) {
+            return Err(format!("Invalid container name: {container}"));
+        }
+
+        let mut cmd_str = format!("kubectl exec -it -n {namespace} {pod}");
+        if !container.is_empty() {
+            cmd_str.push_str(&format!(" -c {container}"));
+        }
+        cmd_str.push_str(" -- /bin/sh");
+
+        #[cfg(target_os = "macos")]
+        {
+            let escaped = crate::validation::escape_applescript(&cmd_str);
+            std::process::Command::new("osascript")
+                .args([
+                    "-e",
+                    &format!("tell application \"Terminal\" to do script \"{escaped}\""),
+                ])
+                .spawn()
+                .map_err(|e| format!("Failed to open terminal: {e}"))?;
+        }
+
+        #[cfg(target_os = "linux")]
+        {
+            let terminals = ["gnome-terminal", "xterm", "konsole"];
+            let launched = terminals.iter().any(|term| {
+                std::process::Command::new(term)
+                    .args(["--", "sh", "-c", &cmd_str])
+                    .spawn()
+                    .is_ok()
+            });
+            if !launched {
+                return Err("No terminal emulator found".to_string());
+            }
+        }
+
+        Ok(format!("Shell opened for pod {pod}"))
+    }
+    .await
+    .map_err(|e: String| crate::error::ColimaError::from(e))
+}
+
 /// Scale a deployment
 #[tauri::command]
 pub async fn k8s_scale(     namespace: String,     deployment: String,     replicas: u32, ) -> Result<String, crate::error::ColimaError> {

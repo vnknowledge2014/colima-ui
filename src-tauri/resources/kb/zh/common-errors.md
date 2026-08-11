@@ -79,6 +79,30 @@ docker system prune -a --volumes
 如果仍然是满的，就在 Settings → Colima Config 中调大磁盘容量。磁盘只能变大，
 不能缩小。
 
+## Error getting credentials
+
+**现象.** 拉取镜像失败 —— 无论在应用中还是命令行 —— 报错
+*error getting credentials — err: exec: "docker-credential-osxkeychain":
+executable file not found in $PATH*。
+
+**原因.** `~/.docker/config.json` 中保留了 `"credsStore": "osxkeychain"`，
+它让 Docker CLI 通过一个辅助程序读取镜像仓库凭据。该辅助程序由 Docker Desktop
+提供，卸载 Docker Desktop 后设置仍在、程序已不在。此后所有拉取都会失败，包括
+公开镜像的匿名拉取 —— CLI 在判断是否需要凭据之前就会调用该程序。
+
+**解决.** 重新安装辅助程序。
+
+```bash
+brew install docker-credential-helper
+```
+
+它会把 `docker-credential-osxkeychain` 安装到 `/opt/homebrew/bin`；ColimaUI
+传给子进程的 PATH 已包含该目录，因此应用无需额外配置即可识别。凭据仍保存在
+macOS 钥匙串中。
+
+从 `~/.docker/config.json` 删除 `"credsStore"` 一行同样能恢复拉取，但不建议：
+之后 `docker login` 会把凭据以明文写入该文件。
+
 ## 相关
 
 - [启动 Colima 实例](start-colima)

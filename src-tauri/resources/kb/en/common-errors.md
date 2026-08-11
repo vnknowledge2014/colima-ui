@@ -85,6 +85,33 @@ docker system prune -a --volumes
 If it stays full, raise the disk size in Settings → Colima Config. A disk can
 only grow, never shrink.
 
+## Error getting credentials
+
+**Symptom.** Pulling an image fails — in the app, or on the command line —
+with *error getting credentials — err: exec:
+"docker-credential-osxkeychain": executable file not found in $PATH*.
+
+**Cause.** `~/.docker/config.json` carries `"credsStore": "osxkeychain"`,
+which tells the Docker CLI to read registry credentials through a helper
+binary. Docker Desktop ships that helper, and uninstalling Docker Desktop
+leaves the setting behind without it. Every pull then fails, including
+anonymous pulls of public images: the CLI calls the helper before it knows
+whether any credentials are needed.
+
+**Fix.** Reinstall the helper.
+
+```bash
+brew install docker-credential-helper
+```
+
+It installs `docker-credential-osxkeychain` into `/opt/homebrew/bin`, which
+ColimaUI already puts on the PATH it hands to child processes, so the app picks
+it up with no further configuration. Credentials stay in the macOS Keychain.
+
+Deleting the `"credsStore"` line from `~/.docker/config.json` also restores
+pulls, but is worth avoiding: `docker login` then writes credentials into that
+file in plain text.
+
 ## Related
 
 - [Start a Colima instance](start-colima)

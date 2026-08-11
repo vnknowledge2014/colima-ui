@@ -53,6 +53,17 @@
   let showTour = $state(false);
   let cleanupPoller: (() => void) | null = null;
 
+  /**
+   * Latches true the first time the Terminal page is opened, and never resets.
+   *
+   * Deferring the first mount keeps xterm out of startup for users who never
+   * open a shell; never resetting is the point — see the render block.
+   */
+  let terminalMounted = $state(false);
+  $effect(() => {
+    if (uiState.currentPage === "terminal") terminalMounted = true;
+  });
+
   // Sync current tab to localStorage on every navigation so the store can
   // restore it on next load. The initial value is already set from localStorage
   // in store.svelte.ts (module-level, before any reactivity).
@@ -126,7 +137,8 @@
     {:else if uiState.currentPage === "settings"}
       <Settings systemInfo={dashboardState.systemInfo} />
     {:else if uiState.currentPage === "terminal"}
-      <Terminal />
+      <!-- Deliberately empty: Terminal is rendered after this chain so that
+           leaving the page hides it instead of destroying it. See below. -->
     {:else if uiState.currentPage === "models"}
       <Models />
     {:else if uiState.currentPage === "help"}
@@ -134,6 +146,23 @@
     {:else}
       <div style="display: flex; justify-content: center; align-items: center; height: 50vh;">
         <div>Component Migration in Progress... ({uiState.currentPage})</div>
+      </div>
+    {/if}
+
+    <!-- Terminal sits outside the page chain because every other page can be
+         destroyed on navigation and this one cannot. Unmounting it runs each
+         TerminalInstance's cleanup, which calls `terminal_close` and kills the
+         pty — so opening a shell on pod A, walking back to Kubernetes, and
+         opening pod B killed A's session on the way out. The backend has no
+         re-attach path (`SessionManager::create` closes and respawns any
+         existing id), so the session only survives if the component does.
+
+         `display: contents` keeps the wrapper out of the box tree entirely, so
+         Terminal's two root elements lay out exactly as they did when they were
+         direct children of <main>. Mounted lazily, then kept forever. -->
+    {#if terminalMounted}
+      <div style="display: {uiState.currentPage === 'terminal' ? 'contents' : 'none'};">
+        <Terminal />
       </div>
     {/if}
   </main>

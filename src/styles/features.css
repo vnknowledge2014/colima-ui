@@ -442,42 +442,27 @@
    `.ai-msg` rules in this file plus a third copy in index.css. Only the union
    was ever live, so the merge below is what the app actually rendered. */
 
+/* `.ai-msg` is the row wrapper, not the bubble.
+
+   It used to be the bubble, and the padding/max-width/radius left over from
+   that design were still landing here — on top of the padding the bubble sets
+   for itself, because AiChatPanel's scoped rule only overrides properties it
+   actually declares. That doubled the inset on every assistant message.
+
+   Only two things still belong on the wrapper. `word-break` has to be here so
+   an unbroken token (a URL, a container id) cannot widen the column, and the
+   animation stays because `@keyframes fadeInSlide` lives in overlays.css —
+   moved into the component, Svelte would scope the name and the reference
+   would dangle.
+
+   The bubbles themselves — `.ai-msg-user`, `.ai-msg-assistant`,
+   `.ai-msg-system` — are owned by AiChatPanel.svelte. Their copies here were
+   duplicates and are gone. What remains below deliberately does not move:
+   those rules target markdown injected with `{@html}`, which a scoped style
+   cannot reach. */
 .ai-msg {
-  max-width: 92%;
-  padding: 8px 12px;
-  border-radius: var(--radius-md);
-  font-size: var(--text-sm);
-  line-height: 1.55;
   word-break: break-word;
   animation: fadeInSlide 0.2s ease-out;
-}
-
-.ai-msg-user {
-  align-self: flex-end;
-  background: rgba(88, 166, 255, 0.12);
-  color: var(--text-primary);
-  border: 1px solid rgba(88, 166, 255, 0.15);
-  border-bottom-right-radius: 4px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-}
-
-.ai-msg-assistant {
-  align-self: flex-start;
-  background: var(--bg-content);
-  color: var(--text-primary);
-  border: 1px solid var(--border-subtle);
-  border-bottom-left-radius: 4px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
-}
-
-.ai-msg-system {
-  align-self: center;
-  background: rgba(210, 153, 34, 0.08);
-  color: var(--accent-yellow);
-  border: 1px solid rgba(210, 153, 34, 0.15);
-  font-size: var(--text-xs);
-  text-align: center;
-  max-width: 100%;
 }
 
 .ai-msg pre {
@@ -533,97 +518,16 @@
 
 /* ===== AI Command Center Panel ===== */
 
-.ai-panel {
-  /* width: 400px; - overriden by inline style */
-  background: var(--bg-primary);
-  border-left: 1px solid var(--border-primary);
-  display: flex;
-  flex-direction: column;
-  z-index: 1000;
-  box-shadow: -4px 0 24px rgba(0, 0, 0, 0.4);
-  position: relative;
-}
+/* `.ai-panel`, its header, resizer, actions, messages and empty state used to
+   be duplicated here. AiChatPanel.svelte owns them in its own <style>, and
+   Svelte scopes those, so the copies here only ever won where the component
+   declared nothing — which is how `.ai-panel-messages` ended up painting
+   --bg-content over the panel's --bg-sidebar and split the panel into two
+   tones. Two of the declarations here also referenced --bg-primary and
+   --bg-hover, neither of which is a defined token.
 
-.ai-panel-resizer {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  left: -2px;
-  width: 5px;
-  cursor: ew-resize;
-  z-index: 1001;
-}
-
-.ai-panel-resizer:hover {
-  background-color: var(--accent-blue);
-  opacity: 0.5;
-}
-
-.ai-panel-header {
-  height: 48px;
-  padding: 0 16px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  border-bottom: 1px solid var(--border-subtle);
-  background: rgba(18, 18, 18, 0.7);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-}
-
-.ai-panel-title {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-weight: 600;
-  font-size: var(--text-sm);
-  color: var(--text-primary);
-}
-
-.ai-status-badge {
-  font-size: 10px;
-  padding: 2px 6px;
-  background: rgba(138, 180, 248, 0.1);
-  color: var(--accent-blue);
-  border-radius: 12px;
-  border: 1px solid rgba(138, 180, 248, 0.2);
-  white-space: nowrap;
-}
-
-.ai-panel-actions button {
-  background: none;
-  border: none;
-  color: var(--text-muted);
-  cursor: pointer;
-  padding: 4px;
-  font-size: 14px;
-  border-radius: 4px;
-}
-
-.ai-panel-actions button:hover {
-  background: var(--bg-hover);
-  color: var(--text-primary);
-}
-
-.ai-panel-messages {
-  flex: 1;
-  overflow-y: auto;
-  padding: 16px;
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-  background: var(--bg-content);
-}
-
-.ai-panel-empty {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  height: 100%;
-  color: var(--text-muted);
-  text-align: center;
-}
+   What stays below is deliberate: it targets markdown HTML injected at
+   runtime, which a scoped component style cannot reach. */
 
 /* An earlier generation of `.ai-msg`, `.ai-msg-user` and `.ai-msg-assistant`
    sat here. index.css carried its own copies further down the cascade, so

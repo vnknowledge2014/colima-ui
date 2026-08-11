@@ -30,7 +30,7 @@ use crate::error::ColimaError;
 /// Bump this when any article body changes. The seed only overwrites a stored
 /// row whose version is lower, which is what lets a user's database survive an
 /// app update without the content going stale.
-const ARTICLE_VERSION: i64 = 1;
+const ARTICLE_VERSION: i64 = 2;
 
 /// Locales with a full translation. A request for anything else falls back to
 /// English rather than returning nothing.

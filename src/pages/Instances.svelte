@@ -17,6 +17,7 @@
   // --- State ---
   let showCreate = $state(false);
   let showCreateKind = $state(false);
+  let kindName = $state("my-cluster");
   let actionLoading = $state<string | null>(null);
   let qemuChecking = $state(false);
   let qemuMissing = $state(false);
@@ -148,6 +149,12 @@ Format: {"minimal": {"cpus": N, "memory": N, "disk": N}, ...}`;
 
   onMount(() => {
     fetchKind();
+    // Keep the Kind cluster list current even when clusters are created or
+    // deleted outside this page (CLI, other tabs, the AI assistant). Without
+    // polling, a stale in-memory list silently omits new clusters until the
+    // user hits the manual refresh button.
+    const kindTimer = setInterval(fetchKind, 15000);
+    return () => clearInterval(kindTimer);
   });
 
   $effect(() => {
@@ -296,20 +303,54 @@ Format: {"minimal": {"cpus": N, "memory": N, "disk": N}, ...}`;
       <button class="btn btn-primary" onclick={() => showCreate = true} style="display: flex; align-items: center; gap: 6px;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>{t('instances.new', { default: 'New Instance' })}</button>
     </div>
   {:else}
+    <!-- Overview strip -->
+    <div class="overview-strip">
+      <div class="overview-card">
+        <div class="overview-label">Instances</div>
+        <div class="overview-value">{dashboardState.colimaInstances.length}</div>
+      </div>
+      <div class="overview-card">
+        <div class="overview-label" style="color: var(--accent-green);">Running</div>
+        <div class="overview-value">{dashboardState.colimaInstances.filter(i => i.status === "Running").length}</div>
+      </div>
+      <div class="overview-card">
+        <div class="overview-label" style="color: var(--text-muted);">Stopped</div>
+        <div class="overview-value">{dashboardState.colimaInstances.filter(i => i.status !== "Running").length}</div>
+      </div>
+      <div class="overview-card">
+        <div class="overview-label">CPU Cores</div>
+        <div class="overview-value">{dashboardState.colimaInstances.reduce((s, i) => s + (i.cpus || 0), 0)}</div>
+      </div>
+      <div class="overview-card">
+        <div class="overview-label">RAM Allocated</div>
+        <div class="overview-value">{formatBytes(dashboardState.colimaInstances.reduce((s, i) => s + (i.memory || 0), 0))}</div>
+      </div>
+      <div class="overview-card">
+        <div class="overview-label" style="color: var(--accent-purple);">Kind Clusters</div>
+        <div class="overview-value">{kindLoading ? "…" : kindClusters.length}</div>
+      </div>
+    </div>
     <div style="display: grid; grid-template-columns: 320px 1fr; gap: 0; min-height: calc(100vh - 140px);">
       <!-- Left: Item List -->
-      <div style="border-right: 1px solid var(--border-primary); overflow-y: auto; background: var(--bg-primary); border-radius: 12px 0 0 12px;">
+      <div style="border-right: 1px solid var(--border-primary); overflow-y: auto;">
         <div style="padding: 10px 14px 6px; font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-muted);">
           Colima Instances ({dashboardState.colimaInstances.length})
         </div>
         {#each dashboardState.colimaInstances as inst}
           {@const isRunning = inst.status === "Running"}
           {@const isSelected = selected?.type === "colima" && selected.data.name === inst.name}
-          <div role="button" tabindex="0" onkeydown={(e) => e.key === 'Enter' && e.currentTarget.click()} onclick={() => selected = { type: "colima", data: inst }} style="padding: 10px 14px; cursor: pointer; display: flex; align-items: center; gap: 10px; background: {isSelected ? 'var(--bg-card-hover)' : 'transparent'}; border-left: 3px solid {isSelected ? 'var(--accent-blue)' : 'transparent'};">
+          <div role="button" tabindex="0" onkeydown={(e) => e.key === 'Enter' && e.currentTarget.click()} onclick={() => selected = { type: "colima", data: inst }} class="inst-item" style="padding: 10px 14px; cursor: pointer; display: flex; align-items: center; gap: 10px; background: {isSelected ? 'var(--bg-card-hover)' : 'transparent'}; border-left: 3px solid {isSelected ? 'var(--accent-blue)' : 'transparent'};">
             <div style="width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; background: {isRunning ? 'var(--accent-green)' : 'var(--text-muted)'}; box-shadow: {isRunning ? '0 0 6px var(--accent-green)' : 'none'};"></div>
             <div style="flex: 1; min-width: 0;">
-              <div style="font-weight: 600; font-size: var(--text-sm); color: var(--text-primary);">{inst.name}</div>
-              <div style="font-size: 11px; color: var(--text-muted); margin-top: 1px;">{inst.runtime} · {formatCpus(inst.cpus)} CPU · {formatBytes(inst.memory)}</div>
+              <div style="font-weight: 600; font-size: var(--text-sm); color: var(--text-primary); display: flex; align-items: center; gap: 6px;">
+                {inst.name}
+                {#if inst.kubernetes}
+                  <span class="k8s-pill" title="Kubernetes enabled">k8s</span>
+                {/if}
+              </div>
+              <div style="font-size: 11px; color: var(--text-muted); margin-top: 2px;">
+                {inst.runtime} · {inst.arch || "?"} · {formatCpus(inst.cpus)} CPU · {formatBytes(inst.memory)} · {formatBytes(inst.disk)}
+              </div>
             </div>
             <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 4px;">
               <span style="padding: 2px 6px; border-radius: 10px; font-size: 10px; font-weight: 600; background: {isRunning ? 'rgba(63,185,80,0.1)' : 'rgba(139,148,158,0.1)'}; color: {isRunning ? 'var(--accent-green)' : 'var(--text-muted)'};">{inst.status}</span>
@@ -328,7 +369,7 @@ Format: {"minimal": {"cpus": N, "memory": N, "disk": N}, ...}`;
         {:else}
           {#each kindClusters as name}
             {@const isSelected = selected?.type === "kind" && selected.name === name}
-            <div role="button" tabindex="0" onkeydown={(e) => e.key === 'Enter' && e.currentTarget.click()} onclick={() => selected = { type: "kind", name }} style="padding: 10px 14px; cursor: pointer; display: flex; align-items: center; gap: 10px; background: {isSelected ? 'rgba(167,139,250,0.08)' : 'transparent'}; border-left: 3px solid {isSelected ? 'var(--accent-purple)' : 'transparent'};">
+            <div role="button" tabindex="0" onkeydown={(e) => e.key === 'Enter' && e.currentTarget.click()} onclick={() => selected = { type: "kind", name }} class="inst-item" style="padding: 10px 14px; cursor: pointer; display: flex; align-items: center; gap: 10px; background: {isSelected ? 'rgba(167,139,250,0.08)' : 'transparent'}; border-left: 3px solid {isSelected ? 'var(--accent-purple)' : 'transparent'};">
               <div style="flex: 1; min-width: 0;">
                 <div style="font-weight: 600; font-size: var(--text-sm); color: var(--text-primary); font-family: var(--font-mono);">{name}</div>
                 <div style="font-size: 11px; color: var(--text-muted); margin-top: 1px;">kind-{name}</div>
@@ -340,9 +381,10 @@ Format: {"minimal": {"cpus": N, "memory": N, "disk": N}, ...}`;
       </div>
 
       <!-- Right: Detail Panel -->
-      <div style="padding: 24px; overflow-y: auto; background: var(--bg-secondary); border-radius: 0 12px 12px 0;">
+      <div style="padding: 20px; overflow-y: auto;">
+        <div class="detail-card">
         {#if !selected}
-          <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: var(--text-muted);">
+          <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 320px; color: var(--text-muted);">
             <div style="margin-top: 12px; font-size: var(--text-sm);">Select an instance to view details</div>
           </div>
         {:else if selected.type === "colima"}
@@ -354,13 +396,16 @@ Format: {"minimal": {"cpus": N, "memory": N, "disk": N}, ...}`;
           
           <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 24px;">
             <div>
-              <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 6px;">
-                <div style="width: 12px; height: 12px; border-radius: 50%; background: {isRunning ? 'var(--accent-green)' : 'var(--text-muted)'}; box-shadow: {isRunning ? '0 0 8px var(--accent-green)' : 'none'};"></div>
-                <h2 style="margin: 0; font-size: var(--text-xl); font-weight: 700;">{inst.name}</h2>
-                <span style="padding: 2px 6px; border-radius: 10px; font-size: 10px; font-weight: 600; background: {allPresets.find(p => p.cpus === inst.cpus && p.memory === inst.memory) ? 'rgba(63,185,80,0.1)' : 'rgba(139,148,158,0.1)'}; color: {allPresets.find(p => p.cpus === inst.cpus && p.memory === inst.memory) ? 'var(--accent-green)' : 'var(--text-muted)'}; margin-left: 8px;">
-                  {allPresets.find(p => p.cpus === inst.cpus && p.memory === inst.memory) ? allPresets.find(p => p.cpus === inst.cpus && p.memory === inst.memory)?.label : "Custom"}
-                </span>
-              </div>
+            <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 6px;">
+              <span class="status-pill {isRunning ? 'pill-running' : 'pill-stopped'}">
+                <span class="status-dot"></span>
+                {inst.status}
+              </span>
+              <h2 style="margin: 0; font-size: var(--text-xl); font-weight: 700;">{inst.name}</h2>
+              <span style="padding: 2px 6px; border-radius: 10px; font-size: 10px; font-weight: 600; background: {allPresets.find(p => p.cpus === inst.cpus && p.memory === inst.memory) ? 'rgba(63,185,80,0.1)' : 'rgba(139,148,158,0.1)'}; color: {allPresets.find(p => p.cpus === inst.cpus && p.memory === inst.memory) ? 'var(--accent-green)' : 'var(--text-muted)'}; margin-left: 8px;">
+                {allPresets.find(p => p.cpus === inst.cpus && p.memory === inst.memory) ? allPresets.find(p => p.cpus === inst.cpus && p.memory === inst.memory)?.label : "Custom"}
+              </span>
+            </div>
               <div style="font-size: var(--text-xs); color: var(--text-muted); margin-left: 22px;">
                 Profile: <span style="font-family: var(--font-mono); color: var(--accent-blue);">{profileId}</span>
               </div>
@@ -377,31 +422,58 @@ Format: {"minimal": {"cpus": N, "memory": N, "disk": N}, ...}`;
           </div>
 
           <!-- Resource Stats -->
-          <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; margin-bottom: 24px;">
-            <div style="padding: 14px 16px; border-radius: 10px; background: var(--bg-primary); border-left: 3px solid var(--accent-blue);">
-              <div style="font-size: 10px; color: var(--text-muted); font-weight: 600; margin-bottom: 4px; text-transform: uppercase;">CPUs</div>
-              <div style="font-size: var(--text-lg); font-weight: 700; font-family: var(--font-mono); color: var(--accent-blue);">{formatCpus(inst.cpus)}</div>
+          <div class="stat-grid">
+            <div class="stat-card accent-blue">
+              <div class="stat-label">CPUs</div>
+              <div class="stat-value" style="color: var(--accent-blue);">{formatCpus(inst.cpus)}</div>
             </div>
-            <div style="padding: 14px 16px; border-radius: 10px; background: var(--bg-primary); border-left: 3px solid var(--accent-green);">
-              <div style="font-size: 10px; color: var(--text-muted); font-weight: 600; margin-bottom: 4px; text-transform: uppercase;">Memory</div>
-              <div style="font-size: var(--text-lg); font-weight: 700; font-family: var(--font-mono); color: var(--accent-green);">{formatBytes(inst.memory)}</div>
+            <div class="stat-card accent-green">
+              <div class="stat-label">Memory</div>
+              <div class="stat-value" style="color: var(--accent-green);">{formatBytes(inst.memory)}</div>
             </div>
-            <div style="padding: 14px 16px; border-radius: 10px; background: var(--bg-primary); border-left: 3px solid var(--accent-orange);">
-              <div style="font-size: 10px; color: var(--text-muted); font-weight: 600; margin-bottom: 4px; text-transform: uppercase;">Disk</div>
-              <div style="font-size: var(--text-lg); font-weight: 700; font-family: var(--font-mono); color: var(--accent-orange);">{formatBytes(inst.disk)}</div>
+            <div class="stat-card accent-orange">
+              <div class="stat-label">Disk</div>
+              <div class="stat-value" style="color: var(--accent-orange);">{formatBytes(inst.disk)}</div>
             </div>
+          </div>
+
+          <!-- Instance details -->
+          <div class="details-grid">
+            <div class="detail-item"><span class="detail-label">Architecture</span><span class="detail-value mono">{inst.arch || "—"}</span></div>
+            <div class="detail-item"><span class="detail-label">Runtime</span><span class="detail-value mono">{inst.runtime || "—"}</span></div>
+            <div class="detail-item"><span class="detail-label">Address</span><span class="detail-value mono" style="font-size: 11px;">{inst.address || "—"}</span></div>
+            <div class="detail-item"><span class="detail-label">Kubernetes</span><span class="detail-value">{inst.kubernetes ? "Enabled" : "Disabled"}</span></div>
           </div>
         {:else if selected.type === "kind"}
           {@const name = selected.name}
           <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 24px;">
             <div>
               <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 6px;">
+                <span class="status-pill pill-running"><span class="status-dot"></span>Running</span>
                 <h2 style="margin: 0; font-size: var(--text-xl); font-weight: 700; font-family: var(--font-mono);">{name}</h2>
+              </div>
+              <div style="font-size: var(--text-xs); color: var(--text-muted); margin-left: 22px;">
+                Context: <span style="font-family: var(--font-mono); color: var(--accent-purple);">kind-{name}</span>
               </div>
             </div>
             <button class="btn btn-ghost" onclick={() => handleDeleteKind(name)} disabled={actionLoading === `kind-${name}-delete`} style="font-size: var(--text-xs); color: var(--accent-red);">Delete</button>
           </div>
+
+          <div class="details-grid">
+            <div class="detail-item"><span class="detail-label">Runtime</span><span class="detail-value mono">Docker</span></div>
+            <div class="detail-item"><span class="detail-label">Kubernetes</span><span class="detail-value">Enabled</span></div>
+            <div class="detail-item"><span class="detail-label">Provider</span><span class="detail-value mono">kind</span></div>
+            <div class="detail-item"><span class="detail-label">Context</span><span class="detail-value mono" style="font-size: 11px;">kind-{name}</span></div>
+          </div>
+
+          <div style="margin-top: 20px; padding: 14px 16px; border-radius: 10px; background: var(--bg-primary); border: 1px solid var(--border-subtle);">
+            <div style="font-size: 11px; line-height: 1.6; color: var(--text-secondary);">
+              <strong style="color: var(--accent-purple);">Kind</strong> runs Kubernetes nodes as containers inside Docker. Access it with
+              <code style="font-size: inherit;">kubectl</code> using the <code style="font-size: inherit;">kind-{name}</code> context.
+            </div>
+          </div>
         {/if}
+        </div>
       </div>
     </div>
   {/if}
@@ -425,12 +497,34 @@ Format: {"minimal": {"cpus": N, "memory": N, "disk": N}, ...}`;
   <div role="button" tabindex="0" class="modal-overlay" onkeydown={(e) => e.key === 'Enter' && e.currentTarget.click()} onclick={() => showCreateKind = false}>
     <div role="button" tabindex="0" class="modal" onkeydown={(e) => e.key === 'Enter' && e.currentTarget.click()} onclick={(e) => e.stopPropagation()} style="width: 460px;">
       <div class="modal-header"><h2 class="modal-title">Create Kind Cluster</h2></div>
+      <div style="padding: 20px; display: flex; flex-direction: column; gap: 16px;">
+        <div>
+          <label for="kindName" style="display: block; font-size: var(--text-sm); font-weight: 500; color: var(--text-secondary); margin-bottom: 6px;">Cluster Name</label>
+          <input id="kindName" type="text" bind:value={kindName} placeholder="my-cluster" style="width: 100%; padding: 8px 12px; background: var(--bg-secondary); border: 1px solid var(--border-primary); border-radius: 6px; color: var(--text-primary); font-size: var(--text-sm);" />
+          <p style="margin: 6px 0 0; font-size: var(--text-xs); color: var(--text-secondary); line-height: 1.5;">A Kind cluster runs Kubernetes nodes as containers inside Docker. Requires <code style="font-size: inherit;">kind</code> to be installed (<code style="font-size: inherit;">brew install kind</code>).</p>
+        </div>
+      </div>
       <div class="modal-footer">
         <button class="btn btn-ghost" onclick={() => showCreateKind = false}>Cancel</button>
         <button class="btn btn-primary" onclick={() => {
           showCreateKind = false;
-          globalToast("success", "Creating Kind cluster...");
-          kindApi.create("my-cluster", "").then(() => { fetchKind(); onRefresh(); });
+          // "info", not "success": the work has not happened yet. Announcing
+          // success up front meant a missing `kind` binary produced a green
+          // toast and nothing else.
+          globalToast("info", `Creating Kind cluster "${kindName}"...`);
+          kindApi.create(kindName, "")
+            .then(() => {
+              globalToast("success", `Kind cluster "${kindName}" created`);
+              fetchKind();
+              onRefresh();
+            })
+            .catch(err => {
+              // Without this the rejection was unhandled, so the backend's
+              // actionable message — "'kind' is not installed. Install with:
+              // brew install kind" — never reached the user.
+              globalToast("error", `Failed to create Kind cluster: ${err}`);
+              fetchKind();
+            });
         }}>Create</button>
       </div>
     </div>
@@ -604,3 +698,157 @@ Format: {"minimal": {"cpus": N, "memory": N, "disk": N}, ...}`;
     </div>
   </div>
 {/if}
+
+<style>
+  .overview-strip {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+    gap: 10px;
+    padding: 12px 14px;
+    margin-bottom: 14px;
+    background: var(--bg-card);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-lg);
+  }
+  .overview-card {
+    padding: 8px 12px;
+    border-radius: var(--radius-md);
+    background: var(--bg-secondary);
+  }
+  .overview-label {
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-muted);
+    margin-bottom: 2px;
+  }
+  .overview-value {
+    font-size: var(--text-lg);
+    font-weight: 700;
+    font-family: var(--font-mono);
+    color: var(--text-primary);
+  }
+  .k8s-pill {
+    padding: 1px 6px;
+    border-radius: 8px;
+    font-size: 9px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    background: rgba(88, 166, 255, 0.12);
+    color: var(--accent-blue);
+    border: 1px solid rgba(88, 166, 255, 0.25);
+  }
+  .status-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: capitalize;
+  }
+  .status-pill .status-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+  }
+  .pill-running {
+    background: rgba(63, 185, 80, 0.12);
+    color: var(--accent-green);
+  }
+  .pill-running .status-dot {
+    background: var(--accent-green);
+    box-shadow: 0 0 5px var(--accent-green);
+  }
+  .pill-stopped {
+    background: rgba(139, 148, 158, 0.12);
+    color: var(--text-muted);
+  }
+  .pill-stopped .status-dot {
+    background: var(--text-muted);
+  }
+  .details-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 10px;
+    margin-top: 16px;
+  }
+  .detail-item {
+    padding: 10px 12px;
+    border-radius: var(--radius-md);
+    background: var(--bg-primary);
+    border: 1px solid var(--border-subtle);
+  }
+  .detail-label {
+    display: block;
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-muted);
+    margin-bottom: 4px;
+  }
+  .detail-value {
+    font-size: var(--text-sm);
+    font-weight: 600;
+    color: var(--text-primary);
+  }
+  .detail-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-sm);
+    padding: 24px;
+    min-height: 100%;
+  }
+  .mono {
+    font-family: var(--font-mono);
+  }
+  .stat-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 12px;
+    margin-bottom: 20px;
+  }
+  .stat-card {
+    position: relative;
+    padding: 14px 16px 16px;
+    border-radius: var(--radius-lg);
+    background: var(--bg-card);
+    border: 1px solid var(--border-subtle);
+    overflow: hidden;
+  }
+  .stat-card::after {
+    content: "";
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: 3px;
+  }
+  .stat-card.accent-blue::after { background: var(--accent-blue); }
+  .stat-card.accent-green::after { background: var(--accent-green); }
+  .stat-card.accent-orange::after { background: var(--accent-orange); }
+  .stat-label {
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-muted);
+    margin-bottom: 6px;
+  }
+  .stat-value {
+    font-size: var(--text-lg);
+    font-weight: 700;
+    font-family: var(--font-mono);
+  }
+  .inst-item {
+    transition: background 0.12s ease;
+  }
+  .inst-item:hover {
+    background: var(--bg-card-hover);
+  }
+</style>

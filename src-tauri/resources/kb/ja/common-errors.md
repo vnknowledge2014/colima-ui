@@ -84,6 +84,33 @@ docker system prune -a --volumes
 それでも埋まったままなら Settings → Colima Config でディスクサイズを増やします。
 ディスクは拡大のみ可能で、縮小はできません。
 
+## Error getting credentials
+
+**症状.** アプリからでもコマンドラインからでも、イメージの取得が
+*error getting credentials — err: exec: "docker-credential-osxkeychain":
+executable file not found in $PATH* で失敗する。
+
+**原因.** `~/.docker/config.json` に `"credsStore": "osxkeychain"` が
+残っており、Docker CLI はレジストリの認証情報をヘルパーバイナリ経由で読もうと
+します。このヘルパーは Docker Desktop に同梱されているため、Docker Desktop を
+アンインストールすると設定だけが残ります。以降はすべての pull が失敗します。
+CLI は認証情報が必要かどうかを判断する前にヘルパーを呼ぶため、公開イメージの
+匿名 pull も同様です。
+
+**対処.** ヘルパーを再インストールします。
+
+```bash
+brew install docker-credential-helper
+```
+
+`docker-credential-osxkeychain` が `/opt/homebrew/bin` に入ります。ColimaUI
+は子プロセスに渡す PATH にこのディレクトリを既に含めているため、追加設定なしで
+認識されます。認証情報は macOS キーチェーンに保持されたままです。
+
+`~/.docker/config.json` から `"credsStore"` の行を削除しても pull は復旧し
+ますが、避けてください。以後 `docker login` が認証情報を平文でこのファイルに
+書き込みます。
+
 ## 関連
 
 - [Colima インスタンスの起動](start-colima)
