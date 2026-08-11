@@ -77,7 +77,7 @@
 
 </script>
 
-<div class="content-header">
+<div class="content-header" data-tauri-drag-region>
   <h1>
     {t('compose.title', { default: 'Docker Compose' })}
     <span style="font-size: var(--text-sm); color: var(--text-muted); font-weight: 400; margin-left: 12px;">

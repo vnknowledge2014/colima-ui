@@ -429,10 +429,10 @@
 </script>
 
 {#if loading}
-  <div class="content-header"><h1>Kubernetes</h1></div>
+  <div class="content-header" data-tauri-drag-region><h1>Kubernetes</h1></div>
   <div class="loading-screen"><div class="spinner"></div><span>Connecting to cluster...</span></div>
 {:else if !connected}
-  <div class="content-header">
+  <div class="content-header" data-tauri-drag-region>
     <h1>Kubernetes</h1>
     {#if !kubectlMissing && contexts.length > 1}
       <div class="content-header-actions" style="display: flex; gap: 8px; align-items: center;">
@@ -471,7 +471,7 @@
     </div>
   </div>
 {:else}
-  <div class="content-header">
+  <div class="content-header" data-tauri-drag-region>
     <h1>
       {t('kubernetes.title', { default: 'Kubernetes' })}
       <span style="font-size: var(--text-sm); color: var(--accent-green); font-weight: 400; margin-left: 12px;">

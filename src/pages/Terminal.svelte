@@ -185,7 +185,7 @@
   }
 </script>
 
-<div class="content-header">
+<div class="content-header" data-tauri-drag-region>
   <h1>{t('terminal.title', { default: 'Terminal' })}</h1>
   <div class="content-header-actions">
     <button class="btn btn-primary" onclick={() => {

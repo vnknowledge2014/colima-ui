@@ -236,7 +236,7 @@
 
 </script>
 
-<div class="content-header">
+<div class="content-header" data-tauri-drag-region>
   <h1>
     {t('images.title', { default: 'Images' })}
     <span style="font-size: var(--text-sm); color: var(--text-muted); font-weight: 400; margin-left: 12px;" title={`${dockerState.images.length} ${t('images.count', { default: 'images' })} · ${totalSize > 1024 ? `${(totalSize / 1024).toFixed(1)} GB` : `${totalSize.toFixed(0)} MB`}`}>

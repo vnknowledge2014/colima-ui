@@ -290,9 +290,9 @@
 </style>
 
 <aside class="sidebar {uiState.sidebarCollapsed ? 'collapsed' : ''}">
-  <div class="sidebar-header">
-    <img src="/colima_icon.png" alt="ColimaUI" class="sidebar-logo" />
-    <h1 class="sidebar-title">ColimaUI</h1>
+  <div class="sidebar-header" data-tauri-drag-region>
+    <img src="/colima_icon.png" alt="ColimaUI" class="sidebar-logo" data-tauri-drag-region />
+    <h1 class="sidebar-title" data-tauri-drag-region>ColimaUI</h1>
   </div>
 
   <nav class="sidebar-nav" data-tour-id="sidebar-nav">

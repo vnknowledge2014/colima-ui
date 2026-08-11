@@ -53,6 +53,15 @@
   let showTour = $state(false);
   let cleanupPoller: (() => void) | null = null;
 
+  // Sync current tab to localStorage on every navigation so the store can
+  // restore it on next load. The initial value is already set from localStorage
+  // in store.svelte.ts (module-level, before any reactivity).
+  $effect(() => {
+    if (uiState.currentPage) {
+      localStorage.setItem("colima_active_page", uiState.currentPage);
+    }
+  });
+
   $effect(() => {
     if (appState.isSettingsLoaded) {
       if (getAppSetting("colimaui_setup_complete") !== "true" && !showWizard && !showTour) {
@@ -168,4 +177,9 @@
 
   <ConfirmDialog />
 </div>
+
+<!-- ToastContainer is rendered OUTSIDE .app-layout to avoid stacking context
+     issues from backdrop-filter on modal-overlay. This guarantees
+     z-index: 99999 is always above modals and overlays. -->
+<ToastContainer />
 </ErrorBoundary>

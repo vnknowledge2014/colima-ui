@@ -85,9 +85,13 @@ export async function chatStream(
     throw new Error(redact(`HTTP Error ${response.status}: ${await response.text()}`));
   }
 
-  if (!response.body) throw new Error("No response body");
+  if (!response!.ok) {
+    throw new Error(`HTTP Error ${response!.status}: ${await response!.text()}`);
+  }
 
-  const reader = response.body.getReader();
+  if (!response!.body) throw new Error("No response body");
+
+  const reader = response!.body!.getReader();
   const decoder = new TextDecoder("utf-8");
 
   if (isGemini) {

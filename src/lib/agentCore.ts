@@ -37,6 +37,19 @@ export async function runAgent(
     callbacks.onMessage({ id: newId(), role: "system", content: "⚠️ API Key not configured." });
     return;
   }
+  if (!model) {
+    callbacks.onMessage({ id: Date.now().toString(), role: "system", content: "⚠️ No AI model selected. Go to **Settings → AI & Diagnostics** and pick a model." });
+    return;
+  }
+  if (!apiKey && provider !== "ollama-local" && provider !== "ollama-cloud") {
+    callbacks.onMessage({ id: Date.now().toString(), role: "system", content: "⚠️ API Key not configured. Go to **Settings → AI & Diagnostics** to add your API key." });
+    return;
+  }
+  if ((provider === "ollama-cloud") && !endpoint) {
+    callbacks.onMessage({ id: Date.now().toString(), role: "system", content: "⚠️ Ollama Cloud requires an **Endpoint URL**. Go to **Settings → AI & Diagnostics** and set the endpoint (e.g. `https://your-ollama-host.com`)." });
+    return;
+  }
+  // ─────────────────────────────────────────────────────────────────────────
 
   let kbContext = "";
   try {
@@ -298,8 +311,9 @@ Built-in Presets: ${JSON.stringify(BUILT_IN_PRESETS)}
         try {
           const refContent = await aiApi.readReference(path.trim());
           toolContext += `\n\n### Reference: ${path}\n${refContent}\n`;
-        } catch (e) {
-          toolContext += `\n(Failed to read reference ${path}: ${e})\n`;
+        } catch {
+          // readReference endpoint may not be implemented yet — skip gracefully
+          toolContext += `\n(Reference ${path} unavailable)\n`;
         }
       }
 

@@ -4,7 +4,7 @@
 //! to `colima list --json` (which triggers slow macOS system_profiler calls).
 //!
 //! Structure:
-//! ```
+//! ```text
 //! ~/.colima/
 //! ├── default/colima.yaml          # profile config
 //! ├── myprofile/colima.yaml        # another profile

@@ -36,9 +36,15 @@ export const dashboardState = $state({
   engineResources: null as EngineResources | null,
 });
 
+// Read saved tab ONCE at module init — runs before any Svelte reactivity or effects.
+// This eliminates all race conditions between $effect and onMount.
+const _savedPage = typeof localStorage !== "undefined"
+  ? localStorage.getItem("colima_active_page")
+  : null;
+
 export const uiState = $state({
   aiPanelOpen: false,
-  currentPage: "dashboard",
+  currentPage: (_savedPage && _savedPage !== "dashboard") ? _savedPage : "dashboard",
   globalError: null as string | null,
   sidebarCollapsed: false,
   /**
