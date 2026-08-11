@@ -58,12 +58,25 @@ describe('markdown utilities', () => {
       expect(result).toContain('&lt;script&gt;');
     });
 
-    it('should handle headers and lists', () => {
+    it('should render # and ## headings as heading elements', () => {
+      const input = '# Article title\n## Related';
+      const result = renderMarkdown(input);
+      expect(result).toContain('<h2 class="md-h md-h-title">Article title</h2>');
+      expect(result).toContain('<h3 class="md-h">Related</h3>');
+    });
+
+    it('should handle ### headers and lists', () => {
       const input = '### Header 3\n- Item 1\n- Item 2';
       const result = renderMarkdown(input);
-      expect(result).toContain('<p><strong>Header 3</strong></p>');
+      expect(result).toContain('<h4 class="md-h">Header 3</h4>');
       expect(result).toContain('<p>• Item 1</p>');
       expect(result).toContain('<p>• Item 2</p>');
+    });
+
+    it('should render [text](slug) links with data-slug', () => {
+      const input = '- [Start a Colima instance](start-colima)';
+      const result = renderMarkdown(input);
+      expect(result).toContain('<a class="md-link" data-slug="start-colima">Start a Colima instance</a>');
     });
     
     it('should handle empty lines gracefully by adding <br />', () => {

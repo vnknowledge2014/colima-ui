@@ -12,4 +12,5 @@ export * from "./lima";
 export * from "./ai";
 export * from "./settings";
 export * from "./knowledgeBank";
+export * from "./colimaConfig";
 export * from "./sandbox";

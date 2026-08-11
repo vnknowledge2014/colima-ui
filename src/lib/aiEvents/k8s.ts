@@ -1,6 +1,7 @@
 import { isRunningInTauri } from "../env";
 // @ts-nocheck
 import { EventHandler } from "./types";
+import { openTerminalSession } from "../../store.svelte";
 import { 
   colimaApi, dockerApi, volumesApi, networksApi, sysMethods, 
   composeApi, modelsApi, k8sApi, kindApi, limaApi
@@ -160,8 +161,16 @@ export const k8sRegistry: Record<string, EventHandler> = {
     category: "NORMAL",
     description: "Open exec session into a pod",
     handler: async (p) => {
-      await k8sApi.exec(p.namespace, p.pod, p.container || "");
-      return `Exec session opened for pod '${p.pod}'.`;
+      // Opens a tab in the app's Terminal page. This used to go through
+      // `k8sApi.exec`, which launched Terminal.app via osascript — the agent
+      // would report success while the shell appeared outside the app.
+      openTerminalSession({
+        kind: "k8sExec",
+        namespace: p.namespace,
+        pod: p.pod,
+        container: p.container || "",
+      });
+      return `Exec session opened for pod '${p.pod}' in the Terminal tab.`;
     }
   },
 

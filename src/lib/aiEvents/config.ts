@@ -1,4 +1,5 @@
 import { isRunningInTauri } from "../env";
+import { runSandboxed } from "./shell";
 // @ts-nocheck
 import { EventHandler } from "./types";
 import { 
@@ -117,11 +118,11 @@ export const configRegistry: Record<string, EventHandler> = {
     description: "Execute a command through the App CLI gateway",
     handler: async (p) => {
       if (isRunningInTauri()) {
-        const { invoke } = await import("@tauri-apps/api/core");
         try {
-          const result = await invoke("execute_shell", { command: p.command, args: p.args || [] });
-          return String(result);
+          return await runSandboxed(p.command, p.args || []);
         } catch (e: any) {
+          // Includes the sandbox's own refusals — a `banned:` reason for
+          // command chaining, or an argument the executor cannot represent.
           return `Error executing command: ${e.message || e}`;
         }
       }

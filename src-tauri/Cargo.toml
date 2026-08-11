@@ -40,6 +40,9 @@ regex-lite = "0.1"
 tauri-plugin-http = "2.5.9"
 rand = "0.8"
 sha2 = "0.11.0"
+# Real pseudo-terminal. Replaces the `script(1)` wrapper, which only bought
+# character echo — a PTY is what carries window size, signals and job control.
+portable-pty = "0.9"
 async-trait = "0.1"
 clap = { version = "4", features = ["derive"], optional = true }
 

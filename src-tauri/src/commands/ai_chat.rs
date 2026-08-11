@@ -23,16 +23,140 @@ pub struct AiChatHistoryMessage {
     pub content: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AiConversation {
+    pub id: String,
+    pub title: String,
+    pub updated_at: i64,
+    pub message_count: i64,
+    /// First user message, trimmed — the list needs a preview even for threads
+    /// the user never renamed.
+    pub preview: String,
+}
+
+/// The thread every message lands in until the user starts a new one. Also the
+/// bucket pre-thread history is migrated into, so it must always exist.
+pub const DEFAULT_CONVERSATION_ID: &str = "default";
+
+/// Create the row on demand. Messages carry a `conversation_id` the panel picks
+/// before the thread has ever been named, so an insert must never fail on a
+/// missing parent.
+fn ensure_conversation(conn: &rusqlite::Connection, id: &str) -> Result<(), String> {
+    conn.execute(
+        "INSERT OR IGNORE INTO chat_conversations (id, title) VALUES (?1, '')",
+        rusqlite::params![id],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 #[tauri::command]
-pub async fn ai_chat_load_history() -> Result<Vec<AiChatHistoryMessage>, crate::error::ColimaError> {
+pub async fn ai_chat_list_conversations() -> Result<Vec<AiConversation>, crate::error::ColimaError> {
     async move {
     let conn = crate::commands::knowledge_bank::get_db().lock().unwrap();
+    ensure_conversation(&conn, DEFAULT_CONVERSATION_ID)?;
+
     let mut stmt = conn
-        .prepare("SELECT id, role, content FROM chat_messages ORDER BY created_at ASC")
+        .prepare(
+            "SELECT c.id,
+                    c.title,
+                    c.updated_at,
+                    (SELECT COUNT(*) FROM chat_messages m WHERE m.conversation_id = c.id),
+                    COALESCE((SELECT m.content FROM chat_messages m
+                              WHERE m.conversation_id = c.id AND m.role = 'user'
+                              ORDER BY m.created_at ASC LIMIT 1), '')
+             FROM chat_conversations c
+             ORDER BY c.updated_at DESC",
+        )
+        .map_err(|e| e.to_string())?;
+
+    let conversations = stmt
+        .query_map([], |row| {
+            let preview: String = row.get(4)?;
+            Ok(AiConversation {
+                id: row.get(0)?,
+                title: row.get(1)?,
+                updated_at: row.get(2)?,
+                message_count: row.get(3)?,
+                preview: preview.chars().take(120).collect(),
+            })
+        })
+        .map_err(|e| e.to_string())?
+        .filter_map(Result::ok)
+        .collect();
+
+    Ok(conversations)
+    }
+    .await.map_err(|e: String| crate::error::ColimaError::from(e))
+}
+
+#[tauri::command]
+pub async fn ai_chat_create_conversation(id: String, title: String) -> Result<(), crate::error::ColimaError> {
+    async move {
+    let conn = crate::commands::knowledge_bank::get_db().lock().unwrap();
+    conn.execute(
+        "INSERT OR IGNORE INTO chat_conversations (id, title) VALUES (?1, ?2)",
+        rusqlite::params![id, title],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+    }
+    .await.map_err(|e: String| crate::error::ColimaError::from(e))
+}
+
+#[tauri::command]
+pub async fn ai_chat_rename_conversation(id: String, title: String) -> Result<(), crate::error::ColimaError> {
+    async move {
+    let conn = crate::commands::knowledge_bank::get_db().lock().unwrap();
+    conn.execute(
+        "UPDATE chat_conversations SET title = ?2 WHERE id = ?1",
+        rusqlite::params![id, title],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+    }
+    .await.map_err(|e: String| crate::error::ColimaError::from(e))
+}
+
+#[tauri::command]
+pub async fn ai_chat_delete_conversation(id: String) -> Result<(), crate::error::ColimaError> {
+    async move {
+    let conn = crate::commands::knowledge_bank::get_db().lock().unwrap();
+    conn.execute(
+        "DELETE FROM chat_messages WHERE conversation_id = ?1",
+        rusqlite::params![id],
+    )
+    .map_err(|e| e.to_string())?;
+    // The default thread is the landing spot for every new message, so it is
+    // emptied rather than removed.
+    if id != DEFAULT_CONVERSATION_ID {
+        conn.execute(
+            "DELETE FROM chat_conversations WHERE id = ?1",
+            rusqlite::params![id],
+        )
+        .map_err(|e| e.to_string())?;
+    }
+    Ok(())
+    }
+    .await.map_err(|e: String| crate::error::ColimaError::from(e))
+}
+
+#[tauri::command]
+pub async fn ai_chat_load_history(
+    conversation_id: Option<String>,
+) -> Result<Vec<AiChatHistoryMessage>, crate::error::ColimaError> {
+    async move {
+    let conversation_id = conversation_id.unwrap_or_else(|| DEFAULT_CONVERSATION_ID.to_string());
+    let conn = crate::commands::knowledge_bank::get_db().lock().unwrap();
+    let mut stmt = conn
+        .prepare(
+            "SELECT id, role, content FROM chat_messages
+             WHERE conversation_id = ?1 ORDER BY created_at ASC",
+        )
         .map_err(|e| e.to_string())?;
 
     let messages = stmt
-        .query_map([], |row| {
+        .query_map(rusqlite::params![conversation_id], |row| {
             Ok(AiChatHistoryMessage {
                 id: row.get(0)?,
                 role: row.get(1)?,
@@ -49,13 +173,24 @@ pub async fn ai_chat_load_history() -> Result<Vec<AiChatHistoryMessage>, crate::
 }
 
 #[tauri::command]
-pub async fn ai_chat_save_message(message: AiChatHistoryMessage) -> Result<(), crate::error::ColimaError> {
+pub async fn ai_chat_save_message(
+    message: AiChatHistoryMessage,
+    conversation_id: Option<String>,
+) -> Result<(), crate::error::ColimaError> {
     async move {
+    let conversation_id = conversation_id.unwrap_or_else(|| DEFAULT_CONVERSATION_ID.to_string());
     let conn = crate::commands::knowledge_bank::get_db().lock().unwrap();
+    ensure_conversation(&conn, &conversation_id)?;
     conn.execute(
-        "INSERT INTO chat_messages (id, role, content) VALUES (?1, ?2, ?3)
+        "INSERT INTO chat_messages (id, role, content, conversation_id) VALUES (?1, ?2, ?3, ?4)
          ON CONFLICT(id) DO UPDATE SET content = excluded.content",
-        rusqlite::params![message.id, message.role, message.content],
+        rusqlite::params![message.id, message.role, message.content, conversation_id],
+    )
+    .map_err(|e| e.to_string())?;
+    // Drives the ordering of the conversation list.
+    conn.execute(
+        "UPDATE chat_conversations SET updated_at = strftime('%s', 'now') WHERE id = ?1",
+        rusqlite::params![conversation_id],
     )
     .map_err(|e| e.to_string())?;
     Ok(())
@@ -64,11 +199,17 @@ pub async fn ai_chat_save_message(message: AiChatHistoryMessage) -> Result<(), c
 }
 
 #[tauri::command]
-pub async fn ai_chat_clear_history() -> Result<(), crate::error::ColimaError> {
+pub async fn ai_chat_clear_history(
+    conversation_id: Option<String>,
+) -> Result<(), crate::error::ColimaError> {
     async move {
+    let conversation_id = conversation_id.unwrap_or_else(|| DEFAULT_CONVERSATION_ID.to_string());
     let conn = crate::commands::knowledge_bank::get_db().lock().unwrap();
-    conn.execute("DELETE FROM chat_messages", [])
-        .map_err(|e| e.to_string())?;
+    conn.execute(
+        "DELETE FROM chat_messages WHERE conversation_id = ?1",
+        rusqlite::params![conversation_id],
+    )
+    .map_err(|e| e.to_string())?;
     Ok(())
     }
     .await.map_err(|e: String| crate::error::ColimaError::from(e))
@@ -143,15 +284,15 @@ async fn list_ollama_models(base_url: &str, api_key: &str) -> Result<String, Str
         req = req.header("Authorization", format!("Bearer {}", api_key));
     }
 
-    let resp = req.send().await.map_err(|e| format!("Request failed: {}", e))?;
-    let body = resp.text().await.map_err(|e| format!("Read error: {}", e))?;
+    let resp = req.send().await.map_err(|e| crate::redact::redact_err("Request failed", e))?;
+    let body = resp.text().await.map_err(|e| crate::redact::redact_err("Read error", e))?;
 
     if body.trim().is_empty() {
         return Ok("[]".to_string());
     }
 
     let resp: serde_json::Value =
-        serde_json::from_str(&body).map_err(|e| format!("JSON parse error: {}", e))?;
+        serde_json::from_str(&body).map_err(|e| crate::redact::redact_err("JSON parse error", e))?;
 
     let models: Vec<String> = resp["models"]
         .as_array()
@@ -162,7 +303,7 @@ async fn list_ollama_models(base_url: &str, api_key: &str) -> Result<String, Str
         })
         .unwrap_or_default();
 
-    serde_json::to_string(&models).map_err(|e| format!("Serialize error: {}", e))
+    serde_json::to_string(&models).map_err(|e| crate::redact::redact_err("Serialize error", e))
 }
 
 async fn list_gemini_models(api_key: &str, endpoint: &str) -> Result<String, String> {
@@ -171,21 +312,28 @@ async fn list_gemini_models(api_key: &str, endpoint: &str) -> Result<String, Str
     } else {
         endpoint.trim_end_matches('/')
     };
-    let url = format!("{}/models?key={}", base, api_key);
+    // The key travels in a header, never the URL. reqwest embeds the full URL
+    // in its error Display, so a key in the query string ends up in the toast
+    // the user copies into a bug report.
+    let url = format!("{}/models", base);
 
     let resp = http_client()
         .get(&url)
+        .header("x-goog-api-key", api_key)
         .send()
         .await
-        .map_err(|e| format!("Request failed: {}", e))?;
-    let body = resp.text().await.map_err(|e| format!("Read error: {}", e))?;
+        .map_err(|e| crate::redact::redact_err("Request failed", e))?;
+    let body = resp
+        .text()
+        .await
+        .map_err(|e| crate::redact::redact_err("Read error", e))?;
 
     if body.trim().is_empty() {
         return Ok("[]".to_string());
     }
 
     let resp: serde_json::Value =
-        serde_json::from_str(&body).map_err(|e| format!("JSON parse error: {}", e))?;
+        serde_json::from_str(&body).map_err(|e| crate::redact::redact_err("JSON parse error", e))?;
 
     let models: Vec<String> = resp["models"]
         .as_array()
@@ -208,7 +356,7 @@ async fn list_gemini_models(api_key: &str, endpoint: &str) -> Result<String, Str
         })
         .unwrap_or_default();
 
-    serde_json::to_string(&models).map_err(|e| format!("Serialize error: {}", e))
+    serde_json::to_string(&models).map_err(|e| crate::redact::redact_err("Serialize error", e))
 }
 
 async fn list_anthropic_models(api_key: &str, endpoint: &str) -> Result<String, String> {
@@ -229,15 +377,15 @@ async fn list_anthropic_models(api_key: &str, endpoint: &str) -> Result<String, 
         .header("anthropic-version", "2023-06-01")
         .send()
         .await
-        .map_err(|e| format!("Request failed: {}", e))?;
-    let body = resp.text().await.map_err(|e| format!("Read error: {}", e))?;
+        .map_err(|e| crate::redact::redact_err("Request failed", e))?;
+    let body = resp.text().await.map_err(|e| crate::redact::redact_err("Read error", e))?;
 
     if body.trim().is_empty() {
         return Ok("[]".to_string());
     }
 
     let resp: serde_json::Value =
-        serde_json::from_str(&body).map_err(|e| format!("JSON parse error: {}", e))?;
+        serde_json::from_str(&body).map_err(|e| crate::redact::redact_err("JSON parse error", e))?;
 
     let models: Vec<String> = resp["data"]
         .as_array()
@@ -248,7 +396,7 @@ async fn list_anthropic_models(api_key: &str, endpoint: &str) -> Result<String, 
         })
         .unwrap_or_default();
 
-    serde_json::to_string(&models).map_err(|e| format!("Serialize error: {}", e))
+    serde_json::to_string(&models).map_err(|e| crate::redact::redact_err("Serialize error", e))
 }
 
 async fn list_openai_models(api_key: &str, endpoint: &str) -> Result<String, String> {
@@ -268,15 +416,15 @@ async fn list_openai_models(api_key: &str, endpoint: &str) -> Result<String, Str
         .header("Authorization", format!("Bearer {}", api_key))
         .send()
         .await
-        .map_err(|e| format!("Request failed: {}", e))?;
-    let body = resp.text().await.map_err(|e| format!("Read error: {}", e))?;
+        .map_err(|e| crate::redact::redact_err("Request failed", e))?;
+    let body = resp.text().await.map_err(|e| crate::redact::redact_err("Read error", e))?;
 
     if body.trim().is_empty() {
         return Ok("[]".to_string());
     }
 
     let resp: serde_json::Value =
-        serde_json::from_str(&body).map_err(|e| format!("JSON parse error: {}", e))?;
+        serde_json::from_str(&body).map_err(|e| crate::redact::redact_err("JSON parse error", e))?;
 
     let mut models: Vec<String> = resp["data"]
         .as_array()
@@ -302,7 +450,7 @@ async fn list_openai_models(api_key: &str, endpoint: &str) -> Result<String, Str
     models.sort();
     models.reverse(); // newest first (gpt-5 before gpt-4)
 
-    serde_json::to_string(&models).map_err(|e| format!("Serialize error: {}", e))
+    serde_json::to_string(&models).map_err(|e| crate::redact::redact_err("Serialize error", e))
 }
 
 // ===== Chat implementations =====
@@ -349,12 +497,12 @@ async fn call_anthropic(req: &AiChatRequest) -> Result<String, String> {
         .json(&body)
         .send()
         .await
-        .map_err(|e| format!("Request failed: {}", e))?;
+        .map_err(|e| crate::redact::redact_err("Request failed", e))?;
 
     let resp_body: serde_json::Value = resp
         .json()
         .await
-        .map_err(|e| format!("JSON parse error: {}", e))?;
+        .map_err(|e| crate::redact::redact_err("JSON parse error", e))?;
 
     if let Some(err) = resp_body.get("error") {
         return Err(format!(
@@ -409,12 +557,12 @@ async fn call_openai(req: &AiChatRequest) -> Result<String, String> {
         .json(&body)
         .send()
         .await
-        .map_err(|e| format!("Request failed: {}", e))?;
+        .map_err(|e| crate::redact::redact_err("Request failed", e))?;
 
     let resp_body: serde_json::Value = resp
         .json()
         .await
-        .map_err(|e| format!("JSON parse error: {}", e))?;
+        .map_err(|e| crate::redact::redact_err("JSON parse error", e))?;
 
     if let Some(err) = resp_body.get("error") {
         return Err(format!(
@@ -472,23 +620,22 @@ async fn call_gemini(req: &AiChatRequest) -> Result<String, String> {
     } else {
         req.endpoint.trim_end_matches('/')
     };
-    let url = format!(
-        "{}/models/{}:generateContent?key={}",
-        base, req.model, req.api_key
-    );
+    // Key in a header, not the query string — see list_gemini_models.
+    let url = format!("{}/models/{}:generateContent", base, req.model);
 
     let resp = http_client()
         .post(&url)
         .header("Content-Type", "application/json")
+        .header("x-goog-api-key", &req.api_key)
         .json(&body)
         .send()
         .await
-        .map_err(|e| format!("Request failed: {}", e))?;
+        .map_err(|e| crate::redact::redact_err("Request failed", e))?;
 
     let resp_body: serde_json::Value = resp
         .json()
         .await
-        .map_err(|e| format!("JSON parse error: {}", e))?;
+        .map_err(|e| crate::redact::redact_err("JSON parse error", e))?;
 
     if let Some(err) = resp_body.get("error") {
         return Err(format!(
@@ -536,20 +683,19 @@ async fn call_ollama(req: &AiChatRequest, base_url: &str) -> Result<String, Stri
         .json(&body)
         .send()
         .await
-        .map_err(|e| format!("Request failed: {} — is the server running?", e))?;
+        .map_err(|e| crate::redact::redact_err("Request failed (is the server running?)", e))?;
 
-    let resp_text = resp.text().await.map_err(|e| format!("Read error: {}", e))?;
+    let resp_text = resp.text().await.map_err(|e| crate::redact::redact_err("Read error", e))?;
 
     if resp_text.trim().is_empty() {
         return Err("Empty response from Ollama — is the server running?".to_string());
     }
 
     let resp_body: serde_json::Value = serde_json::from_str(&resp_text).map_err(|e| {
-        format!(
-            "JSON parse error: {} — raw: {}",
-            e,
-            &resp_text[..resp_text.len().min(200)]
-        )
+        // Take chars, not bytes: byte slicing panics mid-codepoint on UTF-8.
+        // The body is redacted because a server can echo credentials back.
+        let preview: String = resp_text.chars().take(200).collect();
+        crate::redact::redact(&format!("JSON parse error: {} — raw: {}", e, preview))
     })?;
 
     if let Some(err) = resp_body.get("error") {
@@ -563,9 +709,7 @@ async fn call_ollama(req: &AiChatRequest, base_url: &str) -> Result<String, Stri
         .as_str()
         .map(|s| s.to_string())
         .ok_or_else(|| {
-            format!(
-                "No response content from Ollama — raw: {}",
-                &resp_text[..resp_text.len().min(200)]
-            )
+            let preview: String = resp_text.chars().take(200).collect();
+            crate::redact::redact(&format!("No response content from Ollama — raw: {}", preview))
         })
 }

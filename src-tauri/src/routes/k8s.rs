@@ -20,6 +20,10 @@ pub async fn api_k8s_action(Query(q): Query<K8sQuery>) -> (StatusCode, Json<ApiR
         if !valid_actions.contains(&action.as_str()) {
             return Err(format!("Invalid kubernetes action: {}", action));
         }
+        // This route builds the colima argv itself instead of delegating to
+        // commands::colima, so it needs its own guard — the profile is pushed
+        // straight into argv below.
+        crate::validation::ensure_valid_profile(&profile)?;
         let mut args = vec!["kubernetes".to_string(), action.clone()];
         if profile != "default" && !profile.is_empty() {
             args.push("--profile".to_string());
@@ -241,58 +245,12 @@ pub async fn api_k8s_events(Query(q): Query<K8sNsQuery>) -> (StatusCode, Json<Ap
 pub async fn api_k8s_resources(
     Query(q): Query<K8sResourceQuery>,
 ) -> (StatusCode, Json<ApiResponse<String>>) {
-    let resource = q.resource;
-    let ns = q.namespace;
-    // Whitelist allowed resource types
-    let allowed = [
-        "pods",
-        "deployments",
-        "services",
-        "namespaces",
-        "configmaps",
-        "secrets",
-        "statefulsets",
-        "daemonsets",
-        "replicasets",
-        "jobs",
-        "cronjobs",
-        "ingresses",
-        "persistentvolumes",
-        "persistentvolumeclaims",
-        "pv",
-        "pvc",
-        "endpoints",
-        "serviceaccounts",
-        "roles",
-        "rolebindings",
-        "clusterroles",
-        "clusterrolebindings",
-        "storageclasses",
-        "networkpolicies",
-        "horizontalpodautoscalers",
-        "hpa",
-        "limitranges",
-        "resourcequotas",
-        "poddisruptionbudgets",
-        "pdb",
-    ];
-    if !allowed.contains(&resource.as_str()) {
-        return err(format!("Resource type '{}' not allowed", resource));
-    }
-    match run_blocking(move || {
-        if ns.is_empty() || ns == "all" {
-            run_cmd(
-                "kubectl",
-                &["get", &resource, "-o", "json", "--all-namespaces"],
-            )
-        } else {
-            run_cmd("kubectl", &["get", &resource, "-o", "json", "-n", &ns])
-        }
-    })
-    .await
-    {
+    // Delegates to the command so both transports share one allowlist and one
+    // implementation; they used to diverge, and the Tauri side simply did not
+    // exist.
+    match crate::commands::kubernetes::k8s_resources(q.resource, q.namespace).await {
         Ok(out) => ok(out),
-        Err(e) => err(e.to_string()),
+        Err(e) => err(e),
     }
 }
 
@@ -754,224 +712,10 @@ pub async fn api_k8s_generic_scale(
 
 
 pub async fn api_k8s_cluster_health() -> (StatusCode, Json<ApiResponse<String>>) {
-    match run_blocking(|| {
-        // Gather data from multiple sources
-        let pods_raw = run_cmd("kubectl", &["get", "pods", "--all-namespaces", "-o", "json"]).unwrap_or_default();
-        let deploys_raw = run_cmd("kubectl", &["get", "deployments", "--all-namespaces", "-o", "json"]).unwrap_or_default();
-        let pvcs_raw = run_cmd("kubectl", &["get", "pvc", "--all-namespaces", "-o", "json"]).unwrap_or_default();
-        let events_raw = run_cmd("kubectl", &["get", "events", "--all-namespaces", "--field-selector=type=Warning", "-o", "json"]).unwrap_or_default();
-        let nodes_raw = run_cmd("kubectl", &["get", "nodes", "-o", "json"]).unwrap_or_default();
-
-        let mut issues: Vec<serde_json::Value> = Vec::new();
-        let mut score: u32 = 100;
-
-        // Check pods
-        if let Ok(pods) = serde_json::from_str::<serde_json::Value>(&pods_raw) {
-            if let Some(items) = pods["items"].as_array() {
-                let total_pods = items.len();
-                let mut unhealthy = 0u32;
-                for pod in items {
-                    let phase = pod["status"]["phase"].as_str().unwrap_or("");
-                    let name = pod["metadata"]["name"].as_str().unwrap_or("");
-                    let ns = pod["metadata"]["namespace"].as_str().unwrap_or("");
-                    let containers = pod["status"]["containerStatuses"].as_array();
-
-                    if phase == "Failed" || phase == "Unknown" {
-                        unhealthy += 1;
-                        issues.push(serde_json::json!({
-                            "severity": "error",
-                            "category": "Pod",
-                            "resource": format!("{}/{}", ns, name),
-                            "message": format!("Pod is in {} phase", phase)
-                        }));
-                    } else if phase == "Pending" {
-                        unhealthy += 1;
-                        issues.push(serde_json::json!({
-                            "severity": "warning",
-                            "category": "Pod",
-                            "resource": format!("{}/{}", ns, name),
-                            "message": "Pod is pending"
-                        }));
-                    }
-
-                    if let Some(statuses) = containers {
-                        for cs in statuses {
-                            let restarts = cs["restartCount"].as_u64().unwrap_or(0);
-                            let ready = cs["ready"].as_bool().unwrap_or(false);
-                            let cname = cs["name"].as_str().unwrap_or("");
-                            if restarts > 5 {
-                                issues.push(serde_json::json!({
-                                    "severity": "warning",
-                                    "category": "Pod",
-                                    "resource": format!("{}/{}", ns, name),
-                                    "message": format!("Container {} has {} restarts", cname, restarts)
-                                }));
-                            }
-                            if !ready {
-                                issues.push(serde_json::json!({
-                                    "severity": "warning",
-                                    "category": "Pod",
-                                    "resource": format!("{}/{}", ns, name),
-                                    "message": format!("Container {} is not ready", cname)
-                                }));
-                            }
-                            // Check CrashLoopBackOff
-                            if let Some(waiting) = cs["state"]["waiting"]["reason"].as_str() {
-                                if waiting == "CrashLoopBackOff" || waiting == "ImagePullBackOff" || waiting == "ErrImagePull" {
-                                    issues.push(serde_json::json!({
-                                        "severity": "error",
-                                        "category": "Pod",
-                                        "resource": format!("{}/{}", ns, name),
-                                        "message": format!("Container {} in {}", cname, waiting)
-                                    }));
-                                }
-                            }
-                        }
-                    }
-                }
-                if unhealthy > 0 {
-                    score = score.saturating_sub(unhealthy * 5);
-                }
-                issues.push(serde_json::json!({
-                    "severity": "info",
-                    "category": "Summary",
-                    "resource": "Pods",
-                    "message": format!("{} total, {} unhealthy", total_pods, unhealthy)
-                }));
-            }
-        }
-
-        // Check deployments
-        if let Ok(deploys) = serde_json::from_str::<serde_json::Value>(&deploys_raw) {
-            if let Some(items) = deploys["items"].as_array() {
-                for dep in items {
-                    let name = dep["metadata"]["name"].as_str().unwrap_or("");
-                    let ns = dep["metadata"]["namespace"].as_str().unwrap_or("");
-                    let desired = dep["spec"]["replicas"].as_u64().unwrap_or(0);
-                    let ready = dep["status"]["readyReplicas"].as_u64().unwrap_or(0);
-                    let available = dep["status"]["availableReplicas"].as_u64().unwrap_or(0);
-                    if ready < desired {
-                        score = score.saturating_sub(3);
-                        issues.push(serde_json::json!({
-                            "severity": "warning",
-                            "category": "Deployment",
-                            "resource": format!("{}/{}", ns, name),
-                            "message": format!("Only {}/{} replicas ready", ready, desired)
-                        }));
-                    }
-                    if available < desired {
-                        issues.push(serde_json::json!({
-                            "severity": "warning",
-                            "category": "Deployment",
-                            "resource": format!("{}/{}", ns, name),
-                            "message": format!("Only {}/{} replicas available", available, desired)
-                        }));
-                    }
-                }
-            }
-        }
-
-        // Check PVCs
-        if let Ok(pvcs) = serde_json::from_str::<serde_json::Value>(&pvcs_raw) {
-            if let Some(items) = pvcs["items"].as_array() {
-                for pvc in items {
-                    let name = pvc["metadata"]["name"].as_str().unwrap_or("");
-                    let ns = pvc["metadata"]["namespace"].as_str().unwrap_or("");
-                    let phase = pvc["status"]["phase"].as_str().unwrap_or("");
-                    if phase != "Bound" {
-                        score = score.saturating_sub(5);
-                        issues.push(serde_json::json!({
-                            "severity": "error",
-                            "category": "PVC",
-                            "resource": format!("{}/{}", ns, name),
-                            "message": format!("PVC is {}", phase)
-                        }));
-                    }
-                }
-            }
-        }
-
-        // Check nodes
-        if let Ok(nodes) = serde_json::from_str::<serde_json::Value>(&nodes_raw) {
-            if let Some(items) = nodes["items"].as_array() {
-                for node in items {
-                    let name = node["metadata"]["name"].as_str().unwrap_or("");
-                    let conditions = node["status"]["conditions"].as_array();
-                    if let Some(conds) = conditions {
-                        for cond in conds {
-                            let ctype = cond["type"].as_str().unwrap_or("");
-                            let status = cond["status"].as_str().unwrap_or("");
-                            if ctype == "Ready" && status != "True" {
-                                score = score.saturating_sub(15);
-                                issues.push(serde_json::json!({
-                                    "severity": "error",
-                                    "category": "Node",
-                                    "resource": name,
-                                    "message": "Node is NotReady"
-                                }));
-                            }
-                            if (ctype == "MemoryPressure" || ctype == "DiskPressure" || ctype == "PIDPressure") && status == "True" {
-                                score = score.saturating_sub(10);
-                                issues.push(serde_json::json!({
-                                    "severity": "error",
-                                    "category": "Node",
-                                    "resource": name,
-                                    "message": format!("{} detected", ctype)
-                                }));
-                            }
-                        }
-                    }
-                    // Check unschedulable
-                    if node["spec"]["unschedulable"].as_bool().unwrap_or(false) {
-                        issues.push(serde_json::json!({
-                            "severity": "warning",
-                            "category": "Node",
-                            "resource": name,
-                            "message": "Node is cordoned (unschedulable)"
-                        }));
-                    }
-                }
-            }
-        }
-
-        // Check warning events
-        if let Ok(events) = serde_json::from_str::<serde_json::Value>(&events_raw) {
-            if let Some(items) = events["items"].as_array() {
-                let warning_count = items.len();
-                if warning_count > 0 {
-                    score = score.saturating_sub(std::cmp::min(warning_count as u32, 10));
-                    // Get top 5 warnings
-                    for evt in items.iter().rev().take(5) {
-                        let reason = evt["reason"].as_str().unwrap_or("");
-                        let msg = evt["message"].as_str().unwrap_or("").chars().take(120).collect::<String>();
-                        let obj = format!("{}/{}",
-                            evt["involvedObject"]["kind"].as_str().unwrap_or(""),
-                            evt["involvedObject"]["name"].as_str().unwrap_or(""));
-                        issues.push(serde_json::json!({
-                            "severity": "warning",
-                            "category": "Event",
-                            "resource": obj,
-                            "message": format!("{}: {}", reason, msg)
-                        }));
-                    }
-                    issues.push(serde_json::json!({
-                        "severity": "info",
-                        "category": "Summary",
-                        "resource": "Events",
-                        "message": format!("{} warning events", warning_count)
-                    }));
-                }
-            }
-        }
-
-        let result = serde_json::json!({
-            "score": std::cmp::max(score, 0),
-            "grade": if score >= 90 { "A" } else if score >= 75 { "B" } else if score >= 60 { "C" } else if score >= 40 { "D" } else { "F" },
-            "issues": issues
-        });
-
-        Ok(result.to_string())
-    }).await {
+    // Delegates: the report is ~200 lines of JSON analysis and lived here as
+    // the only copy until the IPC layer needed it too. One implementation, in
+    // commands::k8s_cluster, so the two transports cannot drift.
+    match run_blocking(crate::commands::k8s_cluster::cluster_health_report).await {
         Ok(out) => ok(out),
         Err(e) => err(e.to_string()),
     }
@@ -1073,110 +817,16 @@ pub async fn api_k8s_log_stream(
 pub async fn api_k8s_benchmark(
     Json(body): Json<BenchmarkBody>,
 ) -> (StatusCode, Json<ApiResponse<String>>) {
-    let url = body.url;
-    let concurrency = body.concurrency.min(100).max(1);
-    let total = body.requests.min(10000).max(1);
-    let method = if body.method.is_empty() {
-        "GET".to_string()
-    } else {
-        body.method.to_uppercase()
-    };
-
-    // Validate URL — only allow localhost / 127.0.0.1 / K8s service IPs
-    if !url.starts_with("http://") && !url.starts_with("https://") {
-        return err("URL must start with http:// or https://".to_string());
+    // Delegates — see the note on api_k8s_cluster_health.
+    match crate::commands::k8s_cluster::run_benchmark(
+        body.url,
+        body.concurrency,
+        body.requests,
+        body.method,
+    )
+    .await
+    {
+        Ok(out) => ok(out),
+        Err(e) => err(e),
     }
-
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(30))
-        .build()
-        .unwrap_or_default();
-
-    let semaphore = std::sync::Arc::new(tokio::sync::Semaphore::new(concurrency as usize));
-    let latencies = std::sync::Arc::new(tokio::sync::Mutex::new(Vec::<u128>::with_capacity(
-        total as usize,
-    )));
-    let successes = std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0));
-    let failures = std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0));
-
-    let start = std::time::Instant::now();
-    let mut handles = Vec::new();
-
-    for _ in 0..total {
-        let permit = semaphore.clone().acquire_owned().await.unwrap();
-        let c = client.clone();
-        let u = url.clone();
-        let m = method.clone();
-        let lats = latencies.clone();
-        let succ = successes.clone();
-        let fail = failures.clone();
-
-        handles.push(tokio::spawn(async move {
-            let req_start = std::time::Instant::now();
-            let result = match m.as_str() {
-                "POST" => c.post(&u).send().await,
-                "PUT" => c.put(&u).send().await,
-                "DELETE" => c.delete(&u).send().await,
-                _ => c.get(&u).send().await,
-            };
-            let elapsed = req_start.elapsed().as_millis();
-            match result {
-                Ok(resp) if resp.status().is_success() || resp.status().is_redirection() => {
-                    succ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                }
-                _ => {
-                    fail.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                }
-            }
-            lats.lock().await.push(elapsed);
-            drop(permit);
-        }));
-    }
-
-    for h in handles {
-        let _ = h.await;
-    }
-
-    let total_time = start.elapsed().as_millis();
-    let mut lats = latencies.lock().await;
-    lats.sort();
-
-    let count = lats.len();
-    let avg = if count > 0 {
-        lats.iter().sum::<u128>() / count as u128
-    } else {
-        0
-    };
-    let p50 = if count > 0 { lats[count * 50 / 100] } else { 0 };
-    let p95 = if count > 0 { lats[count * 95 / 100] } else { 0 };
-    let p99 = if count > 0 {
-        lats[count.saturating_sub(1) * 99 / 100]
-    } else {
-        0
-    };
-    let min = lats.first().copied().unwrap_or(0);
-    let max = lats.last().copied().unwrap_or(0);
-    let rps = if total_time > 0 {
-        count as f64 / total_time as f64 * 1000.0
-    } else {
-        0.0
-    };
-
-    let result = serde_json::json!({
-        "total_requests": total,
-        "success": successes.load(std::sync::atomic::Ordering::Relaxed),
-        "failed": failures.load(std::sync::atomic::Ordering::Relaxed),
-        "total_time_ms": total_time,
-        "avg_latency_ms": avg,
-        "min_latency_ms": min,
-        "max_latency_ms": max,
-        "p50_ms": p50,
-        "p95_ms": p95,
-        "p99_ms": p99,
-        "requests_per_sec": format!("{:.1}", rps),
-        "concurrency": concurrency,
-        "method": method,
-    });
-
-    ok(result.to_string())
 }

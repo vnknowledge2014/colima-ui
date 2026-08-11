@@ -3,6 +3,7 @@
   import { sysMethods, colimaApi, type SystemInfo, type PlatformInfo } from "../lib/api";
   import { setAppSetting } from "../lib/settingsStore.svelte";
   import { t, getLanguage } from "../lib/i18n.svelte";
+  import { loadCapabilities, capability } from "../store/capabilities.svelte";
   import Icon from "./Icon.svelte";
 
   let { systemInfo, onComplete, onSkip } = $props<{
@@ -106,15 +107,26 @@
       }
     }
 
-    if (systemInfo) {
-      updated[1].status = systemInfo.colima_installed ? "installed" : "missing";
-      updated[1].version = systemInfo.colima_version ? systemInfo.colima_version.split("\n")[0] : "";
-      updated[2].status = systemInfo.docker_installed ? "installed" : "missing";
-      updated[2].version = systemInfo.docker_version ? systemInfo.docker_version.split("\n")[0] : "";
-      updated[3].status = systemInfo.lima_installed ? "installed" : "missing";
-      updated[3].version = systemInfo.lima_version ? systemInfo.lima_version.split("\n")[0] : "";
-    } else {
-      for (let i = 1; i <= 3; i++) updated[i].status = "missing";
+    // Single source of truth — the same detection every other page reads, so
+    // the wizard and the rest of the app can no longer disagree about whether
+    // something is installed.
+    await loadCapabilities();
+
+    const depStatus = (id: string): DepStatus => {
+      const cap = capability(id);
+      if (!cap) return "missing";
+      // The wizard asks "is it installed"; whether the VM is running is a
+      // separate question it does not present.
+      if (cap.state === "missing") return "missing";
+      // Detection failing is not evidence of absence — do not tell the user to
+      // install something that may already be there.
+      if (cap.state === "unknown") return "failed";
+      return "installed";
+    };
+
+    for (const [index, id] of [[1, "colima"], [2, "docker"], [3, "lima"]] as const) {
+      updated[index].status = depStatus(id);
+      updated[index].version = capability(id)?.version ?? "";
     }
 
     if (platform) {

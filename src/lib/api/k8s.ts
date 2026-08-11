@@ -1,4 +1,4 @@
-import { call } from "./client";
+import { call, resolveApiBase } from "./client";
 import type { ColimaInstance, InstanceStatus, StartConfig, DockerContainer, DockerImage, SystemInfo, AiModel, DockerVolume, DockerNetwork } from "./types";
 
 // ===== Kubernetes API =====
@@ -73,10 +73,11 @@ export const k8sApi = {
   crdResources: (resource: string, namespace = "all") =>
     call<string>("k8s_crd_resources", { resource, namespace }, "GET", "/api/k8s/crds/resources", { resource, namespace }),
   // Log streaming — returns URL for EventSource (SSE)
-  logStreamUrl: (namespace: string, pod: string, container = "", tail = 50) => {
+  // Async because the server may bind a fallback port — see resolveApiBase().
+  logStreamUrl: async (namespace: string, pod: string, container = "", tail = 50) => {
     const params = new URLSearchParams({ namespace, pod, tail: String(tail) });
     if (container) params.set("container", container);
-    return `http://127.0.0.1:11420/api/k8s/pods/logs/stream?${params}`;
+    return `${await resolveApiBase()}/api/k8s/pods/logs/stream?${params}`;
   },
   // Benchmark
   benchmark: (url: string, concurrency = 5, requests = 50, method = "GET") =>

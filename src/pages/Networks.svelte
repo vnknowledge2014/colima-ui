@@ -5,6 +5,7 @@
   import { resourceState } from "../store.svelte";
   import * as Icons from "../components/Icons.svelte";
   import { t } from "../lib/i18n.svelte";
+  import { blockingCapability, capabilityNotice } from "../store/capabilities.svelte";
 
   let searchTerm = $state("");
   let showCreate = $state(false);
@@ -263,8 +264,14 @@
   {#if resourceState.networksLoading}
     <div style="text-align: center; padding: 40px; color: var(--text-muted);">{t('networks.loading', { default: 'Loading networks...' })}</div>
   {:else if filteredNetworks.length === 0}
+    {@const blocked = searchTerm ? undefined : blockingCapability("colima", "docker")}
     <div style="text-align: center; padding: 40px; color: var(--text-muted);">
-      {searchTerm ? t('networks.no_match', { default: 'No networks match your search' }) : t('networks.no_networks', { default: 'No networks found' })}
+      {#if blocked}
+        <div>{capabilityNotice(blocked).title}</div>
+        <div style="margin-top: 6px; font-size: 0.9em;">{capabilityNotice(blocked).text}</div>
+      {:else}
+        {searchTerm ? t('networks.no_match', { default: 'No networks match your search' }) : t('networks.no_networks', { default: 'No networks found' })}
+      {/if}
     </div>
   {:else}
     <div style="display: flex; flex-direction: column; gap: 8px;">

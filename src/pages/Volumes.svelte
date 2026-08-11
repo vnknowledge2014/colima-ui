@@ -6,6 +6,7 @@
   import { resourceState } from "../store.svelte";
   import * as Icons from "../components/Icons.svelte";
   import { formatVolumeName } from "../lib/formatters";
+  import { blockingCapability, capabilityNotice } from "../store/capabilities.svelte";
 
   let searchTerm = $state("");
   let showCreate = $state(false);
@@ -237,8 +238,14 @@
   {#if resourceState.volumesLoading}
     <div style="text-align: center; padding: 40px; color: var(--text-muted);">{t('volumes.loading', { default: 'Loading volumes...' })}</div>
   {:else if filteredVolumes.length === 0}
+    {@const blocked = searchTerm ? undefined : blockingCapability("colima", "docker")}
     <div style="text-align: center; padding: 40px; color: var(--text-muted);">
-      {searchTerm ? t('volumes.no_search', { default: 'No volumes match your search' }) : t('volumes.no_found', { default: 'No volumes found' })}
+      {#if blocked}
+        <div>{capabilityNotice(blocked).title}</div>
+        <div style="margin-top: 6px; font-size: 0.9em;">{capabilityNotice(blocked).text}</div>
+      {:else}
+        {searchTerm ? t('volumes.no_search', { default: 'No volumes match your search' }) : t('volumes.no_found', { default: 'No volumes found' })}
+      {/if}
     </div>
   {:else}
     <div style="display: flex; flex-direction: column; gap: 8px;">

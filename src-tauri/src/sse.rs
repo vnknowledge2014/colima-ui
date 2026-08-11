@@ -126,41 +126,11 @@ async fn fetch_docker_state(docker: &bollard::Docker) -> Option<serde_json::Valu
         .await
         .unwrap_or_default();
 
-    let mut mapped_containers = Vec::new();
-    for c in containers {
-        let names = c.names.unwrap_or_default().join(", ").replace("/", "");
-        let ports = match c.ports {
-            Some(ports) => ports
-                .iter()
-                .map(|p| {
-                    let typ_str = p
-                        .typ
-                        .as_ref()
-                        .map(|t| format!("{:?}", t).to_lowercase().replace("\"", ""))
-                        .unwrap_or_else(|| "tcp".to_string());
-                    if let Some(ip) = &p.ip {
-                        format!("{}:{}->{}/{}", ip, p.public_port.unwrap_or(0), p.private_port, typ_str)
-                    } else {
-                        format!("{}/{}", p.private_port, typ_str)
-                    }
-                })
-                .collect::<Vec<String>>()
-                .join(", "),
-            None => "".to_string(),
-        };
-
-        mapped_containers.push(serde_json::json!({
-            "id": c.id.unwrap_or_default(),
-            "Names": names,
-            "Image": c.image.unwrap_or_default(),
-            "Status": c.status.unwrap_or_default(),
-            "State": c.state.unwrap_or_default(),
-            "Ports": ports,
-            "CreatedAt": c.created.unwrap_or(0).to_string(),
-            "Size": c.size_rw.unwrap_or(0).to_string(),
-            "Command": c.command.unwrap_or_default(),
-        }));
-    }
+    // Reuse the single mapper rather than keeping a second copy here. The
+    // two had already drifted — this one emitted a lowercase "id" — and a
+    // divergence like that means a feature works in one mode and silently
+    // not the other.
+    let mapped_containers = crate::docker_state::map_containers(&containers);
 
     let mut mapped_images = Vec::new();
     for i in images {

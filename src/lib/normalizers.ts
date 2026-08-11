@@ -20,6 +20,12 @@ export function normalizeContainer(v: Record<string, any>): DockerContainer {
     CreatedAt: v.CreatedAt || v.created_at || v.createdAt || "",
     Size: v.Size || v.size || "",
     Command: v.Command || v.command || "",
+    // The backend always sends an object; guard anyway so a container from an
+    // older payload cannot break grouping.
+    Labels:
+      v.Labels && typeof v.Labels === "object" && !Array.isArray(v.Labels)
+        ? (v.Labels as Record<string, string>)
+        : {},
   };
 }
 

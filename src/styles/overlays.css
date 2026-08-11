@@ -74,6 +74,72 @@
 }
 
 /* ===== Toast Notifications =====
-   Styles are self-contained in ToastContainer.svelte (scoped <style> block).
-   Global overrides (if needed) go here.
-   ============================= */
+
+   These are NOT optional, and the note that replaced them ("self-contained in
+   ToastContainer.svelte") described a different component. That version was
+   self-contained; this one is not — it renders `.toast-container` and
+   `.toast-item toast-<type>` and supplies only the extra column layout its
+   hint and action rows need. Deleting this section left every toast unstyled.
+
+   The loss was silent: the deletion arrived on one side of a merge while this
+   branch left the region untouched, so git resolved it without raising a
+   conflict. Position, colour and entry animation live here; per-toast layout
+   lives in the component. */
+
+.toast-container {
+  position: fixed;
+  top: 16px;
+  right: 16px;
+  z-index: 99999;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: 420px;
+}
+
+.toast-item {
+  padding: 12px 20px;
+  border-radius: var(--radius-md);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(12px);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  /* Button reset */
+  font-family: inherit;
+  text-align: left;
+  width: 100%;
+  animation: toast-slide-in 0.3s ease-out;
+}
+
+.toast-success {
+  background: #1a2e1a;
+  border: 1px solid var(--accent-green);
+  color: var(--accent-green);
+}
+
+.toast-error {
+  background: #2e1a1a;
+  border: 1px solid var(--accent-red);
+  color: var(--accent-red);
+}
+
+.toast-info {
+  background: #1a1a2e;
+  border: 1px solid var(--accent-blue);
+  color: var(--accent-blue);
+}
+
+@keyframes toast-slide-in {
+  from {
+    opacity: 0;
+    transform: translateX(100%);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}

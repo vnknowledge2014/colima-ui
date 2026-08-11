@@ -1,4 +1,5 @@
 import type { ChatMessage } from "./api";
+import { redact } from "./redact";
 
 // Use Tauri's fetch (bypasses CORS) when available, fall back to native fetch in browser mode.
 // The lazy import avoids a crash when @tauri-apps/plugin-http is not available.
@@ -22,7 +23,8 @@ export async function chatStream(
   apiKey: string,
   messages: ChatMessage[],
   endpoint: string,
-  onChunk: (text: string) => void
+  onChunk: (text: string) => void,
+  signal?: AbortSignal
 ): Promise<void> {
   const isAnthropic = provider === "anthropic";
   const isGemini = provider === "gemini";
@@ -52,7 +54,10 @@ export async function chatStream(
     body = { model: model || "gpt-3.5-turbo", messages, stream: true };
   } else if (isGemini) {
     let m = model || "gemini-1.5-flash";
-    url = `https://generativelanguage.googleapis.com/v1beta/models/${m}:streamGenerateContent?key=${apiKey}`;
+    // Key in a header, not the query string: a failing request surfaces its URL
+    // in the error message, which the user then copies into a bug report.
+    url = `https://generativelanguage.googleapis.com/v1beta/models/${m}:streamGenerateContent`;
+    headers["x-goog-api-key"] = apiKey;
     let contents = messages.filter(m => m.role !== "system").map(m => ({
       role: m.role === "assistant" ? "model" : "user",
       parts: [{ text: m.content }]
@@ -68,16 +73,16 @@ export async function chatStream(
   }
 
   const fetchFn = await getFetch();
-  let response: Response;
-  try {
-    response = await fetchFn(url, {
-      method: "POST",
-      headers,
-      body: JSON.stringify(body),
-    });
-  } catch (networkErr: any) {
-    // TypeError: Failed to fetch / net::ERR_NAME_NOT_RESOLVED / etc.
-    throw new Error(`Cannot connect to ${provider} at ${url.replace(/\?.*/, "")}. Check your Endpoint URL in Settings.\n(${networkErr?.message || networkErr})`);
+  const response = await fetchFn(url, {
+    method: "POST",
+    headers,
+    body: JSON.stringify(body),
+    signal,
+  });
+
+  if (!response.ok) {
+    // The body is redacted because a provider can echo the credential back.
+    throw new Error(redact(`HTTP Error ${response.status}: ${await response.text()}`));
   }
 
   if (!response!.ok) {
@@ -93,6 +98,13 @@ export async function chatStream(
     // Gemini stream format is an array of objects but chunks might be split
     let buffer = "";
     while (true) {
+      // Checked per chunk, not only on the fetch: Tauri's HTTP plugin can have
+      // the body in flight already, so a cancelled request would otherwise keep
+      // streaming text into a message the user has stopped.
+      if (signal?.aborted) {
+        await reader.cancel().catch(() => {});
+        break;
+      }
       const { done, value } = await reader.read();
       if (done) break;
       buffer += decoder.decode(value, { stream: true });
@@ -117,6 +129,13 @@ export async function chatStream(
     // SSE Format for OpenAI, Anthropic, Ollama
     let buffer = "";
     while (true) {
+      // Checked per chunk, not only on the fetch: Tauri's HTTP plugin can have
+      // the body in flight already, so a cancelled request would otherwise keep
+      // streaming text into a message the user has stopped.
+      if (signal?.aborted) {
+        await reader.cancel().catch(() => {});
+        break;
+      }
       const { done, value } = await reader.read();
       if (done) break;
       buffer += decoder.decode(value, { stream: true });

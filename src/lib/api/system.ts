@@ -11,6 +11,23 @@ export interface PlatformInfo {
   package_managers: Array<{ name: string; available: boolean; version: string }>;
 }
 
+/** Mirrors `CapabilityState` in `src-tauri/src/commands/system_capabilities.rs`. */
+export type CapabilityState =
+  | "missing"
+  | "installed_not_running"
+  | "running"
+  | "unknown";
+
+/** Mirrors `Capability` in `src-tauri/src/commands/system_capabilities.rs`. */
+export interface Capability {
+  id: string;
+  name: string;
+  state: CapabilityState;
+  version?: string;
+  install_hint?: string;
+  doc_id?: string;
+}
+
 export interface HostSpecs {
   cpu_cores: number;
   memory_gib: number;
@@ -18,6 +35,25 @@ export interface HostSpecs {
   disk_total_gib: number;
   arch: string;
   model: string;
+}
+
+/**
+ * Mirrors `EngineResources` in `src-tauri/src/commands/engine_resources.rs`.
+ * `available: false` means the engine was unreachable — callers fall back to
+ * the VM config numbers instead of rendering zeros.
+ */
+export interface EngineResources {
+  available: boolean;
+  engineName: string;
+  serverVersion: string;
+  operatingSystem: string;
+  cpuCores: number;
+  cpuPercent: number;
+  memoryTotalBytes: number;
+  memoryUsedBytes: number;
+  diskUsedBytes: number;
+  diskReclaimableBytes: number;
+  containersRunning: number;
 }
 
 export const systemApi = {
@@ -33,6 +69,32 @@ export const systemApi = {
   // Host hardware detection
   hostSpecs: () =>
     call<HostSpecs>("host_specs", undefined, "GET", "/api/system/host-specs"),
+
+  /**
+   * Live CPU / RAM / disk of the active container engine. Works with any engine
+   * (Colima, Docker Desktop, OrbStack, Rancher), unlike the VM figures read from
+   * colima.yaml which only exist for Colima-managed profiles.
+   */
+  engineResources: () =>
+    call<EngineResources>(
+      "engine_resources",
+      undefined,
+      "GET",
+      "/api/system/engine-resources",
+    ),
+
+  /**
+   * One source of truth for which host tools are installed and usable.
+   * Note the path: `/api/system/capabilities`, not `/api/capabilities` — the
+   * latter is the static API schema published for AI agents.
+   */
+  getCapabilities: () =>
+    call<Capability[]>(
+      "get_system_capabilities",
+      undefined,
+      "GET",
+      "/api/system/capabilities",
+    ),
 
   // Setup Wizard APIs
   getPlatform: () =>

@@ -1,4 +1,5 @@
 import { isRunningInTauri } from "../env";
+import { runSandboxed } from "./shell";
 // @ts-nocheck
 import { EventHandler } from "./types";
 import { 
@@ -70,13 +71,11 @@ export const dockerRegistry: Record<string, EventHandler> = {
     description: "Build a docker image from a Dockerfile",
     handler: async (p) => {
       if (isRunningInTauri()) {
-        const { invoke } = await import("@tauri-apps/api/core");
         const args = ["build"];
         if (p.tag) { args.push("-t", p.tag); }
         if (p.file) { args.push("-f", p.file); }
         args.push(p.dir || ".");
-        const result = await invoke("execute_shell", { command: "docker", args });
-        return String(result);
+        return await runSandboxed("docker", args);
       }
       return `[SIMULATED] Built image ${p.tag || "untagged"}`;
     }

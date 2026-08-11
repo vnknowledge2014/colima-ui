@@ -4,7 +4,7 @@
 //! to `colima list --json` (which triggers slow macOS system_profiler calls).
 //!
 //! Structure:
-//! ```
+//! ```text
 //! ~/.colima/
 //! ├── default/colima.yaml          # profile config
 //! ├── myprofile/colima.yaml        # another profile
@@ -48,7 +48,7 @@ struct KubernetesConfig {
 }
 
 /// Get the colima home directory (~/.colima)
-fn colima_home() -> PathBuf {
+pub fn colima_home() -> PathBuf {
     if let Ok(home) = std::env::var("COLIMA_HOME") {
         return PathBuf::from(home);
     }
@@ -71,9 +71,54 @@ fn is_instance_running(lima_dir: &Path) -> bool {
     lima_dir.join("ha.sock").exists() || lima_dir.join("ha.pid").exists()
 }
 
+/// Resource fields of the lima instance colima generates from colima.yaml.
+/// Lima writes sizes as strings ("4GiB"), cpus as a plain count.
+#[derive(Deserialize, Default)]
+struct LimaResources {
+    #[serde(default)]
+    cpus: u32,
+    #[serde(default)]
+    memory: String,
+    #[serde(default)]
+    disk: String,
+}
+
+/// Read cpus / memory / disk from `_lima/<instance>/lima.yaml`.
+/// Returns `(cpus, memory_bytes, disk_bytes)`; any field lima omits comes back 0.
+fn read_lima_resources(lima_dir: &Path) -> Option<(u32, u64, u64)> {
+    let content = std::fs::read_to_string(lima_dir.join("lima.yaml")).ok()?;
+    let res: LimaResources = serde_yml::from_str(&content).ok()?;
+    Some((
+        res.cpus,
+        crate::commands::engine_resources::parse_size_to_bytes(&res.memory).unwrap_or(0),
+        crate::commands::engine_resources::parse_size_to_bytes(&res.disk).unwrap_or(0),
+    ))
+}
+
 /// Read a single instance's state from the filesystem.
 fn read_instance(colima_home: &Path, profile: &str) -> Option<ColimaInstance> {
+    // The profile name becomes a path component. Reject anything that could
+    // walk out of ~/.colima before touching the filesystem — this function is
+    // also reached from HTTP routes.
+    //
+    // Log rather than dropping silently: colima permits some names this
+    // validator rejects, and a profile vanishing from the dashboard with no
+    // explanation reads as "my VM was deleted".
+    if !crate::validation::is_valid_profile_name(profile) {
+        eprintln!(
+            "[instance_reader] skipping profile with unsupported name: {:?}",
+            profile
+        );
+        return None;
+    }
     let config_path = colima_home.join(profile).join("colima.yaml");
+
+    // Defence in depth behind the name check: prove the resolved path really is
+    // inside ~/.colima before reading it.
+    if let Err(e) = crate::validation::assert_path_within(colima_home, &config_path) {
+        eprintln!("[instance_reader] refusing to read {:?}: {}", profile, e);
+        return None;
+    }
     let lima_name = lima_instance_name(profile);
     let lima_dir = colima_home.join("_lima").join(&lima_name);
 
@@ -101,8 +146,27 @@ fn read_instance(colima_home: &Path, profile: &str) -> Option<ColimaInstance> {
 
     // Memory and disk are stored in GiB in colima.yaml but our struct uses bytes
     // to match what `colima list --json` returns
-    let memory_bytes = (config.memory as u64) * 1024 * 1024 * 1024;
-    let disk_bytes = (config.disk as u64) * 1024 * 1024 * 1024;
+    let mut cpus = config.cpu;
+    let mut memory_bytes = (config.memory as u64) * 1024 * 1024 * 1024;
+    let mut disk_bytes = (config.disk as u64) * 1024 * 1024 * 1024;
+
+    // colima.yaml is not always complete — profiles created by older colima
+    // versions, or edited by hand, can omit these. The lima instance colima
+    // generated from it always carries the real allocation, so prefer that over
+    // inventing a number.
+    if cpus == 0 || memory_bytes == 0 || disk_bytes == 0 {
+        if let Some(lima) = read_lima_resources(&lima_dir) {
+            if cpus == 0 {
+                cpus = lima.0;
+            }
+            if memory_bytes == 0 {
+                memory_bytes = lima.1;
+            }
+            if disk_bytes == 0 {
+                disk_bytes = lima.2;
+            }
+        }
+    }
 
     Some(ColimaInstance {
         name,
@@ -116,17 +180,12 @@ fn read_instance(colima_home: &Path, profile: &str) -> Option<ColimaInstance> {
         } else {
             config.arch
         },
-        cpus: if config.cpu == 0 { 2 } else { config.cpu },
-        memory: if memory_bytes == 0 {
-            2 * 1024 * 1024 * 1024
-        } else {
-            memory_bytes
-        },
-        disk: if disk_bytes == 0 {
-            60 * 1024 * 1024 * 1024
-        } else {
-            disk_bytes
-        },
+        // 0 means "unknown" and the UI renders it as such — a hardcoded 2 CPU /
+        // 2 GiB / 60 GiB placeholder here used to be indistinguishable from a
+        // real allocation.
+        cpus,
+        memory: memory_bytes,
+        disk: disk_bytes,
         runtime: if config.runtime.is_empty() && running {
             "docker".to_string()
         } else {

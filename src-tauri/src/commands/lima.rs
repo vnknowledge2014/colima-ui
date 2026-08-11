@@ -77,6 +77,9 @@ fn format_bytes_lima(bytes: i64) -> String {
 /// Start a Lima instance
 #[tauri::command]
 pub async fn lima_start(name: String) -> Result<String, crate::error::ColimaError> {
+    if !crate::validation::is_valid_resource_name(&name) {
+        return Err(crate::error::ColimaError::validation(format!("Invalid name: {:?}", name)));
+    }
     async move {
     let output = limactl_cmd()
         .args(["start", &name])
@@ -98,6 +101,9 @@ pub async fn lima_start(name: String) -> Result<String, crate::error::ColimaErro
 /// Stop a Lima instance
 #[tauri::command]
 pub async fn lima_stop(name: String) -> Result<String, crate::error::ColimaError> {
+    if !crate::validation::is_valid_resource_name(&name) {
+        return Err(crate::error::ColimaError::validation(format!("Invalid name: {:?}", name)));
+    }
     async move {
     let output = limactl_cmd()
         .args(["stop", &name])
@@ -119,6 +125,9 @@ pub async fn lima_stop(name: String) -> Result<String, crate::error::ColimaError
 /// Delete a Lima instance
 #[tauri::command]
 pub async fn lima_delete(name: String, force: bool) -> Result<String, crate::error::ColimaError> {
+    if !crate::validation::is_valid_resource_name(&name) {
+        return Err(crate::error::ColimaError::validation(format!("Invalid name: {:?}", name)));
+    }
     async move {
     let mut args = vec!["delete"];
     if force {
@@ -146,6 +155,10 @@ pub async fn lima_delete(name: String, force: bool) -> Result<String, crate::err
 /// Get Lima instance info (shell)
 #[tauri::command]
 pub async fn lima_info(name: String) -> Result<String, crate::error::ColimaError> {
+    // No validation guard here on purpose: `limactl info` is global and `name`
+    // never reaches argv. Validating it would reject callers that pass an empty
+    // name before a VM is selected.
+    let _ = &name;
     async move {
     let output = limactl_cmd()
         .args(["info"])
@@ -168,6 +181,9 @@ pub async fn lima_info(name: String) -> Result<String, crate::error::ColimaError
 /// Execute a command inside a Lima VM
 #[tauri::command]
 pub async fn lima_shell(name: String, command: String) -> Result<String, crate::error::ColimaError> {
+    if !crate::validation::is_valid_resource_name(&name) {
+        return Err(crate::error::ColimaError::validation(format!("Invalid name: {:?}", name)));
+    }
     async move {
     // Security validation (applies to both Tauri IPC and HTTP routes)
     if !crate::validation::is_valid_k8s_name(&name) {
@@ -209,6 +225,10 @@ pub async fn lima_templates() -> Result<String, crate::error::ColimaError> {
 }
 
 /// Create a new Lima VM and auto-start it
+///
+/// The `#[tauri::command]` attribute was missing, so this was reachable over
+/// HTTP but not over IPC — creating a VM failed in the desktop app only.
+#[tauri::command]
 pub async fn lima_create(
     name: String,
     template: String,
@@ -216,6 +236,9 @@ pub async fn lima_create(
     memory: u32,
     disk: u32,
 ) -> Result<String, String> {
+    if !crate::validation::is_valid_resource_name(&name) {
+        return Err(format!("Invalid name: {:?}", name));
+    }
     let name_start = name.clone();
     tokio::task::spawn_blocking(move || {
         let mut args = vec![

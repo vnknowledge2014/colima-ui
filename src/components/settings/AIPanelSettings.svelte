@@ -1,10 +1,12 @@
 <script lang="ts">
-  import { onMount } from "svelte";
+  import { onMount, tick } from "svelte";
+  import { uiState } from "../../store.svelte";
   import { aiApi, knowledgeBankApi } from "../../lib/api";
   import { globalToast } from "../../lib/globalToast";
   import { confirm } from "../../store/confirm.svelte";
   import Icon from "../Icon.svelte";
   import { setAppSetting, getAppSetting } from "../../lib/settingsStore.svelte";
+  import { normalizeError } from "../../lib/errors";
 
   export interface AgentMemoryItem {
     id: string;
@@ -43,6 +45,29 @@
   let searxngError = $state("");
   let availableModels = $state<string[]>([]);
   let modelsFetching = $state(false);
+
+  let apiKeyInput = $state<HTMLInputElement>();
+  let aiCardEl = $state<HTMLDivElement>();
+
+  /**
+   * Consume the one-shot deep link set by `openSettingsSection("ai")`.
+   *
+   * An `$effect` rather than `onMount` because Settings is not remounted when
+   * the user is already on the page — clicking the AI panel's gear a second
+   * time has to scroll again. Clearing the flag re-runs this once with a null
+   * value and then settles.
+   */
+  $effect(() => {
+    if (uiState.settingsSection !== "ai") return;
+    uiState.settingsSection = null;
+    tick().then(() => {
+      // `ollama-local` needs no key, so the field is not rendered for it —
+      // fall back to the section header rather than silently doing nothing.
+      const target = apiKeyInput ?? aiCardEl;
+      target?.scrollIntoView({ behavior: "smooth", block: "center" });
+      apiKeyInput?.focus();
+    });
+  });
 
   // Persist AI settings
   $effect(() => { setAppSetting("ai_provider", aiProvider); });
@@ -87,16 +112,15 @@
       }
     } catch (e) {
       searxngStatus = "fail";
-      const msg = String(e);
-      if (msg.includes("Failed to fetch") || msg.includes("NetworkError") || msg.includes("fetch")) {
-        // This typically means the backend server (Rust) is not running when in web mode
-        // or the backend itself cannot reach SearXNG instances
-        searxngError = "Cannot connect to backend — is ColimaUI server running?";
-      } else if (msg.includes("429") || msg.includes("Too Many")) {
+      // Branch on the error code, not on the message text: the message is now
+      // localized, so substring matching would behave differently per language.
+      const err = normalizeError(e);
+      const msg = err.detail;
+      if (msg.includes("429") || msg.includes("Too Many")) {
         searxngError = "Rate limited (429) — all instances busy";
-      } else if (msg.includes("Connection refused") || msg.includes("connection refused")) {
+      } else if (err.code === "network" || msg.toLowerCase().includes("connection refused")) {
         searxngError = "Connection refused — is SearXNG running?";
-      } else if (msg.includes("timeout")) {
+      } else if (err.code === "timeout") {
         searxngError = "Connection timed out";
       } else {
         searxngError = msg.length > 100 ? msg.slice(0, 100) + "…" : msg;
@@ -150,7 +174,7 @@
 </script>
 
 <!-- AI & Diagnostics -->
-<div class="card" style="margin-bottom: 24px;">
+<div class="card" bind:this={aiCardEl} style="margin-bottom: 24px;">
   <h3 style="font-size: var(--text-lg); font-weight: 600; margin-bottom: 20px; display: flex; align-items: center; gap: 8px;">
     <Icon name="Robot" size={18} /> AI & Diagnostics
   </h3>
@@ -188,7 +212,7 @@
     {#if aiProvider !== "ollama-local"}
       <div style="margin-bottom: 8px;">
         <label for="aiApiKey" style="font-size: 11px; color: var(--text-muted); display: block; margin-bottom: 4px;">API Key</label>
-        <input id="aiApiKey" type="password" bind:value={aiApiKey} placeholder="Enter API key..." class="settings-input" style="font-family: var(--font-mono);" />
+        <input id="aiApiKey" bind:this={apiKeyInput} type="password" bind:value={aiApiKey} placeholder="Enter API key..." class="settings-input" style="font-family: var(--font-mono);" />
       </div>
     {/if}
     {#if aiProvider === "ollama-cloud"}

@@ -21,7 +21,15 @@
     "local_ai_models": "ローカルAIモデル",
     "ai_chat": "AIアシスタント",
     "terminal": "ターミナル",
-    "settings": "設定"
+    "settings": "設定",
+    "help": "ヘルプ",
+    "tour_guide": "ツアーガイド",
+    "collapse": "サイドバーを折りたたむ",
+    "expand": "サイドバーを展開",
+    "colima_missing": "Colima が見つかりません",
+    "colima_missing_hint": "ヘルプからインストール",
+    "colima_running": "{count} 台稼働中",
+    "colima_stopped": "停止中"
   },
   "dashboard": {
     "title": "ダッシュボード",
@@ -38,10 +46,177 @@
     "volumes": "ボリューム",
     "networks": "ネットワーク",
     "compose_projects": "Composeプロジェクト",
-    "kubernetes_contexts": "K8sコンテキスト"
+    "kubernetes_contexts": "K8sコンテキスト",
+    "resources": "リソース",
+    "resources_vm_fallback": "VM 割り当て (エンジンに接続できません)",
+    "allocated_cores": "割り当てコア数",
+    "cores_available": "コア利用可能",
+    "of": "/",
+    "reclaimable": "回収可能",
+    "allocated_memory": "割り当てメモリ",
+    "allocated_disk": "割り当てディスク"
   },
   "settings": {
     "title": "設定",
     "language": "言語"
+  },
+  "errors": {
+    "panel_title": "エラーの詳細",
+    "show_details": "詳細",
+    "clear": "クリア",
+    "copy": "コピー",
+    "copied": "コピーしました",
+    "copy_failed": "クリップボードにアクセスできません",
+    "none_this_session": "このセッションではエラーはありません。",
+    "not_installed": {
+      "title": "必要なツールが未インストール",
+      "hint": "必要なコマンドラインツールがありません。設定画面で確認してください。"
+    },
+    "not_running": {
+      "title": "Colima が起動していません",
+      "hint": "Instances ページで Colima インスタンスを起動してから再試行してください。"
+    },
+    "permission_denied": {
+      "title": "権限がありません",
+      "hint": "OS が操作を拒否しました。ファイルの所有者と権限を確認してください。"
+    },
+    "timeout": {
+      "title": "タイムアウトしました",
+      "hint": "VM が応答していない可能性があります。インスタンスを再起動してください。"
+    },
+    "command_failed": {
+      "title": "コマンドが失敗しました"
+    },
+    "network": {
+      "title": "ネットワークエラー",
+      "hint": "接続とプロキシ設定を確認してください。"
+    },
+    "validation": {
+      "title": "入力が正しくありません"
+    },
+    "not_found": {
+      "title": "見つかりません"
+    },
+    "internal": {
+      "title": "内部エラー"
+    },
+    "unknown": {
+      "title": "問題が発生しました"
+    },
+    "how_to_fix": "解決方法を見る"
+  },
+  "common": {
+    "close": "閉じる",
+    "loading": "読み込み中…",
+    "saving": "保存中…",
+    "revert": "元に戻す"
+  },
+  "capabilities": {
+    "missing": {
+      "title": "{name} がインストールされていません",
+      "text": "このページを使うにはインストールしてください。",
+      "text_with_hint": "このページを使うにはインストールしてください: {hint}"
+    },
+    "not_running": {
+      "title": "{name} が起動していません",
+      "text": "Instances ページで Colima インスタンスを起動してから戻ってください。"
+    },
+    "unknown": {
+      "title": "{name} を確認できません",
+      "text": "検出に失敗しました。ツールが PATH にあるか確認してください。"
+    }
+  },
+  "containers": {
+    "group_by_project": "プロジェクトでグループ化",
+    "standalone": "単独",
+    "running_lower": "実行中"
+  },
+  "diff": {
+    "no_changes": "変更なし",
+    "field": "項目",
+    "from": "現在",
+    "to": "変更後",
+    "restart": "再起動",
+    "restart_note": "再起動と表示された項目は、次回インスタンス起動時に反映されます。"
+  },
+  "help": {
+    "title": "ヘルプ",
+    "subtitle": "トラブルシューティング ガイド。オフラインで利用できます。",
+    "search": "記事を検索…",
+    "no_results": "該当する記事がありません。",
+    "pick": "記事を選択してください。"
+  },
+  "colima_config": {
+    "title": "Colima の設定",
+    "description": "colima.yaml を直接編集します。手動で追加した設定は保持され、変更は次回の再起動で反映されます。",
+    "profile": "プロファイル",
+    "presets": "プリセット",
+    "preset_light": "軽量",
+    "preset_balanced": "バランス",
+    "preset_performance": "高性能",
+    "cpu": "CPU 数",
+    "memory": "メモリ (GiB)",
+    "disk": "ディスク (GiB)",
+    "disk_grow_only": "拡大のみ",
+    "runtime": "ランタイム",
+    "vm_type": "VM タイプ",
+    "mount_type": "マウント方式",
+    "dns": "DNS サーバー",
+    "network_address": "VM に到達可能な IP アドレスを割り当てる",
+    "kubernetes": "Kubernetes を有効にする",
+    "pending": "保留中の変更",
+    "apply": "変更を適用",
+    "saved": "設定を保存しました。インスタンスを再起動すると反映されます。",
+    "not_saved": "保存されていません — 上のエラーを修正してください。",
+    "load_action": "Colima 設定の読み込み",
+    "preview_action": "Colima 設定のプレビュー",
+    "apply_action": "Colima 設定の保存",
+    "issue": {
+      "cpu_zero": "CPU 数は 1 以上にしてください。",
+      "cpu_over_host": "{cpu} 個の CPU を要求していますが、ホストは {host} 個です。VM がホストとコアを奪い合います。",
+      "memory_zero": "メモリは 1 GiB 以上にしてください。",
+      "memory_over_host": "{host} GiB のホストに対し {memory} GiB を要求しています。ホスト用に 2 GiB 以上残してください。",
+      "disk_zero": "ディスクサイズは 1 GiB 以上にしてください。",
+      "disk_shrink": "ディスクを {from} GiB から {to} GiB へ縮小することはできません。Colima は拡大のみ可能です。",
+      "disk_over_free": "{disk} GiB を要求していますが、ホストの空きは {free} GiB です。",
+      "runtime_invalid": "「{value}」は次のいずれでもありません: {allowed}。",
+      "vm_type_invalid": "「{value}」は次のいずれでもありません: {allowed}。",
+      "mount_type_invalid": "「{value}」は次のいずれでもありません: {allowed}。",
+      "dns_not_ip": "「{value}」は IP アドレスではありません。"
+    },
+    "no_instance": "Colima インスタンスがまだありません。設定ファイルは初回起動時に作成されます。",
+    "go_to_instances": "Instances を開く"
+  },
+  "ai": {
+    "title": "コマンドセンター",
+    "processing": "処理中...",
+    "new_chat": "新しいチャット",
+    "untitled_chat": "新しいチャット",
+    "chat_history": "チャット履歴",
+    "conversations": "会話",
+    "messages": "件のメッセージ",
+    "rename": "名前を変更",
+    "delete": "削除",
+    "clear_chat": "このチャットを消去",
+    "open_settings": "設定を開く",
+    "send": "メッセージを送信",
+    "stop": "生成を停止",
+    "input_placeholder": "メッセージを入力…",
+    "role_you": "あなた",
+    "role_assistant": "Colima AI",
+    "empty_title": "こんにちは！Colima AI アシスタントです。",
+    "empty_hint": "コンテナの操作、問題の診断、ナレッジバンクの参照、VM の管理ができます。",
+    "queued": "完了後に送信します",
+    "cancel_queued": "送信待ちのメッセージを取り消す",
+    "input_hint": "Enter で送信 · Shift+Enter で改行",
+    "hide_panel": "チャットを隠す（実行は継続）",
+    "bubble_open": "Colima AI を開く",
+    "bubble_working": "Colima AI は実行中 — クリックして開く"
+  },
+  "terminal": {
+    "connection_failed": "接続に失敗しました",
+    "failed_to_connect": "接続できませんでした: {error}",
+    "ensure_running": "インスタンスが実行中であることを確認してください。",
+    "session_ended": "セッションが終了しました (終了コード: {code})"
   }
 }

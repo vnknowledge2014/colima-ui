@@ -2,16 +2,36 @@
   import { onMount } from "svelte";
   import { dockerApi, sysMethods, type DockerContainer } from "../lib/api";
   import { globalToast } from "../lib/globalToast";
+  import { reportError } from "../lib/errorReporter";
   import { t } from "../lib/i18n.svelte";
   import * as Icons from "../components/Icons.svelte";
   
   import { dockerState } from "../store.svelte";
   import { getCurrentPresetForInstance, getContainerPresetMap, PRESET_LABELS, PRESET_COLORS } from "../lib/presetStateManager";
   import { setEventCooldown } from "../store.svelte";
+  import { blockingCapability, capabilityNotice } from "../store/capabilities.svelte";
+  import { groupContainersByProject, type ContainerGroup } from "../lib/composeGrouping";
+  import { withErrorReport } from "../lib/errorReporter";
+  import { normalizeError, errorMessage } from "../lib/errors";
+  import { columnResize } from "../lib/columnResize";
+  import { getAppSetting, setAppSetting } from "../lib/settingsStore.svelte";
 
   let filter = $state<"all" | "running" | "stopped">("all");
   let searchTerm = $state("");
   let actionLoading = $state<string | null>(null);
+  let rowErrors = $state<Record<string, string>>({});
+
+  function setRowError(id: string, e: unknown) {
+    rowErrors = { ...rowErrors, [id]: errorMessage(normalizeError(e)) };
+    setTimeout(() => clearRowError(id), 15000);
+  }
+
+  function clearRowError(id: string) {
+    if (!rowErrors[id]) return;
+    const next = { ...rowErrors };
+    delete next[id];
+    rowErrors = next;
+  }
   let selectedContainer = $state<DockerContainer | null>(null);
   let showRunModal = $state(false);
   let runtimeName = $state("docker");
@@ -93,7 +113,8 @@
                 await refreshContainers();
                 resolve();
               } catch (e) {
-                globalToast("error", String(e));
+                reportError(e, { action: `Remove container '${name}'` });
+                setRowError(id, e);
                 reject(e);
               } finally {
                 actionLoading = null;
@@ -108,9 +129,11 @@
 
       const past: any = { start: "started", stop: "stopped", restart: "restarted", remove: "removed", pause: "paused", unpause: "unpaused" };
       globalToast("success", `Container '${name}' ${past[action] || action}`);
+      clearRowError(id);
       await refreshContainers();
     } catch (e) {
-      globalToast("error", String(e));
+      reportError(e, { action: `${action} container '${name}'` });
+      setRowError(id, e);
     } finally {
       if (action !== "remove") actionLoading = null;
     }
@@ -126,7 +149,7 @@
         confirm = null; batchLoading = true; setEventCooldown();
         let ok = 0;
         for (const c of running) {
-          try { await dockerApi.stopContainer(c.Id); ok++; } catch {}
+          try { await dockerApi.stopContainer(c.Id); ok++; } catch (e) { setRowError(c.Id, e); }
         }
         globalToast("success", `Stopped ${ok} container(s)`);
         selected = new Set();
@@ -147,7 +170,7 @@
         confirm = null; batchLoading = true; setEventCooldown();
         let ok = 0;
         for (const c of targets) {
-          try { await dockerApi.removeContainer(c.Id, true); ok++; } catch {}
+          try { await dockerApi.removeContainer(c.Id, true); ok++; } catch (e) { setRowError(c.Id, e); }
         }
         globalToast("success", `Removed ${ok} container(s)`);
         selected = new Set();
@@ -169,6 +192,64 @@
   }));
 
   let runningCount = $derived(dockerState.containers.filter(c => c.State === "running").length);
+
+  // ===== Compose grouping =====
+
+  /** Id of the synthetic group used in flat mode, so one loop renders both. */
+  const FLAT_GROUP = "__flat__";
+
+  let grouped = $state(getAppSetting("colimaui_group_containers") !== "false");
+  let collapsedGroups = $state<Set<string>>(new Set());
+
+  function toggleGrouped() {
+    grouped = !grouped;
+    setAppSetting("colimaui_group_containers", String(grouped));
+  }
+
+  function toggleGroup(id: string) {
+    const next = new Set(collapsedGroups);
+    next.has(id) ? next.delete(id) : next.add(id);
+    collapsedGroups = next;
+  }
+
+  // Flat mode renders through the same markup as grouped mode by wrapping the
+  // list in a single unnamed group — otherwise the whole row template would
+  // have to be duplicated.
+  let renderGroups = $derived(
+    grouped
+      ? groupContainersByProject(filtered)
+      : [{
+          id: FLAT_GROUP,
+          project: "",
+          containers: filtered,
+          total: filtered.length,
+          running: filtered.filter(c => c.State === "running").length,
+        }]
+  );
+
+  /** Start or stop every container in a Compose project. */
+  async function handleGroupAction(group: ContainerGroup, action: "start" | "stop") {
+    const targets = group.containers.filter(c =>
+      action === "stop" ? c.State === "running" : c.State !== "running"
+    );
+    if (targets.length === 0) return;
+
+    batchLoading = true;
+    setEventCooldown();
+    let ok = 0;
+    for (const c of targets) {
+      const result = await withErrorReport(
+        () => action === "stop" ? dockerApi.stopContainer(c.Id) : dockerApi.startContainer(c.Id),
+        { action: `${action} ${c.Names}` },
+      );
+      if (result !== undefined) ok++;
+    }
+    if (ok > 0) {
+      globalToast("success", `${action === "stop" ? "Stopped" : "Started"} ${ok} container(s) in ${group.project}`);
+    }
+    batchLoading = false;
+    refreshContainers();
+  }
 
   function toggleSelect(id: string) {
     const next = new Set(selected);
@@ -203,7 +284,7 @@
       showRunModal = false;
       refreshContainers();
     } catch (e) {
-      globalToast("error", String(e));
+      reportError(e, { action: "Run container" });
     } finally {
       runLoading = false;
     }
@@ -213,6 +294,7 @@
   let detailTab = $state<"overview" | "logs" | "stats" | "exec" | "inspect">("overview");
   let detailLogs = $state("");
   let detailStats = $state("");
+  let detailStatsError = $state("");
   let detailTop = $state("");
   let detailInspect = $state("");
   let detailLogLines = $state(200);
@@ -237,12 +319,41 @@
     finally { detailLogLoading = false; }
   }
 
+  /**
+   * `docker stats --format json` emits one JSON object per line. Reduce it to the
+   * CPU / memory / IO figures the tab actually shows; the raw JSON used to be
+   * dumped verbatim, which read as "the stats are broken".
+   */
+  function parseStats(raw: string) {
+    const line = raw.split("\n").map(l => l.trim()).find(Boolean);
+    if (!line) return null;
+    try {
+      const s = JSON.parse(line);
+      return {
+        cpu: s.CPUPerc ?? "--",
+        mem: s.MemUsage ?? "--",
+        memPerc: s.MemPerc ?? "--",
+        net: s.NetIO ?? "--",
+        block: s.BlockIO ?? "--",
+        pids: s.PIDs ?? "--",
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  let detailStatsParsed = $derived(parseStats(detailStats));
+
   async function fetchStats() {
     if (!selectedContainer) return;
+    detailStatsError = "";
     try {
       detailStats = await dockerApi.containerStats(selectedContainer.Id);
       detailTop = await dockerApi.containerTop(selectedContainer.Id);
-    } catch (e) { detailStats = `Error: ${e}`; }
+    } catch (e) {
+      detailStats = "";
+      detailStatsError = `${e}`;
+    }
   }
 
   async function fetchInspect() {
@@ -290,11 +401,11 @@
 <div class="content-header" data-tauri-drag-region>
   <h1>
     {t('containers.title', { default: 'Containers' })}
-    <span style="font-size: var(--text-sm); color: var(--text-muted); font-weight: 400; margin-left: 12px;">
+    <span style="font-size: var(--text-sm); color: var(--text-muted); font-weight: 400; margin-left: 12px;" title={`${runningCount} ${t('containers.running', { default: 'running' })} · ${dockerState.containers.length} ${t('containers.total', { default: 'total' })}`}>
       {runningCount} {t('containers.running', { default: 'running' })} · {dockerState.containers.length} {t('containers.total', { default: 'total' })}
     </span>
     {#if runtimeName}
-      <span style="font-size: var(--text-xs); background: var(--bg-secondary); border: 1px solid var(--border-primary); padding: 2px 8px; border-radius: 12px; margin-left: 12px; color: var(--text-muted);">
+      <span class="header-badge" style="font-size: var(--text-xs); background: var(--bg-secondary); border: 1px solid var(--border-primary); padding: 2px 8px; border-radius: 12px; margin-left: 12px; color: var(--text-muted);">
         {#if runtimeName === "podman"}
           🦭 Podman
         {:else if runtimeName === "containerd"}
@@ -306,7 +417,15 @@
     {/if}
   </h1>
   <div class="content-header-actions">
-    <input class="input" placeholder={t('containers.search', { default: 'Search containers...' })} bind:value={searchTerm} style="width: 180px;" />
+    <input class="input header-search" placeholder={t('containers.search', { default: 'Search containers...' })} bind:value={searchTerm} />
+    <button
+      class="btn"
+      style="background: {grouped ? 'var(--bg-card-hover)' : 'transparent'}; color: {grouped ? 'var(--text-primary)' : 'var(--text-muted)'}; border: none; font-size: var(--text-xs); padding: 4px 10px;"
+      aria-pressed={grouped}
+      onclick={toggleGrouped}
+    >
+      {t('containers.group_by_project', { default: 'Group by project' })}
+    </button>
     <div style="display: flex; gap: 2px; background: var(--bg-card); border-radius: var(--radius-md); padding: 2px;">
       {#each ["all", "running", "stopped"] as f}
         <button class="btn" style="background: {filter === f ? 'var(--bg-card-hover)' : 'transparent'}; color: {filter === f ? 'var(--text-primary)' : 'var(--text-muted)'}; border: none; font-size: var(--text-xs); padding: 4px 10px; text-transform: capitalize;" onclick={() => filter = f as any}>
@@ -338,8 +457,9 @@
   {/if}
 
   {#if filtered.length > 0}
-    <div class="vtable">
-      <div class="vtable-header" style="display: grid; grid-template-columns: 44px minmax(160px,1.5fr) minmax(140px,1fr) minmax(160px,200px) minmax(120px,1fr) 180px;">
+    <div class="vtable" use:columnResize style="--cols: 44px var(--col-1, minmax(180px,1.5fr)) var(--col-2, minmax(150px,1fr)) var(--col-3, minmax(170px,200px)) var(--col-4, minmax(130px,1fr)) 180px;">
+      <div class="vtable-x">
+      <div class="vtable-header" style="display: grid; grid-template-columns: var(--cols);">
         <div class="vtable-header-cell" style="text-align: center;">
           <input type="checkbox" class="checkbox" checked={filtered.length > 0 && selected.size === filtered.length} onchange={toggleAll} />
         </div>
@@ -351,11 +471,46 @@
       </div>
       
       <div class="vtable-scroll">
-        {#each filtered as c (c.Id)}
+        {#each renderGroups as group (group.id)}
+          {#if grouped && group.id !== FLAT_GROUP}
+            {@const collapsed = collapsedGroups.has(group.id)}
+            <div class="vtable-row compose-group-header">
+              <button
+                class="compose-group-toggle"
+                aria-expanded={!collapsed}
+                onclick={() => toggleGroup(group.id)}
+              >
+                <span class="compose-group-caret" class:collapsed>▾</span>
+                <span class="compose-group-name">
+                  {group.project || t('containers.standalone', { default: 'Standalone' })}
+                </span>
+                <span class="compose-group-count">
+                  {group.running}/{group.total} {t('containers.running_lower', { default: 'running' })}
+                </span>
+              </button>
+              {#if group.project}
+                <div class="compose-group-actions">
+                  <button
+                    class="btn btn-ghost btn-sm"
+                    disabled={batchLoading || group.running === 0}
+                    onclick={() => handleGroupAction(group, 'stop')}
+                  >{t('containers.stop', { default: 'Stop' })}</button>
+                  <button
+                    class="btn btn-ghost btn-sm"
+                    disabled={batchLoading || group.running === group.total}
+                    onclick={() => handleGroupAction(group, 'start')}
+                  >{t('containers.start', { default: 'Start' })}</button>
+                </div>
+              {/if}
+            </div>
+          {/if}
+
+          {#if !(grouped && collapsedGroups.has(group.id))}
+        {#each group.containers as c (c.Id)}
           {@const isRunning = c.State === "running"}
           {@const isPaused = c.Status.toLowerCase().includes("paused")}
           {@const isLoading = actionLoading?.startsWith(c.Id)}
-          <div role="button" tabindex="0" class="vtable-row {selected.has(c.Id) ? 'selected' : ''}" style="display: grid; grid-template-columns: 44px minmax(160px,1.5fr) minmax(140px,1fr) minmax(160px,200px) minmax(120px,1fr) 180px; opacity: {isLoading ? 0.6 : 1};" onkeydown={(e) => e.key === 'Enter' && e.currentTarget.click()} onclick={() => selectedContainer = c}>
+          <div role="button" tabindex="0" class="vtable-row {selected.has(c.Id) ? 'selected' : ''}" style="display: grid; grid-template-columns: var(--cols); opacity: {isLoading ? 0.6 : 1};" onkeydown={(e) => e.key === 'Enter' && e.currentTarget.click()} onclick={() => selectedContainer = c}>
             <div role="button" tabindex="0" class="vtable-cell" style="text-align: center;" onkeydown={(e) => e.key === 'Enter' && e.currentTarget.click()} onclick={(e) => e.stopPropagation()}>
               <input type="checkbox" class="checkbox" checked={selected.has(c.Id)} onchange={() => toggleSelect(c.Id)} />
             </div>
@@ -363,6 +518,9 @@
               <div style="display: flex; align-items: center; gap: 8px;">
                 <div style="width: 8px; height: 8px; border-radius: 50%; background: {isPaused ? 'var(--accent-yellow)' : isRunning ? 'var(--status-running)' : 'var(--status-stopped)'}; box-shadow: {isRunning && !isPaused ? '0 0 6px var(--status-running)' : 'none'}; flex-shrink: 0;"></div>
                 <span style="font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title={c.Names}>{c.Names}</span>
+                {#if rowErrors[c.Id]}
+                  <span class="row-error-badge" role="img" aria-label={rowErrors[c.Id]} data-tooltip={rowErrors[c.Id]}>!</span>
+                {/if}
               </div>
             </div>
             <div class="vtable-cell" style="color: var(--text-secondary); font-family: var(--font-mono); font-size: var(--text-xs);">{c.Image}</div>
@@ -389,12 +547,24 @@
             </div>
           </div>
         {/each}
+          {/if}
+        {/each}
+      </div>
       </div>
     </div>
   {:else}
+    {@const blocked = blockingCapability("colima", "docker")}
     <div class="empty-state">
-      <div class="empty-state-title">{t('containers.no_containers', { default: 'No containers' })}</div>
-      <div class="empty-state-text">{t('containers.empty_text', { default: 'Click "Run" to start a container from an image.' })}</div>
+      {#if blocked}
+        <!-- The list is empty because a tool is missing or stopped, not because
+             the user has nothing. Saying "No containers" here sends them
+             looking for a Run button that cannot work. -->
+        <div class="empty-state-title">{capabilityNotice(blocked).title}</div>
+        <div class="empty-state-text">{capabilityNotice(blocked).text}</div>
+      {:else}
+        <div class="empty-state-title">{t('containers.no_containers', { default: 'No containers' })}</div>
+        <div class="empty-state-text">{t('containers.empty_text', { default: 'Click "Run" to start a container from an image.' })}</div>
+      {/if}
     </div>
   {/if}
 </div>
@@ -479,13 +649,24 @@
       {:else if detailTab === "stats"}
         {#if isRunning}
           <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-            <h3 style="margin: 0; font-size: var(--text-sm); font-weight: 600;">Processes</h3>
+            <h3 style="margin: 0; font-size: var(--text-sm); font-weight: 600;">Resource usage</h3>
             <button class="btn btn-ghost" style="font-size: var(--text-xs); padding: 2px 8px;" onclick={fetchStats}>↻</button>
           </div>
+          {#if detailStatsError}
+            <div style="padding: 12px; background: var(--bg-primary); border-radius: 8px; font-size: var(--text-xs); color: var(--accent-red);">{detailStatsError}</div>
+          {:else if detailStatsParsed}
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px;">
+              <div class="stat-tile"><span class="stat-tile-label">CPU</span><span class="stat-tile-value">{detailStatsParsed.cpu}</span></div>
+              <div class="stat-tile"><span class="stat-tile-label">Memory</span><span class="stat-tile-value">{detailStatsParsed.mem}</span><span class="stat-tile-label">{detailStatsParsed.memPerc}</span></div>
+              <div class="stat-tile"><span class="stat-tile-label">Net I/O</span><span class="stat-tile-value">{detailStatsParsed.net}</span></div>
+              <div class="stat-tile"><span class="stat-tile-label">Block I/O</span><span class="stat-tile-value">{detailStatsParsed.block}</span></div>
+              <div class="stat-tile"><span class="stat-tile-label">PIDs</span><span class="stat-tile-value">{detailStatsParsed.pids}</span></div>
+            </div>
+          {:else}
+            <div style="padding: 12px; background: var(--bg-primary); border-radius: 8px; font-size: var(--text-xs); color: var(--text-muted);">No stats available</div>
+          {/if}
+          <h3 style="margin: 16px 0 8px; font-size: var(--text-sm); font-weight: 600;">Processes</h3>
           <pre style="padding: 12px; background: var(--bg-primary); border-radius: 8px; font-size: var(--text-xs); overflow: auto; max-height: 30vh; color: var(--text-secondary); margin: 0;">{detailTop || "No processes running"}</pre>
-          <div style="margin-top: 12px;">
-            <pre style="padding: 12px; background: var(--bg-primary); border-radius: 8px; font-size: var(--text-xs); overflow: auto; max-height: 20vh; color: var(--text-secondary); margin: 0;">{detailStats}</pre>
-          </div>
         {:else}
           <div style="text-align: center; padding: 40px; color: var(--text-muted);">Container is not running</div>
         {/if}
@@ -533,3 +714,77 @@
     </div>
   </div>
 {/if}
+
+<style>
+  /* Group header sits in the same virtual table as the rows, so it inherits the
+     row chrome and only overrides what makes it a header. */
+  .row-error-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: var(--accent-red);
+    color: #fff;
+    font-size: 9px;
+    font-weight: 700;
+    line-height: 1;
+    flex-shrink: 0;
+    cursor: help;
+  }
+
+  .compose-group-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 6px 12px;
+    background: var(--bg-card);
+    border-top: 1px solid var(--border-primary);
+    cursor: default;
+  }
+
+  .compose-group-toggle {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: none;
+    border: none;
+    color: inherit;
+    font: inherit;
+    cursor: pointer;
+    padding: 2px 0;
+  }
+
+  .compose-group-caret {
+    display: inline-block;
+    transition: transform 120ms ease;
+    color: var(--text-muted);
+  }
+
+  .compose-group-caret.collapsed {
+    transform: rotate(-90deg);
+  }
+
+  .compose-group-name {
+    font-weight: 600;
+    font-size: var(--text-sm);
+  }
+
+  .compose-group-count {
+    font-size: var(--text-xs);
+    color: var(--text-muted);
+  }
+
+  .compose-group-actions {
+    display: flex;
+    gap: 4px;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .compose-group-caret {
+      transition: none;
+    }
+  }
+</style>

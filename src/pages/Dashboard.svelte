@@ -1,6 +1,6 @@
 <script lang="ts">
    
-  import { composeApi, k8sApi, limaApi, kindApi, type SystemInfo } from "../lib/api";
+  import { composeApi, k8sApi, limaApi, kindApi, systemApi, type SystemInfo } from "../lib/api";
   import { dashboardState, dockerState, resourceState } from "../store.svelte";
   import { t } from "../lib/i18n.svelte";
 
@@ -14,7 +14,40 @@
 
   let runningCount = $derived(dashboardState.colimaInstances.filter(i => i.status === "Running").length);
   let stoppedCount = $derived(dashboardState.colimaInstances.filter(i => i.status !== "Running").length);
-  let totalCpus = $derived(dashboardState.colimaInstances.filter(i => i.status === "Running").reduce((sum, i) => sum + i.cpus, 0));
+  let runningInstances = $derived(dashboardState.colimaInstances.filter(i => i.status === "Running"));
+  let engine = $derived(dashboardState.engineResources);
+
+  /**
+   * Resource figures come from the container engine when it is reachable, and
+   * only fall back to the Colima VM allocation when it is not. The VM numbers
+   * are read from colima.yaml, which does not exist for Docker Desktop,
+   * OrbStack, or Rancher — showing them unconditionally reported 0 CPU / 0 RAM
+   * on those engines even while containers were running.
+   */
+  let resources = $derived.by(() => {
+    if (engine?.available) {
+      return {
+        source: engine.engineName || "engine",
+        cpuCores: engine.cpuCores,
+        cpuPercent: engine.cpuPercent,
+        memoryTotal: engine.memoryTotalBytes,
+        memoryUsed: engine.memoryUsedBytes,
+        diskUsed: engine.diskUsedBytes,
+        diskReclaimable: engine.diskReclaimableBytes,
+        live: true,
+      };
+    }
+    return {
+      source: "vm",
+      cpuCores: runningInstances.reduce((sum, i) => sum + i.cpus, 0),
+      cpuPercent: 0,
+      memoryTotal: runningInstances.reduce((sum, i) => sum + i.memory, 0),
+      memoryUsed: 0,
+      diskUsed: runningInstances.reduce((sum, i) => sum + i.disk, 0),
+      diskReclaimable: 0,
+      live: false,
+    };
+  });
 
   let dockerCounts = $derived({
     containers: dockerState.containers.length,
@@ -29,6 +62,28 @@
     if (bytes >= 1073741824) return `${Math.round(bytes / 1073741824)} GiB`;
     if (bytes >= 1048576) return `${Math.round(bytes / 1048576)} MiB`;
     return `${bytes} B`;
+  }
+
+  /** Like formatBytes but keeps one decimal, so 7.8 GiB does not read as "8 GiB". */
+  function formatSize(bytes: number) {
+    if (!bytes) return "0 B";
+    if (bytes >= 1073741824) return `${(bytes / 1073741824).toFixed(1)} GiB`;
+    if (bytes >= 1048576) return `${(bytes / 1048576).toFixed(1)} MiB`;
+    if (bytes >= 1024) return `${(bytes / 1024).toFixed(1)} KiB`;
+    return `${bytes} B`;
+  }
+
+  function percentOf(used: number, total: number) {
+    if (!total) return 0;
+    return Math.min(100, Math.round((used / total) * 100));
+  }
+
+  async function fetchEngineResources() {
+    try {
+      dashboardState.engineResources = await systemApi.engineResources();
+    } catch {
+      dashboardState.engineResources = null;
+    }
   }
 
   async function fetchDockerCounts() {
@@ -78,6 +133,7 @@
         fetchDockerCounts();
         fetchK8sStatus();
         fetchLinuxVMs();
+        fetchEngineResources();
         dashboardState.lastFetch = now;
       }
     }
@@ -156,8 +212,77 @@
             </div>
           </div>
           <div class="metric-body">
-            <span class="metric-value">{totalCpus}</span>
-            <span class="metric-sub">Allocated cores</span>
+            <span class="metric-value">{resources.cpuCores}</span>
+            <span class="metric-sub">
+              {resources.live
+                ? `${resources.cpuPercent.toFixed(1)}% in use`
+                : t('dashboard.allocated_cores', { default: 'Allocated cores' })}
+            </span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- SECTION 1b: Engine resources (CPU / RAM / Disk) -->
+    <div class="dash-section">
+      <div class="dash-section-header">
+        <div class="dash-section-icon dash-icon-blue">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M3 3v18h18"/><path d="M7 15l4-6 4 3 4-7"/>
+          </svg>
+        </div>
+        <span class="dash-section-title">{t('dashboard.resources', { default: 'Resources' })}</span>
+        {#if resources.live}
+          <span class="live-badge">
+            <span class="badge-dot"></span>
+            {resources.source} · live
+          </span>
+        {:else}
+          <span class="metric-sub" style="margin-left: 8px;">
+            {t('dashboard.resources_vm_fallback', { default: 'VM allocation (engine unreachable)' })}
+          </span>
+        {/if}
+      </div>
+      <div class="dash-grid-3">
+        <div class="metric-card metric-card-orange">
+          <div class="metric-header">
+            <span class="metric-title">CPU</span>
+          </div>
+          <div class="metric-body">
+            <span class="metric-value">{resources.live ? `${resources.cpuPercent.toFixed(1)}%` : resources.cpuCores}</span>
+            <span class="metric-sub">
+              {resources.live
+                ? `${resources.cpuCores} ${t('dashboard.cores_available', { default: 'cores available' })}`
+                : t('dashboard.allocated_cores', { default: 'Allocated cores' })}
+            </span>
+          </div>
+        </div>
+
+        <div class="metric-card metric-card-purple">
+          <div class="metric-header">
+            <span class="metric-title">RAM</span>
+          </div>
+          <div class="metric-body">
+            <span class="metric-value">{formatSize(resources.live ? resources.memoryUsed : resources.memoryTotal)}</span>
+            <span class="metric-sub">
+              {resources.live
+                ? `${t('dashboard.of', { default: 'of' })} ${formatSize(resources.memoryTotal)} (${percentOf(resources.memoryUsed, resources.memoryTotal)}%)`
+                : t('dashboard.allocated_memory', { default: 'Allocated memory' })}
+            </span>
+          </div>
+        </div>
+
+        <div class="metric-card metric-card-blue">
+          <div class="metric-header">
+            <span class="metric-title">Disk</span>
+          </div>
+          <div class="metric-body">
+            <span class="metric-value">{formatSize(resources.diskUsed)}</span>
+            <span class="metric-sub">
+              {resources.live
+                ? `${formatSize(resources.diskReclaimable)} ${t('dashboard.reclaimable', { default: 'reclaimable' })}`
+                : t('dashboard.allocated_disk', { default: 'Allocated disk' })}
+            </span>
           </div>
         </div>
       </div>
@@ -375,7 +500,7 @@
                 <td style="color: var(--text-secondary);">{inst.runtime}</td>
                 <td style="color: var(--text-secondary);">{inst.arch}</td>
                 <td style="color: var(--text-secondary); font-family: var(--font-mono); font-size: var(--text-xs);">
-                  {inst.cpus} CPU · {formatBytes(inst.memory)} · {formatBytes(inst.disk)}
+                  {inst.cpus || '—'} CPU · {formatBytes(inst.memory)} · {formatBytes(inst.disk)}
                 </td>
               </tr>
             {/each}

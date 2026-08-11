@@ -1,4 +1,6 @@
 import { colimaApi, dockerApi, volumesApi, networksApi, sysMethods, getApiToken, type ColimaInstance } from "./api";
+import { resolveApiBase } from "./api/client";
+import { loadCapabilities } from "../store/capabilities.svelte";
 import { normalizeContainer, normalizeImage } from "./normalizers";
 import { dockerState, resourceState, dashboardState, isEventCooldownActive, uiState } from "../store.svelte";
 import { getAppSetting } from "./settingsStore.svelte";
@@ -18,6 +20,7 @@ export async function refreshManual() {
       sysMethods.checkSystem().catch(() => null),
     ]);
     dashboardState.colimaInstances = instanceList;
+    dashboardState.instancesLoaded = true;
     if (sysInfo) dashboardState.systemInfo = sysInfo;
   } catch (e) {
     uiState.globalError = String(e);
@@ -92,6 +95,10 @@ function handleConnectionLost() {
 export function startDataPoller() {
   refreshManual();
   refetchAllResources();
+  // Load once at startup so pages can explain an empty list ("Colima isn't
+  // installed") instead of just showing nothing. The backend caches this and
+  // drops the cache when an instance changes state, so refreshing is cheap.
+  loadCapabilities();
 
   const rsEnabled = getAppSetting("colimaui_auto_pause") === "true";
   const rsMins = parseInt(getAppSetting("colimaui_auto_pause_mins") || "15", 10);
@@ -103,21 +110,36 @@ export function startDataPoller() {
     import("@tauri-apps/api/event").then((mod) => {
       mod.listen("instances-update", (event: any) => {
         dashboardState.colimaInstances = event.payload.instances;
+        dashboardState.instancesLoaded = true;
+        // Starting or stopping an instance flips Colima and Docker between
+        // "installed but not running" and "usable".
+        loadCapabilities();
       });
       mod.listen("docker-state-updated", (event: any) => handleDockerStateUpdated(event.payload));
       mod.listen("docker-connection-lost", handleConnectionLost);
       mod.listen("docker-reconnected", refetchAllResources);
+      // Tray menu navigation (container click / Help) drives the active page.
+      mod.listen("navigate", (event: any) => {
+        const page = event.payload?.page;
+        if (typeof page === "string") uiState.currentPage = page;
+      });
     });
   } else {
     let sseRetryDelay = 2000;
 
-    function connectSSE(token: string) {
-      const sseUrl = token ? `http://127.0.0.1:11420/api/events?token=${token}` : "http://127.0.0.1:11420/api/events";
+    async function connectSSE(token: string) {
+      // Must use the resolved base: the server falls back to 11421-11429 when
+      // the default port is taken, and an EventSource pointed at the wrong port
+      // fails silently — the UI would just stop updating.
+      const base = await resolveApiBase();
+      const sseUrl = token ? `${base}/api/events?token=${token}` : `${base}/api/events`;
       const es = new EventSource(sseUrl);
       es.addEventListener("instances-update", (e: any) => {
         try {
           const data = JSON.parse(e.data);
           dashboardState.colimaInstances = data.instances;
+          dashboardState.instancesLoaded = true;
+          loadCapabilities();
         } catch {}
       });
       es.addEventListener("docker-state-updated", (e: any) => {

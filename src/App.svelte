@@ -17,6 +17,7 @@
   import LinuxVMs from "./pages/LinuxVMs.svelte";
   import Settings from "./pages/Settings.svelte";
   import Terminal from "./pages/Terminal.svelte";
+  import Help from "./pages/Help.svelte";
 
   import SetupWizard from "./components/SetupWizard.svelte";
   import GettingStartedTour from "./components/GettingStartedTour.svelte";
@@ -26,13 +27,42 @@
   
   import Sidebar from "./components/Sidebar.svelte";
   import ToastContainer from "./components/ToastContainer.svelte";
+  import ErrorDetailPanel from "./components/ErrorDetailPanel.svelte";
   import { isRunningInTauri } from "./lib/env";
 
   let isTauri = $state(isRunningInTauri());
 
+  // Tauri 2's reliable window drag is the data-tauri-drag-region attribute;
+  // plain -webkit-app-region CSS is unreliable in macOS WKWebView with an
+  // overlay titlebar. Pages swap headers on navigation, so re-tag on DOM
+  // changes instead of tagging each page's markup.
+  function windowDragRegion(node: HTMLElement) {
+    if (!isRunningInTauri()) return {};
+    const tag = () => {
+      node.querySelectorAll<HTMLElement>(".content-header, .sidebar-header").forEach((el) => {
+        if (!el.hasAttribute("data-tauri-drag-region")) el.setAttribute("data-tauri-drag-region", "");
+      });
+    };
+    tag();
+    const observer = new MutationObserver(tag);
+    observer.observe(node, { childList: true, subtree: true });
+    return { destroy: () => observer.disconnect() };
+  }
+
   let showWizard = $state(false);
   let showTour = $state(false);
   let cleanupPoller: (() => void) | null = null;
+
+  /**
+   * Latches true the first time the Terminal page is opened, and never resets.
+   *
+   * Deferring the first mount keeps xterm out of startup for users who never
+   * open a shell; never resetting is the point — see the render block.
+   */
+  let terminalMounted = $state(false);
+  $effect(() => {
+    if (uiState.currentPage === "terminal") terminalMounted = true;
+  });
 
   // Sync current tab to localStorage on every navigation so the store can
   // restore it on next load. The initial value is already set from localStorage
@@ -70,7 +100,7 @@
 </script>
 
 <ErrorBoundary>
-<div class="app-layout {isTauri ? 'tauri-app' : ''}">
+<div class="app-layout {isTauri ? 'tauri-app' : ''}" use:windowDragRegion>
   <Sidebar 
     systemInfo={dashboardState.systemInfo} 
     onStartTour={() => { showTour = true; setAppSetting("colimaui_tour_complete", "false"); }} 
@@ -107,17 +137,43 @@
     {:else if uiState.currentPage === "settings"}
       <Settings systemInfo={dashboardState.systemInfo} />
     {:else if uiState.currentPage === "terminal"}
-      <Terminal />
+      <!-- Deliberately empty: Terminal is rendered after this chain so that
+           leaving the page hides it instead of destroying it. See below. -->
     {:else if uiState.currentPage === "models"}
       <Models />
+    {:else if uiState.currentPage === "help"}
+      <Help />
     {:else}
       <div style="display: flex; justify-content: center; align-items: center; height: 50vh;">
         <div>Component Migration in Progress... ({uiState.currentPage})</div>
       </div>
     {/if}
+
+    <!-- Terminal sits outside the page chain because every other page can be
+         destroyed on navigation and this one cannot. Unmounting it runs each
+         TerminalInstance's cleanup, which calls `terminal_close` and kills the
+         pty — so opening a shell on pod A, walking back to Kubernetes, and
+         opening pod B killed A's session on the way out. The backend has no
+         re-attach path (`SessionManager::create` closes and respawns any
+         existing id), so the session only survives if the component does.
+
+         `display: contents` keeps the wrapper out of the box tree entirely, so
+         Terminal's two root elements lay out exactly as they did when they were
+         direct children of <main>. Mounted lazily, then kept forever. -->
+    {#if terminalMounted}
+      <div style="display: {uiState.currentPage === 'terminal' ? 'contents' : 'none'};">
+        <Terminal />
+      </div>
+    {/if}
   </main>
 
+  <!-- A sibling of <main>, not an overlay: the layout is a flex row, so the
+       panel claims its own column and the content shrinks instead of being
+       covered. -->
+  <AiChatPanel />
+
   <ToastContainer />
+  <ErrorDetailPanel />
 
   {#if showWizard}
     <SetupWizard
@@ -148,7 +204,6 @@
     />
   {/if}
 
-  <AiChatPanel />
   <ConfirmDialog />
 </div>
 

@@ -4,6 +4,7 @@
   import { globalToast } from "../lib/globalToast";
   import Icon from "../components/Icon.svelte";
   import { t } from "../lib/i18n.svelte";
+  import { normalizeError, errorMessage, type ErrorCode } from "../lib/errors";
 
   let models = $state<AiModel[]>([]);
   let instances = $state<ColimaInstance[]>([]);
@@ -11,6 +12,8 @@
   let selectedRunner = $state("");
   let loading = $state(true);
   let error = $state<string | null>(null);
+  /** Kept alongside `error` so branching does not depend on localized text. */
+  let errorCode = $state<ErrorCode | null>(null);
   let actionLoading = $state<string | null>(null);
   let showPull = $state(false);
   let pullName = $state("");
@@ -18,11 +21,14 @@
   async function fetchModels() {
     try {
       error = null;
+      errorCode = null;
       loading = true;
       const list = await modelsApi.listModels(selectedProfile, selectedRunner);
       models = list;
     } catch (e) {
-      error = String(e);
+      const err = normalizeError(e);
+      error = errorMessage(err);
+      errorCode = err.code;
       models = [];
     } finally {
       loading = false;
@@ -173,7 +179,7 @@
           <code style="display: block; margin: 8px 0; padding: 6px 10px; background: var(--bg-primary); border-radius: 6px; font-family: var(--font-mono);">
             colima start --runtime docker --vm-type krunkit
           </code>
-        {:else if error.includes("not installed")}
+        {:else if errorCode === "not_installed"}
           {t('models.error_tools', { default: 'Required tools are not installed. Make sure Colima is available.' })}
         {:else}
           {t('models.error_default', { default: 'Model management requires Colima started with krunkit VM type for GPU access.' })}
