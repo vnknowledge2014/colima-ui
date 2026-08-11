@@ -41,7 +41,12 @@ pub struct SystemInfo {
     pub lima_version: String,
 }
 
-fn get_version(cmd: &str, args: &[&str]) -> Option<String> {
+/// Probe a tool's version, resolving it through the fixed PATH so it also works
+/// when the app was launched from Finder.
+///
+/// `pub(crate)` so `system_capabilities` can reuse it rather than growing a
+/// second, subtly different probe.
+pub(crate) fn get_version(cmd: &str, args: &[&str]) -> Option<String> {
     let resolved = path_util::resolve_binary(cmd);
     let mut command = Command::new(&resolved);
     command.args(args);

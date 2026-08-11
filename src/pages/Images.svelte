@@ -6,6 +6,8 @@
   import * as Icons from "../components/Icons.svelte";
   import { t } from "../lib/i18n.svelte";
   import { formatTimestamp, formatSize, truncateId } from "../lib/formatters";
+  import { columnResize } from "../lib/columnResize";
+  import { blockingCapability, capabilityNotice } from "../store/capabilities.svelte";
 
   let searchTerm = $state("");
   let showPull = $state(false);
@@ -237,11 +239,11 @@
 <div class="content-header">
   <h1>
     {t('images.title', { default: 'Images' })}
-    <span style="font-size: var(--text-sm); color: var(--text-muted); font-weight: 400; margin-left: 12px;">
+    <span style="font-size: var(--text-sm); color: var(--text-muted); font-weight: 400; margin-left: 12px;" title={`${dockerState.images.length} ${t('images.count', { default: 'images' })} · ${totalSize > 1024 ? `${(totalSize / 1024).toFixed(1)} GB` : `${totalSize.toFixed(0)} MB`}`}>
       {dockerState.images.length} {t('images.count', { default: 'images' })} · {totalSize > 1024 ? `${(totalSize / 1024).toFixed(1)} GB` : `${totalSize.toFixed(0)} MB`}
     </span>
     {#if runtimeName}
-      <span style="font-size: var(--text-xs); background: var(--bg-secondary); border: 1px solid var(--border-primary); padding: 2px 8px; border-radius: 12px; margin-left: 12px; color: var(--text-muted);">
+      <span class="header-badge" style="font-size: var(--text-xs); background: var(--bg-secondary); border: 1px solid var(--border-primary); padding: 2px 8px; border-radius: 12px; margin-left: 12px; color: var(--text-muted);">
         {#if runtimeName === "podman"}
           🦭 Podman
         {:else if runtimeName === "containerd"}
@@ -253,7 +255,7 @@
     {/if}
   </h1>
   <div class="content-header-actions">
-    <input class="input" placeholder={t('images.search', { default: 'Search images...' })} bind:value={searchTerm} style="width: 200px;" />
+    <input class="input header-search" placeholder={t('images.search', { default: 'Search images...' })} bind:value={searchTerm} />
     <button class="btn btn-ghost" onclick={handlePrune} disabled={actionLoading === "prune"}>{actionLoading === "prune" ? t('images.pruning', { default: 'Pruning...' }) : t('images.prune', { default: 'Prune' })}</button>
     <button class="btn btn-primary" onclick={() => showPull = !showPull}>{t('images.pull', { default: 'Pull Image' })}</button>
   </div>
@@ -284,8 +286,9 @@
   {/if}
 
   {#if filteredImages.length > 0}
-    <div class="vtable">
-      <div class="vtable-header" style="display: grid; grid-template-columns: 44px minmax(160px,1.5fr) 100px 120px minmax(100px,0.8fr) 120px 160px;">
+    <div class="vtable" use:columnResize style="--cols: 44px var(--col-1, minmax(180px,1.6fr)) var(--col-2, 110px) var(--col-3, 130px) var(--col-4, minmax(120px,0.9fr)) var(--col-5, 130px) 190px;">
+      <div class="vtable-x">
+      <div class="vtable-header" style="display: grid; grid-template-columns: var(--cols);">
         <div class="vtable-header-cell" style="text-align: center;">
           <input type="checkbox" class="checkbox" checked={filteredImages.length > 0 && selected.size === filteredImages.length} onchange={toggleAll} />
         </div>
@@ -299,7 +302,7 @@
       
       <div class="vtable-scroll">
         {#each filteredImages as img (img.Id)}
-          <div class="vtable-row {selected.has(img.Id) ? 'selected' : ''}" style="display: grid; grid-template-columns: 44px minmax(160px,1.5fr) 100px 120px minmax(100px,0.8fr) 120px 160px;">
+          <div class="vtable-row {selected.has(img.Id) ? 'selected' : ''}" style="display: grid; grid-template-columns: var(--cols);">
             <div class="vtable-cell" style="text-align: center;">
               <input type="checkbox" class="checkbox" checked={selected.has(img.Id)} onchange={() => toggleSelect(img.Id)} />
             </div>
@@ -335,11 +338,18 @@
           {/if}
         {/each}
       </div>
+      </div>
     </div>
   {:else}
+    {@const blocked = searchTerm ? undefined : blockingCapability("colima", "docker")}
     <div class="empty-state">
-      <div class="empty-state-title">{searchTerm ? "No matching images" : "No Docker images"}</div>
-      <div class="empty-state-text">{searchTerm ? "Try a different search term." : "Click \"Pull Image\" to download your first image."}</div>
+      {#if blocked}
+        <div class="empty-state-title">{capabilityNotice(blocked).title}</div>
+        <div class="empty-state-text">{capabilityNotice(blocked).text}</div>
+      {:else}
+        <div class="empty-state-title">{searchTerm ? "No matching images" : "No Docker images"}</div>
+        <div class="empty-state-text">{searchTerm ? "Try a different search term." : "Click \"Pull Image\" to download your first image."}</div>
+      {/if}
     </div>
   {/if}
 </div>

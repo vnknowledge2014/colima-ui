@@ -70,11 +70,11 @@
             <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; border-top: 1px solid var(--border-primary); padding-top: 12px;">
               <div style="text-align: center;">
                 <div style="font-size: 10px; color: var(--text-muted);">CPU</div>
-                <div style="font-size: var(--text-sm); font-weight: 600; font-family: var(--font-mono);">{m.cpus} Core</div>
+                <div style="font-size: var(--text-sm); font-weight: 600; font-family: var(--font-mono);">{m.cpus || "—"} Core</div>
               </div>
               <div style="text-align: center;">
                 <div style="font-size: 10px; color: var(--text-muted);">RAM</div>
-                <div style="font-size: var(--text-sm); font-weight: 600; font-family: var(--font-mono);">{m.memory / 1073741824} GB</div>
+                <div style="font-size: var(--text-sm); font-weight: 600; font-family: var(--font-mono);">{m.memory ? m.memory / 1073741824 : "—"} GB</div>
               </div>
             </div>
           </div>
@@ -97,11 +97,11 @@
               <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; border-top: 1px solid var(--border-primary); padding-top: 12px;">
                 <div style="text-align: center;">
                   <div style="font-size: 10px; color: var(--text-muted);">CPU</div>
-                  <div style="font-size: var(--text-sm); font-weight: 600; font-family: var(--font-mono);">{w.cpus} Core</div>
+                  <div style="font-size: var(--text-sm); font-weight: 600; font-family: var(--font-mono);">{w.cpus || "—"} Core</div>
                 </div>
                 <div style="text-align: center;">
                   <div style="font-size: 10px; color: var(--text-muted);">RAM</div>
-                  <div style="font-size: var(--text-sm); font-weight: 600; font-family: var(--font-mono);">{w.memory / 1073741824} GB</div>
+                  <div style="font-size: var(--text-sm); font-weight: 600; font-family: var(--font-mono);">{w.memory ? w.memory / 1073741824 : "—"} GB</div>
                 </div>
               </div>
             </div>

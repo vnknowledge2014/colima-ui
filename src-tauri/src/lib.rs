@@ -14,6 +14,8 @@ pub mod services;
 pub mod auth;
 pub mod sse;
 pub mod validation;
+pub mod redact;
+pub mod tray;
 pub mod platform;
 pub mod helpers;
 
@@ -30,8 +32,26 @@ use commands::networks;
 use commands::searxng;
 use commands::shell_sandbox;
 use commands::system;
+use commands::terminal;
 use commands::volumes;
 use poller::PollerState;
+
+/// Kill every pty on the way out.
+///
+/// Terminal sessions hold an ssh process inside the VM. Once the window is
+/// gone there is no UI left to close them from, so they would survive the app.
+fn reap_terminal_sessions(app: &tauri::AppHandle) {
+    use tauri::Manager;
+    // Clone the Arc out of managed state: the `State` guard borrows the handle.
+    let mgr = (*app.state::<terminal_session::SharedSessionManager>()).clone();
+    // Bound to a statement rather than used directly in `if let`: a scrutinee
+    // temporary lives to the end of the enclosing block, which would outlive
+    // `mgr` itself. Declared after `mgr`, so it drops first.
+    let locked = mgr.lock();
+    if let Ok(mut m) = locked {
+        m.close_all();
+    }
+}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -43,6 +63,9 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_http::init())
         .manage(PollerState::default())
+        // One manager for the whole app: terminal tabs are Tauri commands, and
+        // they all have to reach the same set of live ptys.
+        .manage(terminal_session::create_session_manager())
         .setup(|app| {
             // Initialize Knowledge Bank (SQLite)
             knowledge_bank::init_knowledge_bank();
@@ -69,7 +92,12 @@ pub fn run() {
             let resource_saver_state = Arc::new(RwLock::new(commands::system::ResourceSaverState::default()));
             app.manage(resource_saver_state.clone());
             commands::system::start_resource_saver_daemon(resource_saver_state);
-            
+
+            // Tray last: it reads the poller's instance list, so the poller has
+            // to exist first. Failure here is logged and ignored — several
+            // Linux desktops have no system tray and the app works without one.
+            tray::init(app.handle());
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -85,6 +113,10 @@ pub fn run() {
             colima::kubernetes_action,
             colima::collect_diagnostic_logs,
             colima::create_worker_node,
+            // Colima config (colima.yaml is the single source of truth)
+            commands::colima_config::get_colima_config,
+            commands::colima_config::preview_colima_config,
+            commands::colima_config::apply_colima_config,
             // Docker commands
             containers::list_containers,
             containers::start_container,
@@ -132,6 +164,8 @@ pub fn run() {
             system::get_colima_version,
             system::check_tool,
             system::host_specs,
+            commands::engine_resources::engine_resources,
+            commands::system_capabilities::get_system_capabilities,
             system::get_app_context,
             system::read_reference,
             // Compose commands
@@ -153,6 +187,7 @@ pub fn run() {
             kubernetes::k8s_scale,
             kubernetes::k8s_nodes,
             kubernetes::k8s_events,
+            kubernetes::k8s_resources,
             // Lima commands
             lima::lima_list,
             lima::lima_start,
@@ -167,10 +202,23 @@ pub fn run() {
             ai_chat::ai_chat_load_history,
             ai_chat::ai_chat_save_message,
             ai_chat::ai_chat_clear_history,
+            ai_chat::ai_chat_list_conversations,
+            ai_chat::ai_chat_create_conversation,
+            ai_chat::ai_chat_rename_conversation,
+            ai_chat::ai_chat_delete_conversation,
+            // Terminal (pty over IPC)
+            terminal::terminal_create,
+            terminal::terminal_write,
+            terminal::terminal_resize,
+            terminal::terminal_poll_exit,
+            terminal::terminal_close,
             // AI Diagnostics — SearXNG + HTML→MD
             searxng::searxng_search,
             searxng::fetch_page_as_markdown,
             // Knowledge Bank
+            commands::kb_articles::kb_list_articles,
+            commands::kb_articles::kb_get_article,
+            commands::kb_articles::kb_search_articles,
             knowledge_bank::kb_query,
             knowledge_bank::kb_feedback,
             knowledge_bank::kb_save_solution,
@@ -199,6 +247,14 @@ pub fn run() {
             api_server::get_platform,
             system::set_resource_saver,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while running tauri application")
+        .run(|app, event| {
+            // Reap every pty on the way out. Terminal sessions hold an ssh
+            // process inside the VM; without this they survive the window that
+            // owned them and there is no longer any UI to close them from.
+            if let tauri::RunEvent::ExitRequested { .. } = event {
+                reap_terminal_sessions(app);
+            }
+        });
 }

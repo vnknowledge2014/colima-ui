@@ -22,15 +22,24 @@
   color: var(--text-muted);
 }
 
+/* Header search inputs (Images/Containers): expand smoothly on focus. No
+   :has() or wrapper state — works on any webview. */
+.header-search {
+  width: 180px;
+  transition: width 0.25s ease, border-color var(--transition-fast), box-shadow 0.2s ease;
+}
+
+.header-search:focus {
+  width: 260px;
+}
+
 .select {
   appearance: none;
-  -webkit-appearance: none;
-  -moz-appearance: none;
+  cursor: pointer;
   padding-right: 32px;
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%238B949E' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
   background-repeat: no-repeat;
   background-position: right 10px center;
-  cursor: pointer;
 }
 
 .checkbox {
@@ -108,15 +117,18 @@
   transition: border-color 0.15s, box-shadow 0.15s;
   outline: none;
 }
+
 .settings-select:focus,
 .settings-input:focus {
   border-color: var(--accent-blue);
   box-shadow: 0 0 0 2px rgba(88, 166, 255, 0.15);
 }
+
 .settings-select:hover,
 .settings-input:hover {
   border-color: var(--border-hover, rgba(255,255,255,0.15));
 }
+
 .settings-select {
   appearance: none;
   -webkit-appearance: none;
@@ -127,9 +139,9 @@
   padding-right: 28px;
   cursor: pointer;
 }
+
 .settings-select option {
   background: var(--bg-card);
   color: var(--text-primary);
   padding: 6px 8px;
 }
-

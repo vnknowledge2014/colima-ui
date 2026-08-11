@@ -1,6 +1,7 @@
 import { colimaApi, dockerApi, composeApi, k8sApi, sysMethods, knowledgeBankApi, sandboxApi, aiApi } from "./api";
 import type { ChatMessage } from "./api";
 import { chatStream } from "./llmProviders";
+import { newId } from "./ids";
 import { getCategory, executeEvent } from "./aiEventBus";
 import { BUILT_IN_PRESETS } from "./presetStateManager";
 import { parseAiTools } from "./aiToolParser";
@@ -26,11 +27,14 @@ export async function runAgent(
   chatHistory: ChatMessage[],
   appContext: string,
   customPresets: any,
+  signal?: AbortSignal,
 ): Promise<void> {
   const { provider, model, apiKey, endpoint } = config;
 
+  const aborted = () => signal?.aborted === true;
+
   if (!apiKey && provider !== "ollama-local") {
-    callbacks.onMessage({ id: Date.now().toString(), role: "system", content: "⚠️ API Key not configured." });
+    callbacks.onMessage({ id: newId(), role: "system", content: "⚠️ API Key not configured." });
     return;
   }
 
@@ -58,16 +62,27 @@ export async function runAgent(
 
   try {
     for (let round = 0; round < MAX_SEARCH_ROUNDS; round++) {
+      // Stopping mid-run must not start the next reasoning round — the agent
+      // loop is the expensive part, and a cancelled request that keeps looping
+      // still burns tokens and can still execute tools.
+      if (aborted()) break;
       callbacks.onStatus(round === 0 ? "Agent is reasoning..." : `Agent Loop ${round + 1}...`);
 
       let responseText = "";
-      let streamId = Date.now().toString();
+      let streamId = newId();
       callbacks.onMessage({ id: streamId, role: "assistant", content: "" });
 
       await chatStream(provider, model, apiKey, fullHistory, endpoint, (chunk) => {
         responseText += chunk;
         callbacks.onMessageUpdate(streamId, responseText);
-      });
+      }, signal);
+
+      // Keep whatever streamed in before the stop, but do not run the tools the
+      // half-finished response may have asked for.
+      if (aborted()) {
+        if (!responseText) callbacks.onMessageDelete(streamId);
+        break;
+      }
 
       // Clean tool calls from UI text
       const parsed = parseAiTools(responseText);
@@ -133,23 +148,23 @@ export async function runAgent(
           }
         } else {
           callbacks.onStatus(`⏳ Awaiting approval: ${evt}`);
-          const approvalId = Date.now().toString();
+          const approvalId = newId();
           callbacks.onMessage({ id: approvalId, role: "system", content: `⚠️ Action Required:\nTrigger App Event: **${evt}**\n\`${pld}\`` });
           
           const approved = await callbacks.onApprovalRequired(approvalId, `[EVENT_APPROVE: ${evt} | ${pld}]`);
 
           if (approved) {
-            callbacks.onMessage({ id: Date.now().toString(), role: "system", content: `✅ Approved: \`${evt}\`. Executing...` });
+            callbacks.onMessage({ id: newId(), role: "system", content: `✅ Approved: \`${evt}\`. Executing...` });
             try {
               const result = await executeEvent(evt, parsedPayload);
               toolContext += `\n\n### Approved Event: \`${evt}\`\nResult: ${result}\n`;
-              callbacks.onMessage({ id: Date.now().toString(), role: "system", content: `🏁 Action Completed.` });
+              callbacks.onMessage({ id: newId(), role: "system", content: `🏁 Action Completed.` });
             } catch (e) {
               toolContext += `\n(Event execution failed: ${e})\n`;
             }
           } else {
             toolContext += `\n\n### Event DENIED by user: \`${evt}\`\n`;
-            callbacks.onMessage({ id: Date.now().toString(), role: "system", content: `❌ Denied: \`${evt}\`` });
+            callbacks.onMessage({ id: newId(), role: "system", content: `❌ Denied: \`${evt}\`` });
           }
         }
       }
@@ -157,7 +172,7 @@ export async function runAgent(
       // 3. Old Tools handling
       if (hasQueryState) {
         callbacks.onStatus("🔍 Reading live system state...");
-        callbacks.onMessage({ id: Date.now().toString(), role: "system", content: "🔍 Reading live system state..." });
+        callbacks.onMessage({ id: newId(), role: "system", content: "🔍 Reading live system state..." });
         try {
           const hostSpecsPromise = sysMethods.hostSpecs();
           const [instances, containers, composeProjects, k8sContext, hostSpecs] = 
@@ -188,7 +203,7 @@ Built-in Presets: ${JSON.stringify(BUILT_IN_PRESETS)}
 
       if (hasDiagnose) {
         callbacks.onStatus("🔬 Collecting diagnostics...");
-        callbacks.onMessage({ id: Date.now().toString(), role: "system", content: "🔬 Collecting diagnostics (logs, processes, locks)..." });
+        callbacks.onMessage({ id: newId(), role: "system", content: "🔬 Collecting diagnostics (logs, processes, locks)..." });
         try {
           const diagReport = await knowledgeBankApi.collectDiagnosticLogs("default");
           toolContext += `\n\n### Diagnostic Report\n${diagReport}\n`;
@@ -197,7 +212,7 @@ Built-in Presets: ${JSON.stringify(BUILT_IN_PRESETS)}
 
       for (const [, cmd] of runs.slice(0, 3)) {
         callbacks.onStatus(`🔧 Executing: ${cmd}`);
-        callbacks.onMessage({ id: Date.now().toString(), role: "system", content: `🔧 Executing: \`${cmd}\`` });
+        callbacks.onMessage({ id: newId(), role: "system", content: `🔧 Executing: \`${cmd}\`` });
         try {
           const r = await sandboxApi.execute(cmd);
           toolContext += `\n\n### Command: \`${cmd}\` (exit: ${r.exit_code})\n\`\`\`\n${r.stdout || r.stderr || "(no output)"}\n\`\`\`\n`;
@@ -206,18 +221,18 @@ Built-in Presets: ${JSON.stringify(BUILT_IN_PRESETS)}
 
       for (const [, cmd] of runApprovals.slice(0, 2)) {
         callbacks.onStatus(`⏳ Awaiting approval: ${cmd}`);
-        const approvalId = Date.now().toString();
+        const approvalId = newId();
         callbacks.onMessage({ id: approvalId, role: "system", content: `⚠️ Action Required:\n\`${cmd}\`` });
         const approved = await callbacks.onApprovalRequired(approvalId, cmd);
         if (approved) {
           try {
             const r = await sandboxApi.executeApproved(cmd);
             toolContext += `\n\n### Approved Command: \`${cmd}\` (exit: ${r.exit_code})\n\`\`\`\n${r.stdout || r.stderr || "(no output)"}\n\`\`\`\n`;
-            callbacks.onMessage({ id: Date.now().toString(), role: "system", content: `✅ Approved & Executed: \`${cmd}\`` });
+            callbacks.onMessage({ id: newId(), role: "system", content: `✅ Approved & Executed: \`${cmd}\`` });
           } catch (e) { toolContext += `\n(Approved command failed: ${e})\n`; }
         } else {
           toolContext += `\n\n### Command DENIED by user: \`${cmd}\`\n`;
-          callbacks.onMessage({ id: Date.now().toString(), role: "system", content: `❌ Denied: \`${cmd}\`` });
+          callbacks.onMessage({ id: newId(), role: "system", content: `❌ Denied: \`${cmd}\`` });
         }
       }
 
@@ -230,7 +245,7 @@ Built-in Presets: ${JSON.stringify(BUILT_IN_PRESETS)}
 
       for (const task of securityTasks) {
         callbacks.onStatus(`⏳ Awaiting approval: Security ${task.tool}`);
-        const approvalId = Date.now().toString();
+        const approvalId = newId();
         const warning = task.dangerous ? `\n\n🚨 **WARNING**: This generates code patches. Review carefully before applying.` : "";
         const cmdStr = `${task.cmd} ${task.args.join(" ")}`;
         callbacks.onMessage({ id: approvalId, role: "system", content: `⚠️ Security Action Required:\n**${task.tool}**\n\`${cmdStr}\`${warning}` });
@@ -238,28 +253,28 @@ Built-in Presets: ${JSON.stringify(BUILT_IN_PRESETS)}
         const approved = await callbacks.onApprovalRequired(approvalId, `[EVENT_APPROVE: cli-exec | {"command":"${task.cmd}","args":${JSON.stringify(task.args)}}]`);
 
         if (approved) {
-          callbacks.onMessage({ id: Date.now().toString(), role: "system", content: `✅ Approved: Security ${task.tool}. Executing...` });
+          callbacks.onMessage({ id: newId(), role: "system", content: `✅ Approved: Security ${task.tool}. Executing...` });
           try {
             const result = await executeEvent("cli-exec", { command: task.cmd, args: task.args });
             toolContext += `\n\n### Security ${task.tool}\nResult: ${result}\n`;
-            callbacks.onMessage({ id: Date.now().toString(), role: "system", content: `🏁 Security ${task.tool} Completed.` });
+            callbacks.onMessage({ id: newId(), role: "system", content: `🏁 Security ${task.tool} Completed.` });
           } catch (e) {
             toolContext += `\n(Execution failed: ${e})\n`;
           }
         } else {
           toolContext += `\n(User denied Security ${task.tool})\n`;
-          callbacks.onMessage({ id: Date.now().toString(), role: "system", content: `❌ Denied: Security ${task.tool}` });
+          callbacks.onMessage({ id: newId(), role: "system", content: `❌ Denied: Security ${task.tool}` });
         }
       }
 
       for (const [, expr, prompt] of schedCrons) {
-        const id = `cron-${Date.now()}`;
+        const id = newId("cron");
         callbacks.onCronSchedule(id, expr, prompt);
         toolContext += `\n(Scheduled cron job: ${id} with expr ${expr})\n`;
       }
 
       for (const [, seconds, prompt] of schedTimers) {
-        const id = `timer-${Date.now()}`;
+        const id = newId("timer");
         const ms = parseInt(seconds) * 1000;
         callbacks.onTimerSchedule(id, ms, prompt);
         toolContext += `\n(Scheduled timer: ${id} for ${seconds}s)\n`;
@@ -274,7 +289,7 @@ Built-in Presets: ${JSON.stringify(BUILT_IN_PRESETS)}
       for (const [, tab] of navigates) {
         const page = tab.toLowerCase().trim();
         toolContext += `\n(Navigated to ${page})\n`;
-        callbacks.onMessage({ id: Date.now().toString(), role: "system", content: `🧭 Navigated to ${page} tab` });
+        callbacks.onMessage({ id: newId(), role: "system", content: `🧭 Navigated to ${page} tab` });
         callbacks.onNavigate(page);
       }
 
@@ -296,7 +311,12 @@ Built-in Presets: ${JSON.stringify(BUILT_IN_PRESETS)}
       callbacks.onMessageUpdate(streamId, responseText);
     }
   } catch (e) {
-    callbacks.onMessage({ id: Date.now().toString(), role: "assistant", content: `Error: ${e}` });
+    // An aborted fetch rejects — that is the user pressing Stop, not a failure
+    // worth reporting as an assistant message.
+    const isAbort = aborted() || (e instanceof DOMException && e.name === "AbortError");
+    if (!isAbort) {
+      callbacks.onMessage({ id: newId(), role: "assistant", content: `Error: ${e}` });
+    }
   } finally {
     callbacks.onStatus("");
   }

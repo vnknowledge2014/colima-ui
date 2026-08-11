@@ -50,6 +50,12 @@ export interface DockerContainer {
   CreatedAt: string;
   Size: string;
   Command: string;
+  /**
+   * Container labels, normalized to an object by the backend regardless of
+   * whether they came from the Bollard API or `docker ps --format json`.
+   * Compose grouping reads `com.docker.compose.project` from here.
+   */
+  Labels?: Record<string, string>;
 }
 
 export interface DockerImage {

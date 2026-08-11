@@ -72,6 +72,9 @@ pub async fn list_networks() -> Result<Vec<DockerNetwork>, crate::error::ColimaE
 /// Create a Docker network
 #[tauri::command]
 pub async fn create_network(     name: String,     driver: String,     subnet: String, ) -> Result<String, crate::error::ColimaError> {
+    if !crate::validation::is_valid_resource_name(&name) {
+        return Err(crate::error::ColimaError::validation(format!("Invalid name: {:?}", name)));
+    }
     async move {
     let mut args = vec!["network".to_string(), "create".to_string()];
 
@@ -104,6 +107,9 @@ pub async fn create_network(     name: String,     driver: String,     subnet: S
 /// Remove a Docker network
 #[tauri::command]
 pub async fn remove_network(name: String) -> Result<String, crate::error::ColimaError> {
+    if !crate::validation::is_valid_resource_name(&name) {
+        return Err(crate::error::ColimaError::validation(format!("Invalid name: {:?}", name)));
+    }
     async move {
     let output = docker_output(vec!["network".into(), "rm".into(), name.clone()]).await?;
 
@@ -122,6 +128,9 @@ pub async fn remove_network(name: String) -> Result<String, crate::error::Colima
 /// Inspect a Docker network (raw JSON)
 #[tauri::command]
 pub async fn inspect_network(name: String) -> Result<String, crate::error::ColimaError> {
+    if !crate::validation::is_valid_resource_name(&name) {
+        return Err(crate::error::ColimaError::validation(format!("Invalid name: {:?}", name)));
+    }
     async move {
     let output = docker_output(vec!["network".into(), "inspect".into(), name]).await?;
 

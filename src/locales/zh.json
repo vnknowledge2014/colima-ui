@@ -21,7 +21,15 @@
     "local_ai_models": "本地 AI 模型",
     "ai_chat": "AI 助手",
     "terminal": "终端",
-    "settings": "设置"
+    "settings": "设置",
+    "help": "帮助",
+    "tour_guide": "使用向导",
+    "collapse": "收起侧栏",
+    "expand": "展开侧栏",
+    "colima_missing": "未检测到 Colima",
+    "colima_missing_hint": "打开帮助进行安装",
+    "colima_running": "{count} 个运行中",
+    "colima_stopped": "已停止"
   },
   "dashboard": {
     "title": "仪表盘",
@@ -38,10 +46,177 @@
     "volumes": "数据卷",
     "networks": "网络",
     "compose_projects": "Compose 项目",
-    "kubernetes_contexts": "K8s 上下文"
+    "kubernetes_contexts": "K8s 上下文",
+    "resources": "资源",
+    "resources_vm_fallback": "VM 分配（引擎不可用）",
+    "allocated_cores": "已分配核心",
+    "cores_available": "个可用核心",
+    "of": "/",
+    "reclaimable": "可回收",
+    "allocated_memory": "已分配内存",
+    "allocated_disk": "已分配磁盘"
   },
   "settings": {
     "title": "设置",
     "language": "语言"
+  },
+  "errors": {
+    "panel_title": "错误详情",
+    "show_details": "详情",
+    "clear": "清除",
+    "copy": "复制",
+    "copied": "已复制",
+    "copy_failed": "无法访问剪贴板",
+    "none_this_session": "本次会话没有错误。",
+    "not_installed": {
+      "title": "未安装所需工具",
+      "hint": "缺少必需的命令行工具。请在设置中查看安装说明。"
+    },
+    "not_running": {
+      "title": "Colima 未运行",
+      "hint": "请在 Instances 页面启动 Colima 实例后重试。"
+    },
+    "permission_denied": {
+      "title": "权限不足",
+      "hint": "操作系统拒绝了此操作。请检查文件所有者和权限。"
+    },
+    "timeout": {
+      "title": "操作超时",
+      "hint": "虚拟机可能繁忙或无响应。请尝试重启实例。"
+    },
+    "command_failed": {
+      "title": "命令失败"
+    },
+    "network": {
+      "title": "网络错误",
+      "hint": "请检查网络连接和代理设置。"
+    },
+    "validation": {
+      "title": "输入无效"
+    },
+    "not_found": {
+      "title": "未找到"
+    },
+    "internal": {
+      "title": "内部错误"
+    },
+    "unknown": {
+      "title": "出现问题"
+    },
+    "how_to_fix": "如何解决"
+  },
+  "common": {
+    "close": "关闭",
+    "loading": "加载中…",
+    "saving": "保存中…",
+    "revert": "撤销"
+  },
+  "capabilities": {
+    "missing": {
+      "title": "未安装 {name}",
+      "text": "请先安装以使用此页面。",
+      "text_with_hint": "请先安装以使用此页面：{hint}"
+    },
+    "not_running": {
+      "title": "{name} 未运行",
+      "text": "请在 Instances 页面启动 Colima 实例后返回。"
+    },
+    "unknown": {
+      "title": "无法检测 {name}",
+      "text": "检测失败。请确认该工具在 PATH 中。"
+    }
+  },
+  "containers": {
+    "group_by_project": "按项目分组",
+    "standalone": "独立",
+    "running_lower": "运行中"
+  },
+  "diff": {
+    "no_changes": "没有变更",
+    "field": "字段",
+    "from": "当前",
+    "to": "新值",
+    "restart": "需重启",
+    "restart_note": "标记为需重启的字段将在实例下次启动时生效。"
+  },
+  "help": {
+    "title": "帮助",
+    "subtitle": "故障排查指南，离线可用。",
+    "search": "搜索文章…",
+    "no_results": "没有匹配的文章。",
+    "pick": "请选择一篇文章。"
+  },
+  "colima_config": {
+    "title": "Colima 配置",
+    "description": "直接编辑 colima.yaml。你手动添加的设置会被保留；变更在下次重启时生效。",
+    "profile": "配置档",
+    "presets": "预设",
+    "preset_light": "轻量",
+    "preset_balanced": "均衡",
+    "preset_performance": "高性能",
+    "cpu": "CPU 数量",
+    "memory": "内存 (GiB)",
+    "disk": "磁盘 (GiB)",
+    "disk_grow_only": "只能扩大",
+    "runtime": "运行时",
+    "vm_type": "虚拟机类型",
+    "mount_type": "挂载方式",
+    "dns": "DNS 服务器",
+    "network_address": "为虚拟机分配可访问的 IP 地址",
+    "kubernetes": "启用 Kubernetes",
+    "pending": "待应用的变更",
+    "apply": "应用变更",
+    "saved": "配置已保存。重启实例后生效。",
+    "not_saved": "未保存 —— 请先修正上面的错误。",
+    "load_action": "读取 Colima 配置",
+    "preview_action": "预览 Colima 配置",
+    "apply_action": "保存 Colima 配置",
+    "issue": {
+      "cpu_zero": "CPU 数量至少为 1。",
+      "cpu_over_host": "请求 {cpu} 个 CPU，但宿主机只有 {host} 个。虚拟机会与宿主机争抢核心。",
+      "memory_zero": "内存至少为 1 GiB。",
+      "memory_over_host": "在 {host} GiB 的宿主机上请求了 {memory} GiB。请为宿主机至少保留 2 GiB。",
+      "disk_zero": "磁盘容量至少为 1 GiB。",
+      "disk_shrink": "磁盘无法从 {from} GiB 缩小到 {to} GiB。Colima 只能扩大磁盘。",
+      "disk_over_free": "请求 {disk} GiB，但宿主机只剩 {free} GiB 可用。",
+      "runtime_invalid": "“{value}” 不属于：{allowed}。",
+      "vm_type_invalid": "“{value}” 不属于：{allowed}。",
+      "mount_type_invalid": "“{value}” 不属于：{allowed}。",
+      "dns_not_ip": "“{value}” 不是一个 IP 地址。"
+    },
+    "no_instance": "还没有 Colima 实例。配置文件会在实例首次启动时创建。",
+    "go_to_instances": "前往 Instances"
+  },
+  "ai": {
+    "title": "指挥中心",
+    "processing": "处理中...",
+    "new_chat": "新建对话",
+    "untitled_chat": "新建对话",
+    "chat_history": "聊天记录",
+    "conversations": "对话",
+    "messages": "条消息",
+    "rename": "重命名",
+    "delete": "删除",
+    "clear_chat": "清空当前对话",
+    "open_settings": "打开设置",
+    "send": "发送消息",
+    "stop": "停止生成",
+    "input_placeholder": "输入消息…",
+    "role_you": "你",
+    "role_assistant": "Colima AI",
+    "empty_title": "你好！我是你的 Colima AI 助手。",
+    "empty_hint": "我可以控制容器、排查问题、查阅知识库并管理你的虚拟机。",
+    "queued": "完成后发送",
+    "cancel_queued": "取消排队的消息",
+    "input_hint": "Enter 发送 · Shift+Enter 换行",
+    "hide_panel": "隐藏聊天（后台继续运行）",
+    "bubble_open": "打开 Colima AI",
+    "bubble_working": "Colima AI 正在运行 — 点击打开"
+  },
+  "terminal": {
+    "connection_failed": "连接失败",
+    "failed_to_connect": "无法连接: {error}",
+    "ensure_running": "请确认实例正在运行。",
+    "session_ended": "会话已结束 (退出码: {code})"
   }
 }

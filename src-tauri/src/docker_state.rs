@@ -247,6 +247,10 @@ pub fn map_containers(containers: &[bollard::models::ContainerSummary]) -> Vec<s
             "CreatedAt": c.created.unwrap_or(0).to_string(),
             "Size": c.size_rw.unwrap_or(0).to_string(),
             "Command": c.command.clone().unwrap_or_default(),
+            // Compose grouping reads com.docker.compose.project from here.
+            // Always an object, never null, so the frontend does not have to
+            // special-case a container with no labels.
+            "Labels": c.labels.clone().unwrap_or_default(),
         }));
     }
     mapped

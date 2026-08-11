@@ -17,6 +17,7 @@
   import LinuxVMs from "./pages/LinuxVMs.svelte";
   import Settings from "./pages/Settings.svelte";
   import Terminal from "./pages/Terminal.svelte";
+  import Help from "./pages/Help.svelte";
 
   import SetupWizard from "./components/SetupWizard.svelte";
   import GettingStartedTour from "./components/GettingStartedTour.svelte";
@@ -26,9 +27,27 @@
   
   import Sidebar from "./components/Sidebar.svelte";
   import ToastContainer from "./components/ToastContainer.svelte";
+  import ErrorDetailPanel from "./components/ErrorDetailPanel.svelte";
   import { isRunningInTauri } from "./lib/env";
 
   let isTauri = $state(isRunningInTauri());
+
+  // Tauri 2's reliable window drag is the data-tauri-drag-region attribute;
+  // plain -webkit-app-region CSS is unreliable in macOS WKWebView with an
+  // overlay titlebar. Pages swap headers on navigation, so re-tag on DOM
+  // changes instead of tagging each page's markup.
+  function windowDragRegion(node: HTMLElement) {
+    if (!isRunningInTauri()) return {};
+    const tag = () => {
+      node.querySelectorAll<HTMLElement>(".content-header, .sidebar-header").forEach((el) => {
+        if (!el.hasAttribute("data-tauri-drag-region")) el.setAttribute("data-tauri-drag-region", "");
+      });
+    };
+    tag();
+    const observer = new MutationObserver(tag);
+    observer.observe(node, { childList: true, subtree: true });
+    return { destroy: () => observer.disconnect() };
+  }
 
   let showWizard = $state(false);
   let showTour = $state(false);
@@ -61,7 +80,7 @@
 </script>
 
 <ErrorBoundary>
-<div class="app-layout {isTauri ? 'tauri-app' : ''}">
+<div class="app-layout {isTauri ? 'tauri-app' : ''}" use:windowDragRegion>
   <Sidebar 
     systemInfo={dashboardState.systemInfo} 
     onStartTour={() => { showTour = true; setAppSetting("colimaui_tour_complete", "false"); }} 
@@ -101,6 +120,8 @@
       <Terminal />
     {:else if uiState.currentPage === "models"}
       <Models />
+    {:else if uiState.currentPage === "help"}
+      <Help />
     {:else}
       <div style="display: flex; justify-content: center; align-items: center; height: 50vh;">
         <div>Component Migration in Progress... ({uiState.currentPage})</div>
@@ -108,7 +129,13 @@
     {/if}
   </main>
 
+  <!-- A sibling of <main>, not an overlay: the layout is a flex row, so the
+       panel claims its own column and the content shrinks instead of being
+       covered. -->
+  <AiChatPanel />
+
   <ToastContainer />
+  <ErrorDetailPanel />
 
   {#if showWizard}
     <SetupWizard
@@ -139,7 +166,6 @@
     />
   {/if}
 
-  <AiChatPanel />
   <ConfirmDialog />
 </div>
 </ErrorBoundary>

@@ -41,7 +41,6 @@ use crate::routes::compose::*;
 use crate::routes::payloads::*;
 use crate::routes::capabilities::*;
 use crate::routes::models::*;
-use crate::routes::ws::*;
 use crate::routes::k8s::*;
 use crate::routes::lima::*;
 use crate::routes::ai::*;
@@ -72,8 +71,13 @@ pub fn build_router() -> Router {
         .route("/api/system/version", get(api_get_version))
         .route("/api/system/homebrew", get(api_check_homebrew))
         .route("/api/system/check-tool", get(api_check_tool))
+        .route(
+            "/api/system/capabilities",
+            get(crate::routes::system_capabilities::api_system_capabilities),
+        )
         .route("/api/system/platform", get(api_get_platform))
         .route("/api/system/host-specs", get(api_host_specs))
+        .route("/api/system/engine-resources", get(api_engine_resources))
         .route("/api/system/install", post(api_install_dep))
         // Colima instances
         .route("/api/instances", get(api_list_instances))
@@ -200,9 +204,22 @@ pub fn build_router() -> Router {
         .route("/api/ai/search", post(api_ai_search))
         .route("/api/ai/fetch-page", post(api_ai_fetch_page))
         .route("/api/ai/context", get(api_ai_context))
+        .route("/api/ai/history", get(api_ai_load_history).post(api_ai_save_message))
+        .route("/api/ai/history/clear", post(api_ai_clear_history))
+        .route("/api/ai/conversations", get(api_ai_list_conversations).post(api_ai_create_conversation))
+        .route("/api/ai/conversations/rename", post(api_ai_rename_conversation))
+        .route("/api/ai/conversations/delete", post(api_ai_delete_conversation))
         // Settings
         .route("/api/settings", get(api_get_settings))
         .route("/api/settings", post(api_set_setting))
+        // Colima config — colima.yaml is the single source of truth
+        .route("/api/instances/config", get(crate::routes::colima_config::api_get_colima_config))
+        .route("/api/instances/config/preview", post(crate::routes::colima_config::api_preview_colima_config))
+        .route("/api/instances/config/apply", post(crate::routes::colima_config::api_apply_colima_config))
+        // Help articles
+        .route("/api/kb/articles", get(crate::routes::colima_config::api_kb_list_articles))
+        .route("/api/kb/articles/get", get(crate::routes::colima_config::api_kb_get_article))
+        .route("/api/kb/articles/search", get(crate::routes::colima_config::api_kb_search_articles))
         // Knowledge Bank
         .route("/api/kb/query", post(api_kb_query))
         .route("/api/kb/search", post(api_kb_search))
@@ -217,13 +234,10 @@ pub fn build_router() -> Router {
         .route("/api/capabilities", get(api_capabilities))
         // Diagnostics
         .route("/api/diagnostics/logs", get(api_diagnostics_logs))
-        // Terminal sessions (browser mode)
-        .route("/api/terminal/create", post(api_terminal_create))
-        .route("/api/terminal/write", post(api_terminal_write))
-        .route("/api/terminal/read", get(api_terminal_read))
-        .route("/api/terminal/close", post(api_terminal_close))
-        .route("/api/terminal/resize", post(api_terminal_resize))
-        .with_state(terminal_session::create_session_manager())
+        // Terminal sessions used to live here, over HTTP. They are Tauri
+        // commands now: a shell endpoint reachable on a local port is arbitrary
+        // code execution, and the safest version of that endpoint is one that
+        // does not exist. See plans/260811-0919-terminal-integration.
         .layer(middleware::from_fn(auth_middleware));
 
     // Unauthenticated routes — only token discovery (CORS still restricts to localhost)

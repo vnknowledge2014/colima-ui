@@ -21,7 +21,15 @@
     "local_ai_models": "Mô hình AI Cục bộ",
     "ai_chat": "Trợ lý AI",
     "terminal": "Terminal",
-    "settings": "Cài đặt"
+    "settings": "Cài đặt",
+    "help": "Trợ giúp",
+    "tour_guide": "Hướng dẫn",
+    "collapse": "Thu gọn thanh bên",
+    "expand": "Mở rộng thanh bên",
+    "colima_missing": "Chưa phát hiện Colima",
+    "colima_missing_hint": "Mở Trợ giúp để cài",
+    "colima_running": "{count} đang chạy",
+    "colima_stopped": "Đang tắt"
   },
   "dashboard": {
     "title": "Bảng Điều Khiển",
@@ -38,10 +46,177 @@
     "volumes": "Volumes",
     "networks": "Networks",
     "compose_projects": "Dự án Compose",
-    "kubernetes_contexts": "K8s Contexts"
+    "kubernetes_contexts": "K8s Contexts",
+    "resources": "Tài nguyên",
+    "resources_vm_fallback": "Cấp phát VM (không kết nối được engine)",
+    "allocated_cores": "Số nhân được cấp",
+    "cores_available": "nhân khả dụng",
+    "of": "trên",
+    "reclaimable": "có thể thu hồi",
+    "allocated_memory": "RAM được cấp",
+    "allocated_disk": "Dung lượng được cấp"
   },
   "settings": {
     "title": "Cài đặt",
     "language": "Ngôn ngữ"
+  },
+  "errors": {
+    "panel_title": "Chi tiết lỗi",
+    "show_details": "Chi tiết",
+    "clear": "Xoá",
+    "copy": "Sao chép",
+    "copied": "Đã chép",
+    "copy_failed": "Không truy cập được clipboard",
+    "none_this_session": "Chưa có lỗi nào trong phiên này.",
+    "not_installed": {
+      "title": "Chưa cài công cụ cần thiết",
+      "hint": "Thiếu một công cụ dòng lệnh. Mở Cài đặt để xem cần cài gì."
+    },
+    "not_running": {
+      "title": "Colima chưa chạy",
+      "hint": "Khởi động instance Colima ở trang Instances rồi thử lại."
+    },
+    "permission_denied": {
+      "title": "Không đủ quyền",
+      "hint": "Hệ điều hành từ chối thao tác này. Kiểm tra quyền và chủ sở hữu file."
+    },
+    "timeout": {
+      "title": "Thao tác quá thời gian",
+      "hint": "VM có thể đang bận hoặc không phản hồi. Thử khởi động lại instance."
+    },
+    "command_failed": {
+      "title": "Lệnh thất bại"
+    },
+    "network": {
+      "title": "Lỗi mạng",
+      "hint": "Kiểm tra kết nối mạng và cấu hình proxy."
+    },
+    "validation": {
+      "title": "Dữ liệu không hợp lệ"
+    },
+    "not_found": {
+      "title": "Không tìm thấy"
+    },
+    "internal": {
+      "title": "Lỗi nội bộ"
+    },
+    "unknown": {
+      "title": "Đã có lỗi xảy ra"
+    },
+    "how_to_fix": "Cách khắc phục"
+  },
+  "common": {
+    "close": "Đóng",
+    "loading": "Đang tải…",
+    "saving": "Đang lưu…",
+    "revert": "Hoàn tác"
+  },
+  "capabilities": {
+    "missing": {
+      "title": "Chưa cài {name}",
+      "text": "Cài đặt để dùng được trang này.",
+      "text_with_hint": "Cài đặt để dùng được trang này: {hint}"
+    },
+    "not_running": {
+      "title": "{name} chưa chạy",
+      "text": "Khởi động một instance Colima ở trang Instances rồi quay lại."
+    },
+    "unknown": {
+      "title": "Không kiểm tra được {name}",
+      "text": "Dò tìm thất bại. Kiểm tra xem công cụ có trong PATH không."
+    }
+  },
+  "containers": {
+    "group_by_project": "Nhóm theo project",
+    "standalone": "Đứng riêng",
+    "running_lower": "đang chạy"
+  },
+  "diff": {
+    "no_changes": "Không có thay đổi",
+    "field": "Trường",
+    "from": "Hiện tại",
+    "to": "Mới",
+    "restart": "cần khởi động lại",
+    "restart_note": "Các trường được đánh dấu chỉ có hiệu lực ở lần khởi động instance kế tiếp."
+  },
+  "help": {
+    "title": "Trợ giúp",
+    "subtitle": "Hướng dẫn xử lý sự cố. Dùng được khi không có mạng.",
+    "search": "Tìm bài viết…",
+    "no_results": "Không tìm thấy bài viết phù hợp.",
+    "pick": "Chọn một bài viết."
+  },
+  "colima_config": {
+    "title": "Cấu hình Colima",
+    "description": "Sửa trực tiếp colima.yaml. Các thiết lập bạn tự thêm được giữ nguyên; thay đổi có hiệu lực ở lần khởi động lại kế tiếp.",
+    "profile": "Profile",
+    "presets": "Cấu hình sẵn",
+    "preset_light": "Nhẹ",
+    "preset_balanced": "Cân bằng",
+    "preset_performance": "Hiệu năng cao",
+    "cpu": "Số CPU",
+    "memory": "RAM (GiB)",
+    "disk": "Dung lượng đĩa (GiB)",
+    "disk_grow_only": "chỉ tăng được",
+    "runtime": "Runtime",
+    "vm_type": "Loại máy ảo",
+    "mount_type": "Kiểu mount",
+    "dns": "Máy chủ DNS",
+    "network_address": "Cấp cho máy ảo một địa chỉ IP truy cập được",
+    "kubernetes": "Bật Kubernetes",
+    "pending": "Thay đổi chờ áp dụng",
+    "apply": "Áp dụng thay đổi",
+    "saved": "Đã lưu cấu hình. Khởi động lại instance để áp dụng.",
+    "not_saved": "Chưa lưu — hãy sửa các lỗi ở trên.",
+    "load_action": "Đọc cấu hình Colima",
+    "preview_action": "Xem trước cấu hình Colima",
+    "apply_action": "Lưu cấu hình Colima",
+    "issue": {
+      "cpu_zero": "Số CPU phải ít nhất là 1.",
+      "cpu_over_host": "Yêu cầu {cpu} CPU nhưng máy chỉ có {host}. Máy ảo sẽ tranh chấp nhân với host.",
+      "memory_zero": "RAM phải ít nhất 1 GiB.",
+      "memory_over_host": "Yêu cầu {memory} GiB trên máy {host} GiB. Hãy chừa ít nhất 2 GiB cho hệ điều hành.",
+      "disk_zero": "Dung lượng đĩa phải ít nhất 1 GiB.",
+      "disk_shrink": "Không thể thu nhỏ đĩa từ {from} GiB xuống {to} GiB. Colima chỉ tăng được dung lượng đĩa.",
+      "disk_over_free": "Yêu cầu {disk} GiB nhưng máy chỉ còn trống {free} GiB.",
+      "runtime_invalid": "\"{value}\" không thuộc: {allowed}.",
+      "vm_type_invalid": "\"{value}\" không thuộc: {allowed}.",
+      "mount_type_invalid": "\"{value}\" không thuộc: {allowed}.",
+      "dns_not_ip": "\"{value}\" không phải là địa chỉ IP."
+    },
+    "no_instance": "Chưa có instance Colima nào. File cấu hình được tạo ở lần khởi động instance đầu tiên.",
+    "go_to_instances": "Tới trang Instances"
+  },
+  "ai": {
+    "title": "Trung tâm điều khiển",
+    "processing": "Đang xử lý...",
+    "new_chat": "Cuộc trò chuyện mới",
+    "untitled_chat": "Cuộc trò chuyện mới",
+    "chat_history": "Lịch sử trò chuyện",
+    "conversations": "Cuộc trò chuyện",
+    "messages": "tin nhắn",
+    "rename": "Đổi tên",
+    "delete": "Xoá",
+    "clear_chat": "Xoá nội dung trò chuyện này",
+    "open_settings": "Mở Cài đặt",
+    "send": "Gửi tin nhắn",
+    "stop": "Dừng tạo phản hồi",
+    "input_placeholder": "Nhập tin nhắn…",
+    "role_you": "Bạn",
+    "role_assistant": "Colima AI",
+    "empty_title": "Xin chào! Tôi là trợ lý AI Colima của bạn.",
+    "empty_hint": "Tôi có thể điều khiển container, chẩn đoán sự cố, đọc kho tri thức và quản lý máy ảo của bạn.",
+    "queued": "Sẽ gửi khi xong",
+    "cancel_queued": "Huỷ tin nhắn đang chờ",
+    "input_hint": "Enter để gửi · Shift+Enter để xuống dòng",
+    "hide_panel": "Ẩn chat (vẫn chạy nền)",
+    "bubble_open": "Mở Colima AI",
+    "bubble_working": "Colima AI đang chạy — bấm để mở"
+  },
+  "terminal": {
+    "connection_failed": "Kết nối thất bại",
+    "failed_to_connect": "Không thể kết nối: {error}",
+    "ensure_running": "Hãy chắc chắn instance đang chạy.",
+    "session_ended": "Phiên đã kết thúc (mã thoát: {code})"
   }
 }

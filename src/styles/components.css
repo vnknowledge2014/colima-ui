@@ -13,47 +13,6 @@
   box-shadow: var(--shadow-md);
 }
 
-.card-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-  gap: 16px;
-}
-
-.stat-card {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  /* Button reset for a11y */
-  background: none;
-  border: none;
-  font-family: inherit;
-  text-align: left;
-  color: inherit;
-  cursor: pointer;
-  width: 100%;
-}
-
-.stat-card .stat-label {
-  font-size: var(--text-sm);
-  color: var(--text-secondary);
-  font-weight: 500;
-}
-
-.stat-card .stat-value {
-  font-size: var(--text-2xl);
-  font-weight: 700;
-}
-
-.stat-card .stat-icon {
-  width: 40px;
-  height: 40px;
-  border-radius: var(--radius-md);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  margin-bottom: 4px;
-}
-
 /* ===== Buttons ===== */
 
 .btn {
@@ -84,15 +43,6 @@
 
 .btn-primary:hover {
   background: #4c99eb;
-}
-
-.btn-success {
-  background: var(--accent-green);
-  color: white;
-}
-
-.btn-success:hover {
-  background: #2ea043;
 }
 
 .btn-danger {
@@ -127,7 +77,6 @@
 }
 
 /* ===== Status Badge ===== */
-
 .badge {
   display: inline-flex;
   align-items: center;
@@ -141,6 +90,8 @@
   max-width: 100%;
   overflow: hidden;
   min-width: 0;
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 
 .badge-running {
@@ -255,11 +206,25 @@
 }
 
 /* ===== Virtual Table ===== */
-
 .vtable {
   width: 100%;
   border-radius: var(--radius-lg);
   overflow: hidden;
+}
+
+/* Horizontal scroll wrapper: header + rows scroll together so columns stay
+   aligned. Vertical scroll (and its height cap) lives here too — the header
+   stays pinned via sticky. */
+.vtable-x {
+  overflow: auto;
+  max-height: calc(100vh - 260px);
+}
+
+/* The table's own scrollbar hugs the right edge and reads as a thick border;
+   keep scrolling but render the bar invisible. */
+.vtable-x::-webkit-scrollbar {
+  width: 0;
+  height: 0;
 }
 
 .vtable-header {
@@ -280,11 +245,29 @@
   text-transform: uppercase;
   letter-spacing: 0.05em;
   flex-shrink: 0;
+  position: relative;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
-.vtable-scroll {
-  overflow-y: auto;
-  max-height: calc(100vh - 260px);
+.vtable-col-resize {
+  position: absolute;
+  top: 0;
+  right: -2px;
+  width: 5px;
+  height: 100%;
+  cursor: col-resize;
+  z-index: 3;
+}
+
+.vtable-col-resize:hover,
+.vtable.resizing .vtable-col-resize {
+  background: var(--accent-blue);
+}
+
+.vtable.resizing {
+  cursor: col-resize;
+  user-select: none;
 }
 
 .vtable-row {
@@ -321,6 +304,12 @@
   overflow: visible;
   text-overflow: clip;
   padding: 12px 8px;
+}
+
+/* Cells holding tooltip-bearing elements (action buttons, error badges) must
+   not clip the tooltip, which is positioned above the element. */
+.vtable-cell:has([data-tooltip]) {
+  overflow: visible;
 }
 
 /* ===== Context Menu ===== */
@@ -441,6 +430,8 @@
   border: 1px solid var(--border-primary);
   font-size: var(--text-xs);
   white-space: nowrap;
+  max-width: 340px;
+  line-height: 1.5;
   opacity: 0;
   pointer-events: none;
   transition: opacity var(--transition-fast);
@@ -486,23 +477,33 @@
 }
 
 .metric-card-blue:hover { border-color: rgba(88, 166, 255, 0.4); transform: translateY(-4px) scale(1.02); box-shadow: 0 12px 32px rgba(88, 166, 255, 0.2); }
+
 .metric-card-blue::before { background: radial-gradient(circle at top right, rgba(88, 166, 255, 0.15), transparent 70%); }
+
 .metric-card-blue:hover::before { opacity: 1; }
 
 .metric-card-green:hover { border-color: rgba(63, 185, 80, 0.4); transform: translateY(-4px) scale(1.02); box-shadow: 0 12px 32px rgba(63, 185, 80, 0.2); }
+
 .metric-card-green::before { background: radial-gradient(circle at top right, rgba(63, 185, 80, 0.15), transparent 70%); }
+
 .metric-card-green:hover::before { opacity: 1; }
 
 .metric-card-purple:hover { border-color: rgba(188, 140, 255, 0.4); transform: translateY(-4px) scale(1.02); box-shadow: 0 12px 32px rgba(188, 140, 255, 0.2); }
+
 .metric-card-purple::before { background: radial-gradient(circle at top right, rgba(188, 140, 255, 0.15), transparent 70%); }
+
 .metric-card-purple:hover::before { opacity: 1; }
 
 .metric-card-orange:hover { border-color: rgba(240, 136, 62, 0.4); transform: translateY(-4px) scale(1.02); box-shadow: 0 12px 32px rgba(240, 136, 62, 0.2); }
+
 .metric-card-orange::before { background: radial-gradient(circle at top right, rgba(240, 136, 62, 0.15), transparent 70%); }
+
 .metric-card-orange:hover::before { opacity: 1; }
 
 .metric-card-red:hover { border-color: rgba(248, 81, 73, 0.4); transform: translateY(-4px) scale(1.02); box-shadow: 0 12px 32px rgba(248, 81, 73, 0.2); }
+
 .metric-card-red::before { background: radial-gradient(circle at top right, rgba(248, 81, 73, 0.15), transparent 70%); }
+
 .metric-card-red:hover::before { opacity: 1; }
 
 .metric-header {
@@ -534,18 +535,23 @@
 }
 
 .metric-card-blue .metric-icon-wrapper { background: rgba(88, 166, 255, 0.15); border: 1px solid rgba(88, 166, 255, 0.2); }
+
 .metric-card-blue .metric-icon { color: var(--accent-blue); }
 
 .metric-card-green .metric-icon-wrapper { background: rgba(63, 185, 80, 0.15); border: 1px solid rgba(63, 185, 80, 0.2); }
+
 .metric-card-green .metric-icon { color: var(--accent-green); }
 
 .metric-card-purple .metric-icon-wrapper { background: rgba(188, 140, 255, 0.15); border: 1px solid rgba(188, 140, 255, 0.2); }
+
 .metric-card-purple .metric-icon { color: var(--accent-purple); }
 
 .metric-card-orange .metric-icon-wrapper { background: rgba(240, 136, 62, 0.15); border: 1px solid rgba(240, 136, 62, 0.2); }
+
 .metric-card-orange .metric-icon { color: var(--accent-orange); }
 
 .metric-card-red .metric-icon-wrapper { background: rgba(248, 81, 73, 0.15); border: 1px solid rgba(248, 81, 73, 0.2); }
+
 .metric-card-red .metric-icon { color: var(--accent-red); }
 
 .metric-body {
@@ -563,9 +569,13 @@
 }
 
 .metric-card-blue .metric-value { color: #ffffff; text-shadow: 0 0 16px rgba(88, 166, 255, 0.3); }
+
 .metric-card-green .metric-value { color: #ffffff; text-shadow: 0 0 16px rgba(63, 185, 80, 0.3); }
+
 .metric-card-purple .metric-value { color: #ffffff; text-shadow: 0 0 16px rgba(188, 140, 255, 0.3); }
+
 .metric-card-orange .metric-value { color: #ffffff; text-shadow: 0 0 16px rgba(240, 136, 62, 0.3); }
+
 .metric-card-red .metric-value { color: #ffffff; text-shadow: 0 0 16px rgba(248, 81, 73, 0.3); }
 
 .metric-sub {
@@ -575,14 +585,59 @@
   font-weight: 500;
 }
 
-.spinner {
-  border-radius: 50%;
-  border: 2px solid rgba(139, 148, 158, 0.2);
-  border-top-color: currentColor;
-  animation: spin 1s linear infinite;
+/* "engine · live" marker: figures are being read from a reachable engine right
+   now, as opposed to the static VM allocation fallback. Shares badge-dot's
+   pulse so every live indicator in the app animates identically. */
+.live-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 8px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: var(--text-xs);
+  font-weight: 600;
+  color: var(--accent-green);
+  background: rgba(63, 185, 80, 0.12);
+  border: 1px solid rgba(63, 185, 80, 0.3);
+}
+
+/* Compact readout for a single figure — container stats tab. */
+.stat-tile {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 12px;
+  background: var(--bg-primary);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+}
+
+.stat-tile-label {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+
+.stat-tile-value {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
 }
 
 @keyframes spin {
   to { transform: rotate(360deg); }
 }
 
+/* ---- moved out of index.css during the stylesheet consolidation ---- */
+
+.vtable-scroll {
+  overflow-y: auto;
+  max-height: calc(100vh - 260px);
+}
+
+@keyframes ai-badge-pop {
+  0% { transform: scale(0); }
+  70% { transform: scale(1.2); }
+  100% { transform: scale(1); }
+}

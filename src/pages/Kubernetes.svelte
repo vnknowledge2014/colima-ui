@@ -7,6 +7,7 @@
   import KubernetesHealth from "../components/KubernetesHealth.svelte";
   import { confirm } from "../store/confirm.svelte";
   import { k8sState, type K8sResource } from "../store/k8s.svelte";
+  import { openTerminalSession } from "../store.svelte";
   import { parseItems, timeAgo, statusColor, getColumns } from "../lib/k8sUtils";
   import XRay from "./XRay.svelte";
   import ClusterTopology from "./ClusterTopology.svelte";
@@ -305,10 +306,34 @@
     }
   }
 
-  async function handleExec(item: K8sResource) {
+  /**
+   * Open a shell on this pod in the app's own Terminal page.
+   *
+   * This used to call `k8sApi.exec`, which handed a `kubectl exec -it` string to
+   * `osascript` and opened Terminal.app — dropping the user out of the app, and
+   * building a shell command line by string escaping. The session is a real pty
+   * inside the app now, and every value below travels as its own argv element.
+   */
+  function handleExec(item: K8sResource) {
+    openTerminalSession({
+      kind: "k8sExec",
+      namespace: item.namespace || "default",
+      pod: item.name,
+      container: selectedContainer || "",
+    });
+  }
+
+  /**
+   * The escape hatch: hand the session to the OS terminal instead.
+   *
+   * Kept as an explicit, secondary action rather than the default. The embedded
+   * terminal covers the normal case; this is here for the times it does not —
+   * and it is the only remaining caller of the `osascript` path.
+   */
+  async function handleExecExternal(item: K8sResource) {
     try {
       const result = await k8sApi.exec(item.namespace || "default", item.name, selectedContainer || "");
-      globalToast("success", result || "Shell opened in Terminal");
+      globalToast("success", result || "Shell opened in Terminal.app");
     } catch (e) {
       globalToast("error", "Failed to exec: " + e);
     }
@@ -374,7 +399,11 @@
     const result: any[] = [];
     if (activeResource === "pods") {
       result.push({ label: "View Logs", action: async () => { await openDetail(item); detailTab = "logs"; } });
-      result.push({ label: "Exec Shell", action: async () => await handleExec(item) });
+      result.push({ label: "Exec Shell", action: async () => handleExec(item) });
+      result.push({
+        label: "Exec Shell in Terminal.app",
+        action: async () => await handleExecExternal(item),
+      });
     }
     const activeInfo = ALL_ITEMS.find(t => t.id === activeResource);
     if (activeInfo?.canRestart) {
@@ -809,3 +838,43 @@
     </div>
   </div>
 {/if}
+
+<style>
+  /* The detail drawer's Logs/Describe/YAML tabs carried `class="tab-btn"` but
+     no rule for it existed anywhere in the app, so they fell back to the
+     browser's default button chrome — white pills on a dark panel. Underlined
+     tabs rather than filled pills, to match the drawer's flat surfaces. */
+  .tab-btn {
+    background: transparent;
+    border: none;
+    border-bottom: 2px solid transparent;
+    color: var(--text-secondary);
+    font: inherit;
+    font-size: var(--text-sm);
+    font-weight: 500;
+    padding: 10px 2px;
+    /* Pulls the underline down onto the tab strip's own 1px bottom border
+       instead of leaving a hairline gap above it. */
+    margin-bottom: -1px;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: color var(--transition-fast), border-color var(--transition-fast);
+  }
+
+  .tab-btn:hover {
+    color: var(--text-primary);
+  }
+
+  /* Sits on the container's own bottom border, so the active tab reads as
+     joined to the panel below it. */
+  .tab-btn.active {
+    color: var(--accent-blue);
+    border-bottom-color: var(--accent-blue);
+  }
+
+  .tab-btn:focus-visible {
+    outline: 2px solid var(--accent-blue);
+    outline-offset: -2px;
+    border-radius: var(--radius-sm);
+  }
+</style>

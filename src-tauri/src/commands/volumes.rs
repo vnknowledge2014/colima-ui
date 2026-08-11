@@ -84,6 +84,9 @@ pub async fn list_volumes() -> Result<Vec<DockerVolume>, crate::error::ColimaErr
 /// Create a Docker volume
 #[tauri::command]
 pub async fn create_volume(name: String, driver: String) -> Result<String, crate::error::ColimaError> {
+    if !crate::validation::is_valid_resource_name(&name) {
+        return Err(crate::error::ColimaError::validation(format!("Invalid name: {:?}", name)));
+    }
     async move {
     let mut args = vec!["volume".to_string(), "create".to_string()];
 
@@ -110,6 +113,9 @@ pub async fn create_volume(name: String, driver: String) -> Result<String, crate
 /// Remove a Docker volume
 #[tauri::command]
 pub async fn remove_volume(name: String, force: bool) -> Result<String, crate::error::ColimaError> {
+    if !crate::validation::is_valid_resource_name(&name) {
+        return Err(crate::error::ColimaError::validation(format!("Invalid name: {:?}", name)));
+    }
     async move {
     let mut args = vec!["volume".to_string(), "rm".to_string()];
     if force {
@@ -152,6 +158,9 @@ pub async fn prune_volumes() -> Result<String, crate::error::ColimaError> {
 /// Inspect a Docker volume (raw JSON)
 #[tauri::command]
 pub async fn inspect_volume(name: String) -> Result<String, crate::error::ColimaError> {
+    if !crate::validation::is_valid_resource_name(&name) {
+        return Err(crate::error::ColimaError::validation(format!("Invalid name: {:?}", name)));
+    }
     async move {
     let output = docker_output(vec!["volume".into(), "inspect".into(), name]).await?;
 

@@ -21,7 +21,15 @@
     "local_ai_models": "Local AI Models",
     "ai_chat": "AI Assistant",
     "terminal": "Terminal",
-    "settings": "Settings"
+    "settings": "Settings",
+    "help": "Help",
+    "tour_guide": "Tour Guide",
+    "collapse": "Collapse sidebar",
+    "expand": "Expand sidebar",
+    "colima_missing": "Colima not detected",
+    "colima_missing_hint": "Open Help to install it",
+    "colima_running": "{count} running",
+    "colima_stopped": "Stopped"
   },
   "dashboard": {
     "title": "Dashboard",
@@ -38,10 +46,177 @@
     "volumes": "Volumes",
     "networks": "Networks",
     "compose_projects": "Compose Projects",
-    "kubernetes_contexts": "K8s Contexts"
+    "kubernetes_contexts": "K8s Contexts",
+    "resources": "Resources",
+    "resources_vm_fallback": "VM allocation (engine unreachable)",
+    "allocated_cores": "Allocated cores",
+    "cores_available": "cores available",
+    "of": "of",
+    "reclaimable": "reclaimable",
+    "allocated_memory": "Allocated memory",
+    "allocated_disk": "Allocated disk"
   },
   "settings": {
     "title": "Settings",
     "language": "Language"
+  },
+  "errors": {
+    "panel_title": "Error details",
+    "show_details": "Details",
+    "clear": "Clear",
+    "copy": "Copy",
+    "copied": "Copied",
+    "copy_failed": "Could not access the clipboard",
+    "none_this_session": "No errors this session.",
+    "not_installed": {
+      "title": "Required tool not installed",
+      "hint": "A required command-line tool is missing. Open Settings to see what to install."
+    },
+    "not_running": {
+      "title": "Colima is not running",
+      "hint": "Start the Colima instance from the Instances page, then try again."
+    },
+    "permission_denied": {
+      "title": "Permission denied",
+      "hint": "The operating system refused this operation. Check file ownership and permissions."
+    },
+    "timeout": {
+      "title": "Operation timed out",
+      "hint": "The VM may be busy or unresponsive. Try restarting the instance."
+    },
+    "command_failed": {
+      "title": "Command failed"
+    },
+    "network": {
+      "title": "Network error",
+      "hint": "Check your connection and any proxy settings."
+    },
+    "validation": {
+      "title": "Invalid input"
+    },
+    "not_found": {
+      "title": "Not found"
+    },
+    "internal": {
+      "title": "Internal error"
+    },
+    "unknown": {
+      "title": "Something went wrong"
+    },
+    "how_to_fix": "How to fix this"
+  },
+  "common": {
+    "close": "Close",
+    "loading": "Loading…",
+    "saving": "Saving…",
+    "revert": "Revert"
+  },
+  "capabilities": {
+    "missing": {
+      "title": "{name} is not installed",
+      "text": "Install it to use this page.",
+      "text_with_hint": "Install it to use this page: {hint}"
+    },
+    "not_running": {
+      "title": "{name} is not running",
+      "text": "Start a Colima instance from the Instances page, then come back."
+    },
+    "unknown": {
+      "title": "Could not check {name}",
+      "text": "Detection failed. Check that the tool is on your PATH."
+    }
+  },
+  "containers": {
+    "group_by_project": "Group by project",
+    "standalone": "Standalone",
+    "running_lower": "running"
+  },
+  "diff": {
+    "no_changes": "No changes",
+    "field": "Field",
+    "from": "Current",
+    "to": "New",
+    "restart": "restart",
+    "restart_note": "Fields marked restart take effect the next time the instance starts."
+  },
+  "help": {
+    "title": "Help",
+    "subtitle": "Troubleshooting guides. Available offline.",
+    "search": "Search articles…",
+    "no_results": "No matching articles.",
+    "pick": "Choose an article."
+  },
+  "colima_config": {
+    "title": "Colima Configuration",
+    "description": "Edit colima.yaml directly. Settings you have added by hand are preserved; changes take effect on the next restart.",
+    "profile": "Profile",
+    "presets": "Presets",
+    "preset_light": "Light",
+    "preset_balanced": "Balanced",
+    "preset_performance": "High performance",
+    "cpu": "CPUs",
+    "memory": "Memory (GiB)",
+    "disk": "Disk (GiB)",
+    "disk_grow_only": "grow only",
+    "runtime": "Runtime",
+    "vm_type": "VM type",
+    "mount_type": "Mount type",
+    "dns": "DNS servers",
+    "network_address": "Assign a reachable IP address to the VM",
+    "kubernetes": "Enable Kubernetes",
+    "pending": "Pending changes",
+    "apply": "Apply changes",
+    "saved": "Config saved. Restart the instance to apply.",
+    "not_saved": "Config not saved — fix the errors above.",
+    "load_action": "Load Colima config",
+    "preview_action": "Preview Colima config",
+    "apply_action": "Save Colima config",
+    "issue": {
+      "cpu_zero": "CPU count must be at least 1.",
+      "cpu_over_host": "Requested {cpu} CPUs but the host has {host}. The VM will contend with the host for cores.",
+      "memory_zero": "Memory must be at least 1 GiB.",
+      "memory_over_host": "Requested {memory} GiB of a {host} GiB host. Leave at least 2 GiB for the host.",
+      "disk_zero": "Disk size must be at least 1 GiB.",
+      "disk_shrink": "Disk cannot shrink from {from} GiB to {to} GiB. Colima can only grow a disk.",
+      "disk_over_free": "Requested {disk} GiB but only {free} GiB is free on the host.",
+      "runtime_invalid": "\"{value}\" is not one of: {allowed}.",
+      "vm_type_invalid": "\"{value}\" is not one of: {allowed}.",
+      "mount_type_invalid": "\"{value}\" is not one of: {allowed}.",
+      "dns_not_ip": "\"{value}\" is not an IP address."
+    },
+    "no_instance": "No Colima instance yet. The config file is created the first time an instance starts.",
+    "go_to_instances": "Go to Instances"
+  },
+  "ai": {
+    "title": "Command Center",
+    "processing": "Processing...",
+    "new_chat": "New chat",
+    "untitled_chat": "New chat",
+    "chat_history": "Chat history",
+    "conversations": "Conversations",
+    "messages": "messages",
+    "rename": "Rename",
+    "delete": "Delete",
+    "clear_chat": "Clear this chat",
+    "open_settings": "Open Settings",
+    "send": "Send message",
+    "stop": "Stop generating",
+    "input_placeholder": "Type a message…",
+    "role_you": "You",
+    "role_assistant": "Colima AI",
+    "empty_title": "Hi! I'm your Colima AI Assistant.",
+    "empty_hint": "I can control containers, troubleshoot issues, read the knowledge bank, and manage your VMs.",
+    "queued": "Will send when done",
+    "cancel_queued": "Cancel queued message",
+    "input_hint": "Enter to send · Shift+Enter for a new line",
+    "hide_panel": "Hide chat (keeps running)",
+    "bubble_open": "Open Colima AI",
+    "bubble_working": "Colima AI is working — click to open"
+  },
+  "terminal": {
+    "connection_failed": "Connection failed",
+    "failed_to_connect": "Failed to connect: {error}",
+    "ensure_running": "Make sure the instance is running.",
+    "session_ended": "Session ended (exit code: {code})"
   }
 }

@@ -61,10 +61,33 @@ export function renderMarkdown(text: string): string {
     }
 
     let html = escapeHtml(line);
+
+    // Links [text](target): in the offline KB the target is an article slug
+    // that Help.svelte reads back from a[data-slug] to navigate.
+    html = html.replace(
+      /\[([^\]]+)\]\(([^)\s]+)\)/g,
+      '<a class="md-link" data-slug="$2">$1</a>'
+    );
+
     html = html.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
     html = html.replace(/`([^`]+)`/g, '<code style="background:rgba(255,255,255,0.06);padding:1px 4px;border-radius:3px;font-size:0.72rem">$1</code>');
-    if (html.startsWith("### ")) html = `<strong>${html.slice(4)}</strong>`;
-    else if (html.startsWith("## ")) html = `<strong>${html.slice(3)}</strong>`;
+
+    if (html.startsWith("#### ")) {
+      htmlResult += `<h4 class="md-h">${html.slice(5)}</h4>`;
+      continue;
+    }
+    if (html.startsWith("### ")) {
+      htmlResult += `<h4 class="md-h">${html.slice(4)}</h4>`;
+      continue;
+    }
+    if (html.startsWith("## ")) {
+      htmlResult += `<h3 class="md-h">${html.slice(3)}</h3>`;
+      continue;
+    }
+    if (html.startsWith("# ")) {
+      htmlResult += `<h2 class="md-h md-h-title">${html.slice(2)}</h2>`;
+      continue;
+    }
     if (html.startsWith("- ")) html = `• ${html.slice(2)}`;
     html = html.replace(/^(\d+)\.\s/, "$1. ");
 

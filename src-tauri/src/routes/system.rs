@@ -217,6 +217,16 @@ pub async fn api_system_prune(Query(q): Query<PruneQuery>) -> (StatusCode, Json<
 }
 
 
+/// Live CPU / memory / disk figures for the active container engine.
+pub async fn api_engine_resources(
+) -> (StatusCode, Json<ApiResponse<crate::commands::engine_resources::EngineResources>>) {
+    match crate::commands::engine_resources::engine_resources().await {
+        Ok(res) => ok(res),
+        Err(e) => err(e.to_string()),
+    }
+}
+
+
 /// Delegates to commands layer for system df
 pub async fn api_system_df() -> (StatusCode, Json<ApiResponse<String>>) {
     match containers::system_df().await {

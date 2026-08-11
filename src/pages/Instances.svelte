@@ -52,10 +52,16 @@
   let presets = $state<InstancePreset[]>(BUILT_IN_PRESETS as InstancePreset[]);
 
   // --- Helpers ---
+  /** 0 means the allocation could not be read from colima.yaml or lima.yaml. */
   function formatBytes(bytes: number) {
+    if (!bytes) return "—";
     if (bytes >= 1073741824) return `${Math.round(bytes / 1073741824)} GiB`;
     if (bytes >= 1048576) return `${Math.round(bytes / 1048576)} MiB`;
     return `${bytes} B`;
+  }
+
+  function formatCpus(cpus: number) {
+    return cpus > 0 ? `${cpus}` : "—";
   }
 
   function generateOptimalPresets(specs: HostSpecs): InstancePreset[] {
@@ -303,7 +309,7 @@ Format: {"minimal": {"cpus": N, "memory": N, "disk": N}, ...}`;
             <div style="width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; background: {isRunning ? 'var(--accent-green)' : 'var(--text-muted)'}; box-shadow: {isRunning ? '0 0 6px var(--accent-green)' : 'none'};"></div>
             <div style="flex: 1; min-width: 0;">
               <div style="font-weight: 600; font-size: var(--text-sm); color: var(--text-primary);">{inst.name}</div>
-              <div style="font-size: 11px; color: var(--text-muted); margin-top: 1px;">{inst.runtime} · {inst.cpus} CPU · {formatBytes(inst.memory)}</div>
+              <div style="font-size: 11px; color: var(--text-muted); margin-top: 1px;">{inst.runtime} · {formatCpus(inst.cpus)} CPU · {formatBytes(inst.memory)}</div>
             </div>
             <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 4px;">
               <span style="padding: 2px 6px; border-radius: 10px; font-size: 10px; font-weight: 600; background: {isRunning ? 'rgba(63,185,80,0.1)' : 'rgba(139,148,158,0.1)'}; color: {isRunning ? 'var(--accent-green)' : 'var(--text-muted)'};">{inst.status}</span>
@@ -374,7 +380,7 @@ Format: {"minimal": {"cpus": N, "memory": N, "disk": N}, ...}`;
           <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; margin-bottom: 24px;">
             <div style="padding: 14px 16px; border-radius: 10px; background: var(--bg-primary); border-left: 3px solid var(--accent-blue);">
               <div style="font-size: 10px; color: var(--text-muted); font-weight: 600; margin-bottom: 4px; text-transform: uppercase;">CPUs</div>
-              <div style="font-size: var(--text-lg); font-weight: 700; font-family: var(--font-mono); color: var(--accent-blue);">{inst.cpus}</div>
+              <div style="font-size: var(--text-lg); font-weight: 700; font-family: var(--font-mono); color: var(--accent-blue);">{formatCpus(inst.cpus)}</div>
             </div>
             <div style="padding: 14px 16px; border-radius: 10px; background: var(--bg-primary); border-left: 3px solid var(--accent-green);">
               <div style="font-size: 10px; color: var(--text-muted); font-weight: 600; margin-bottom: 4px; text-transform: uppercase;">Memory</div>

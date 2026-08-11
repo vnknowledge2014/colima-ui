@@ -13,12 +13,15 @@ use crate::commands::system;
 
 // ===== API Response Wrappers =====
 
-/// Generic API response wrapper
+/// Generic API response wrapper.
+///
+/// `error` carries the same structured payload the Tauri IPC path returns, so
+/// browser mode and desktop mode see an identical error contract.
 #[derive(Serialize)]
 pub struct ApiResponse<T: Serialize> {
     pub success: bool,
     pub data: Option<T>,
-    pub error: Option<String>,
+    pub error: Option<crate::error::ColimaError>,
 }
 
 pub fn ok<T: Serialize>(data: T) -> (StatusCode, Json<ApiResponse<T>>) {
@@ -32,15 +35,49 @@ pub fn ok<T: Serialize>(data: T) -> (StatusCode, Json<ApiResponse<T>>) {
     )
 }
 
-pub fn err<T: Serialize>(msg: String) -> (StatusCode, Json<ApiResponse<T>>) {
+/// Build an error response.
+///
+/// Takes anything convertible into [`crate::error::ColimaError`], which is what
+/// lets the ~115 existing `err(e.to_string())` call sites keep working while
+/// gaining classification — `From<String>` classifies the message.
+pub fn err<T: Serialize>(e: impl Into<crate::error::ColimaError>) -> (StatusCode, Json<ApiResponse<T>>) {
     (
         StatusCode::INTERNAL_SERVER_ERROR,
         Json(ApiResponse {
             success: false,
             data: None,
-            error: Some(msg),
+            error: Some(e.into()),
         }),
     )
+}
+
+/// Build a [`crate::error::ColimaError`] from a finished process, attaching the
+/// command and its exit status.
+///
+/// Prefer this over `format!("... {}", stderr)` at any site that has the
+/// `Output` in hand: the classification is the same, but the user also learns
+/// which command failed and how.
+pub fn error_from_output(
+    command: &str,
+    output: &std::process::Output,
+) -> crate::error::ColimaError {
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let detail = if stderr.trim().is_empty() {
+        format!("`{}` failed with no error output", command)
+    } else {
+        stderr.trim().to_string()
+    };
+
+    let mut e = crate::error::ColimaError::from(detail).with_command(command);
+    if let Some(code) = output.status.code() {
+        e = e.with_exit_code(code);
+    }
+    // A process that ran and failed is a command failure unless the message
+    // says something more specific.
+    if e.code == crate::error::ErrorCode::Unknown {
+        e.code = crate::error::ErrorCode::CommandFailed;
+    }
+    e
 }
 
 // ===== Blocking Task Runner =====

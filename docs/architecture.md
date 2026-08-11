@@ -125,16 +125,48 @@ Security validations are applied at the **commands layer** so both entry points 
 | Container ID format | `is_valid_container_id()` | Container operations |
 | Banned Docker flags | `BANNED_DOCKER_FLAGS` | `run_container` (blocks `--privileged`, `--pid=host`, etc.) |
 | Host root bind mount | Inline check | `run_container` (blocks `source=/` bind mounts) |
-| K8s name format | `is_valid_k8s_name()` | Lima VM names |
+| K8s name format | `is_valid_k8s_name()` | Kubernetes resource names |
+| Profile name | `is_valid_profile_name()` / `ensure_valid_profile()` | Colima profile arguments — a name starting with `-` would otherwise be read by `colima` as a flag, and the name is also a path component under `~/.colima` |
+| Resource name | `is_valid_resource_name()` | Lima VM, volume and network names passed positionally to CLI tools |
+| Path containment | `assert_path_within()` | Any filesystem path built from user input; fails closed when the parent cannot be resolved |
+
+### Secret Redaction
+
+`src-tauri/src/redact.rs` and `src/lib/redact.ts` strip credentials from any
+string that reaches the user, a log, or an LLM prompt. Both sides exist because
+the frontend calls LLM providers directly, so provider errors are built in the
+browser and never pass through Rust.
+
+Redaction works two ways: by **position** (credential-shaped query parameters
+and auth headers, whatever the value looks like — this covers providers we have
+never heard of) and by **shape** (known key formats anywhere in the string).
+Docker image digests are deliberately excluded from the shape rules so
+diagnostics stay readable.
+
+On the frontend the choke point is `globalToast()`: it is the last place every
+user-visible message passes through, and it also forwards error text to the AI
+diagnostics listener — i.e. off to a third-party LLM.
 
 ## HTTP Authentication
 
 The HTTP API uses **Bearer token** authentication:
 
-1. Token is auto-generated at startup (random UUID)
-2. Browser clients obtain it via `GET /api/auth/token` (CORS-protected to localhost origins only)
-3. All other endpoints require `Authorization: Bearer <token>`
-4. The `/api/health` endpoint is unauthenticated (health checks)
+1. Token is auto-generated at startup with a CSPRNG (`auth::get_api_token`)
+2. Browser clients obtain it via `GET /api/auth/token`
+3. All other endpoints require `Authorization: Bearer <token>`, compared in constant time
+4. `/api/health` and `/api/auth/token` are the only unauthenticated routes; the list is explicit in `api_server.rs`, not pattern-matched
+5. SSE endpoints authenticate via `?token=` because `EventSource` cannot set headers. The set of such endpoints is an explicit allowlist (`auth::QUERY_TOKEN_PATHS`) — a route is never switched to query-token auth just because its path ends in `/stream`
+
+### Accepted risks
+
+Two weaknesses are known and deliberately left in place, because every available
+fix costs a feature the product needs. Revisit both if the threat model changes
+(e.g. multi-user machines become a target).
+
+| Risk | Why it stays |
+|---|---|
+| `GET /api/auth/token` is unauthenticated, so any local process can obtain the token and then read everything the API exposes — including the configured AI API key via `GET /api/settings` | Browser mode needs an unauthenticated bootstrap for a browser tab to obtain a token. Anything that blocks another local process also blocks the browser. The real fix is for the desktop app to hand the token to the browser directly, which changes how browser mode is opened |
+| `capabilities/default.json` allows `https://*` | This is what lets the app reach OpenRouter, Groq, Together, Mistral, DeepSeek and user-configured endpoints (custom Ollama, private SearXNG). Tauri capabilities are compile-time, so a narrow list cannot be extended at runtime — narrowing would permanently break 6 of the 9 advertised providers. The fix is to route provider calls through Rust (`reqwest` is not bound by capabilities) |
 
 ## State Management
 

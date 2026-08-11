@@ -91,8 +91,103 @@ pub async fn list_containers_cli(all: bool) -> Result<Vec<serde_json::Value>, St
     Ok(stdout
         .lines()
         .filter(|l| !l.trim().is_empty())
-        .filter_map(|l| serde_json::from_str(l).ok())
+        .filter_map(|l| serde_json::from_str::<serde_json::Value>(l).ok())
+        .map(normalize_cli_labels)
         .collect())
+}
+
+/// Convert the CLI's comma-separated `Labels` string into the object shape that
+/// `docker_state::map_containers` produces from the Bollard API.
+///
+/// `docker ps --format json` renders labels as `"a=1,b=2"` while Bollard returns
+/// a map. Without this the same container has two different shapes depending on
+/// which path served the request, and compose grouping would work through one
+/// and not the other.
+fn normalize_cli_labels(mut value: serde_json::Value) -> serde_json::Value {
+    let raw = match value.get("Labels").and_then(|l| l.as_str()) {
+        Some(s) => s.to_string(),
+        // Already an object, or absent — leave a consistent empty object.
+        None => {
+            if value.get("Labels").is_none() {
+                if let Some(obj) = value.as_object_mut() {
+                    obj.insert("Labels".into(), serde_json::json!({}));
+                }
+            }
+            return value;
+        }
+    };
+
+    let mut labels = serde_json::Map::new();
+    for pair in raw.split(',') {
+        let pair = pair.trim();
+        if pair.is_empty() {
+            continue;
+        }
+        // Label values may themselves contain '=', so split only on the first.
+        match pair.split_once('=') {
+            Some((k, v)) => {
+                labels.insert(k.to_string(), serde_json::Value::String(v.to_string()));
+            }
+            None => {
+                labels.insert(pair.to_string(), serde_json::Value::String(String::new()));
+            }
+        }
+    }
+
+    if let Some(obj) = value.as_object_mut() {
+        obj.insert("Labels".into(), serde_json::Value::Object(labels));
+    }
+    value
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn converts_cli_label_string_into_an_object() {
+        let input = serde_json::json!({
+            "Id": "abc",
+            "Labels": "com.docker.compose.project=web,com.docker.compose.service=api"
+        });
+        let out = normalize_cli_labels(input);
+        assert_eq!(out["Labels"]["com.docker.compose.project"], "web");
+        assert_eq!(out["Labels"]["com.docker.compose.service"], "api");
+    }
+
+    #[test]
+    fn keeps_equals_signs_inside_label_values() {
+        let out = normalize_cli_labels(serde_json::json!({ "Labels": "cmd=a=b=c" }));
+        assert_eq!(out["Labels"]["cmd"], "a=b=c");
+    }
+
+    #[test]
+    fn produces_an_empty_object_when_there_are_no_labels() {
+        // Both the empty-string and the absent case, so the frontend never has
+        // to check for null.
+        for input in [
+            serde_json::json!({ "Id": "abc", "Labels": "" }),
+            serde_json::json!({ "Id": "abc" }),
+        ] {
+            let out = normalize_cli_labels(input);
+            assert!(out["Labels"].is_object(), "expected an object: {out}");
+            assert_eq!(out["Labels"].as_object().unwrap().len(), 0);
+        }
+    }
+
+    #[test]
+    fn leaves_an_existing_object_untouched() {
+        let input = serde_json::json!({ "Labels": { "a": "1" } });
+        let out = normalize_cli_labels(input);
+        assert_eq!(out["Labels"]["a"], "1");
+    }
+
+    #[test]
+    fn tolerates_a_label_with_no_value() {
+        let out = normalize_cli_labels(serde_json::json!({ "Labels": "flag,other=2" }));
+        assert_eq!(out["Labels"]["flag"], "");
+        assert_eq!(out["Labels"]["other"], "2");
+    }
 }
 
 /// List all Docker containers

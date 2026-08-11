@@ -62,12 +62,36 @@ pub fn init_knowledge_bank() {
             content_rowid='rowid'
         );
 
+        -- One row per chat thread in the AI panel. Messages point at it via
+        -- `chat_messages.conversation_id`, so clearing one thread leaves the
+        -- others intact.
+        CREATE TABLE IF NOT EXISTS chat_conversations (
+            id TEXT PRIMARY KEY,
+            title TEXT NOT NULL DEFAULT '',
+            created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
+            updated_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now'))
+        );
+
         CREATE TABLE IF NOT EXISTS chat_messages (
             id TEXT PRIMARY KEY,
             role TEXT NOT NULL,
             content TEXT NOT NULL,
-            created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now'))
+            created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
+            conversation_id TEXT NOT NULL DEFAULT 'default'
         );
+
+        -- Which terminal sessions were opened, never what was typed in them.
+        -- Enough to offer reopening a recent session; storing content would mean
+        -- storing whatever credentials the user pasted into a shell.
+        CREATE TABLE IF NOT EXISTS terminal_sessions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            kind TEXT NOT NULL,
+            target TEXT NOT NULL,
+            started_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now'))
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_terminal_sessions_started
+            ON terminal_sessions(started_at DESC);
 
         CREATE TABLE IF NOT EXISTS app_settings (
             setting_key TEXT PRIMARY KEY,
@@ -93,6 +117,51 @@ pub fn init_knowledge_bank() {
         CREATE INDEX IF NOT EXISTS idx_preset_snapshot ON preset_container_snapshots(preset_id, instance_profile);
 
 
+        -- Help articles. Distinct from `solutions`, which holds short
+        -- pattern→remedy pairs mined from VM start failures for the AI agent.
+        -- Articles are long-form prose the user reads, addressed by the stable
+        -- `doc_id` slug that `error.rs` and `system_capabilities.rs` emit.
+        --
+        -- (slug, locale) is the dedupe key, so re-seeding is an upsert rather
+        -- than a duplicate. `version` gates that upsert: bumping it in
+        -- ARTICLE_VERSION ships new content, leaving it alone preserves the row.
+        CREATE TABLE IF NOT EXISTS articles (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            slug TEXT NOT NULL,
+            locale TEXT NOT NULL,
+            title TEXT NOT NULL,
+            body TEXT NOT NULL,
+            platform TEXT NOT NULL DEFAULT 'all',
+            version INTEGER NOT NULL DEFAULT 1,
+            updated_at TEXT DEFAULT (datetime('now')),
+            UNIQUE(slug, locale)
+        );
+
+        -- FTS5 previously covered only `agent_memory`; articles need their own
+        -- index. External-content mode keeps the text stored once, in `articles`.
+        CREATE VIRTUAL TABLE IF NOT EXISTS articles_fts USING fts5(
+            title,
+            body,
+            content='articles',
+            content_rowid='id'
+        );
+
+        CREATE TRIGGER IF NOT EXISTS articles_ai_fts AFTER INSERT ON articles
+        BEGIN
+            INSERT INTO articles_fts(rowid, title, body) VALUES (new.id, new.title, new.body);
+        END;
+
+        CREATE TRIGGER IF NOT EXISTS articles_ad_fts AFTER DELETE ON articles
+        BEGIN
+            INSERT INTO articles_fts(articles_fts, rowid, title, body) VALUES ('delete', old.id, old.title, old.body);
+        END;
+
+        CREATE TRIGGER IF NOT EXISTS articles_au_fts AFTER UPDATE ON articles
+        BEGIN
+            INSERT INTO articles_fts(articles_fts, rowid, title, body) VALUES ('delete', old.id, old.title, old.body);
+            INSERT INTO articles_fts(rowid, title, body) VALUES (new.id, new.title, new.body);
+        END;
+
         CREATE TRIGGER IF NOT EXISTS agent_memory_ai_fts AFTER INSERT ON agent_memory
         BEGIN
             INSERT INTO agent_memory_fts(rowid, content) VALUES (new.rowid, new.content);
@@ -112,6 +181,8 @@ pub fn init_knowledge_bank() {
     )
     .expect("Failed to create knowledge bank tables");
 
+    migrate_chat_conversations(&conn);
+
     // Seed builtin solutions (only if empty)
     let count: i64 = conn
         .query_row(
@@ -125,8 +196,61 @@ pub fn init_knowledge_bank() {
         seed_builtins(&conn);
     }
 
+    // Help articles seed on every launch: the upsert is version-gated, so this
+    // is a no-op until an app update ships new content.
+    super::kb_articles::seed(&conn);
+
     DB.set(Mutex::new(conn))
         .expect("Knowledge bank already initialized");
+}
+
+/// Attach existing chat messages to a conversation.
+///
+/// `chat_messages` shipped without `conversation_id`, so an installed database
+/// already holds rows that predate threads. `CREATE TABLE IF NOT EXISTS` never
+/// touches those, hence the explicit column add — guarded, because SQLite has
+/// no `ADD COLUMN IF NOT EXISTS` and re-running must be a no-op.
+///
+/// Existing messages are adopted by a single thread rather than dropped: the
+/// user's whole history would otherwise vanish behind an empty conversation
+/// list on first launch after the update.
+fn migrate_chat_conversations(conn: &Connection) {
+    let has_column = conn
+        .prepare("SELECT conversation_id FROM chat_messages LIMIT 1")
+        .is_ok();
+
+    if !has_column {
+        if let Err(e) = conn.execute(
+            "ALTER TABLE chat_messages ADD COLUMN conversation_id TEXT NOT NULL DEFAULT 'default'",
+            [],
+        ) {
+            eprintln!("chat_messages migration failed: {e}");
+            return;
+        }
+    }
+
+    let _ = conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_chat_messages_conversation
+         ON chat_messages(conversation_id, created_at)",
+        [],
+    );
+
+    let orphans: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM chat_messages
+             WHERE conversation_id NOT IN (SELECT id FROM chat_conversations)",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap_or(0);
+
+    if orphans > 0 {
+        let _ = conn.execute(
+            "INSERT OR IGNORE INTO chat_conversations (id, title)
+             SELECT DISTINCT conversation_id, '' FROM chat_messages",
+            [],
+        );
+    }
 }
 
 // ===== Seed Data =====

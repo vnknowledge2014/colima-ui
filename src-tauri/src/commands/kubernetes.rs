@@ -467,6 +467,87 @@ pub async fn k8s_nodes() -> Result<String, crate::error::ColimaError> {
     .await.map_err(|e: String| crate::error::ColimaError::from(e))
 }
 
+/// Resource types the generic browser is allowed to list.
+///
+/// An allowlist rather than validation, because the value goes straight into
+/// `kubectl get <type>` and there is no reason to support arbitrary strings.
+pub const K8S_LISTABLE_RESOURCES: &[&str] = &[
+    "pods",
+    "deployments",
+    "services",
+    "namespaces",
+    "configmaps",
+    "secrets",
+    "statefulsets",
+    "daemonsets",
+    "replicasets",
+    "jobs",
+    "cronjobs",
+    "ingresses",
+    "persistentvolumes",
+    "persistentvolumeclaims",
+    "pv",
+    "pvc",
+    "endpoints",
+    "serviceaccounts",
+    "roles",
+    "rolebindings",
+    "clusterroles",
+    "clusterrolebindings",
+    "storageclasses",
+    "networkpolicies",
+    "horizontalpodautoscalers",
+    "hpa",
+    "limitranges",
+    "resourcequotas",
+    "poddisruptionbudgets",
+    "pdb",
+];
+
+/// List any allowlisted resource type as JSON.
+///
+/// This existed only as an HTTP route, so the Kubernetes browser worked in
+/// browser mode and failed in the desktop app with "Command k8s_resources not
+/// found". The implementation lives here and `routes/k8s.rs` delegates to it,
+/// matching how the rest of the backend is layered.
+#[tauri::command]
+pub async fn k8s_resources(
+    resource: String,
+    namespace: String,
+) -> Result<String, crate::error::ColimaError> {
+    async move {
+        if !K8S_LISTABLE_RESOURCES.contains(&resource.as_str()) {
+            return Err(format!("Resource type '{}' not allowed", resource));
+        }
+
+        let all_namespaces = namespace.is_empty() || namespace == "all";
+        let output = tokio::task::spawn_blocking(move || {
+            let mut args = vec!["get", resource.as_str(), "-o", "json"];
+            if all_namespaces {
+                args.push("--all-namespaces");
+            } else {
+                args.push("-n");
+                args.push(namespace.as_str());
+            }
+            kubectl_cmd().args(&args).output()
+        })
+        .await
+        .map_err(|e| format!("Task join error: {}", e))?
+        .map_err(|e| format!("Failed to run kubectl: {}", e))?;
+
+        if !output.status.success() {
+            return Err(format!(
+                "kubectl get failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            ));
+        }
+
+        Ok(String::from_utf8_lossy(&output.stdout).to_string())
+    }
+    .await
+    .map_err(|e: String| crate::error::ColimaError::from(e))
+}
+
 /// Get events in a namespace
 #[tauri::command]
 pub async fn k8s_events(namespace: String) -> Result<String, crate::error::ColimaError> {

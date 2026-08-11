@@ -7,6 +7,8 @@
   import { setLanguage, getLanguage, t } from "../lib/i18n.svelte";
   import AIPanelSettings from "../components/settings/AIPanelSettings.svelte";
   import ResourceSaverSettings from "../components/settings/ResourceSaverSettings.svelte";
+  import TraySettings from "../components/settings/TraySettings.svelte";
+  import ColimaConfig from "./settings/ColimaConfig.svelte";
 
   let { systemInfo } = $props<{ systemInfo: SystemInfo | null }>();
 
@@ -125,6 +127,8 @@
     </div>
   </div>
 
+  <ColimaConfig />
+  <TraySettings />
   <ResourceSaverSettings />
   <AIPanelSettings />
 

@@ -29,15 +29,10 @@
   justify-content: flex-start;
   gap: 12px;
   border-bottom: 1px solid var(--border-subtle);
-  height: 68px;
+  height: var(--header-height);
+  padding-top: var(--header-pad-top);
+  padding-bottom: var(--header-pad-bottom);
   -webkit-app-region: drag;
-}
-
-/* Extra padding for macOS traffic lights in Tauri overlay mode */
-.tauri-app .sidebar-header {
-  padding-top: 44px;
-  padding-bottom: 12px;
-  height: 92px;
 }
 
 .sidebar-logo {
@@ -62,6 +57,9 @@
   flex: 1;
   padding: 8px;
   overflow-y: auto;
+  /* Hide scrollbar for a cleaner sidebar look */
+  scrollbar-width: none;
+  -ms-overflow-style: none;
 }
 
 .nav-section {
@@ -91,34 +89,29 @@
   text-decoration: none;
   position: relative;
   white-space: nowrap;
-  /* Button reset for a11y — nav-items may be <button> elements */
-  background: none;
+  width: 100%;
+  box-sizing: border-box;
+  /* Button reset */
+  background: transparent;
   border: none;
+  outline: none;
+  appearance: none;
   font-family: inherit;
   text-align: left;
-  width: 100%;
 }
 
 .nav-item:hover {
-  background: var(--bg-card-hover);
+  background: rgba(255, 255, 255, 0.06);
   color: var(--text-primary);
 }
 
 .nav-item.active {
-  background: rgba(88, 166, 255, 0.1);
+  background: rgba(88, 166, 255, 0.12);
   color: var(--accent-blue);
 }
 
 .nav-item.active::before {
-  content: '';
-  position: absolute;
-  left: 0;
-  top: 50%;
-  transform: translateY(-50%);
-  width: 3px;
-  height: 16px;
-  background: var(--accent-blue);
-  border-radius: 0 2px 2px 0;
+  transform: translateY(-50%) scaleY(1);
 }
 
 .nav-icon {
@@ -138,43 +131,76 @@
 }
 
 /* ===== Main Content ===== */
-
 .main-content {
   flex: 1;
   display: flex;
   flex-direction: column;
   overflow: hidden;
   background: var(--bg-content);
+  /* Flex items default to min-width:auto, which refuses to shrink below the
+     content's intrinsic width. With the AI panel docked as a sibling column,
+     that made a wide table push the panel off-screen instead of scrolling. */
+  min-width: 0;
 }
 
 .content-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 12px 24px;
+  gap: 12px;
+  padding: 8px 20px;
   border-bottom: 1px solid var(--border-primary);
   height: var(--header-height);
+  padding-top: var(--header-pad-top);
+  padding-bottom: var(--header-pad-bottom);
   flex-shrink: 0;
   background: var(--bg-content);
   -webkit-app-region: drag;
-}
-
-/* Extra padding for macOS overlay title bar in Tauri */
-.tauri-app .content-header {
-  padding-top: 40px;
-  padding-bottom: 12px;
-  height: 84px;
+  /* Single row at every width: title and actions truncate/shrink instead of
+     wrapping to a second line when the window narrows. */
+  overflow: hidden;
 }
 
 .content-header h1 {
   font-size: var(--text-xl);
   font-weight: 600;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+/* The runtime badge (Docker/Podman) must survive any window width — keep it
+   from shrinking; secondary spans (counts) take the truncation instead. */
+.content-header h1 .header-badge {
+  flex-shrink: 0;
+}
+
+.content-header h1 > span:not(.header-badge) {
+  flex-shrink: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .content-header-actions {
   display: flex;
   gap: 8px;
   -webkit-app-region: no-drag;
+  flex-shrink: 1;
+  min-width: 0;
+}
+
+/* Narrow window: keep one line — just shrink the header search input.
+   The vertical padding is deliberately left alone: trimming it here shortened
+   the content header while the sidebar kept its height, which is what pulled
+   the two bottom borders out of line below 1100px. */
+@media (max-width: 1100px) {
+  .header-search {
+    width: 130px;
+  }
 }
 
 .content-body {
@@ -203,3 +229,89 @@
   background: var(--text-muted);
 }
 
+/* ---- moved out of index.css during the stylesheet consolidation ---- */
+
+.sidebar-nav::-webkit-scrollbar {
+  display: none !important;
+  width: 0 !important;
+  height: 0 !important;
+}
+
+.sidebar-nav::-webkit-scrollbar-thumb,
+.sidebar-nav::-webkit-scrollbar-track {
+  display: none !important;
+  background: transparent !important;
+}
+
+.nav-item > * {
+  transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1), color 0.2s;
+}
+
+.nav-item::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%) scaleY(0);
+  width: 3px;
+  height: 60%;
+  background: var(--accent-blue);
+  border-radius: 0 4px 4px 0;
+  transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  transform-origin: center;
+}
+
+.nav-item:hover > * {
+  transform: translateX(3px);
+}
+
+.nav-item:hover svg {
+  color: var(--text-primary);
+}
+
+.nav-item.active > * {
+  transform: translateX(3px);
+}
+
+.nav-item.active:hover {
+  background: rgba(88, 166, 255, 0.18);
+}
+
+.nav-item.active:hover svg {
+  color: var(--accent-blue);
+}
+
+/* ===== Collapsed Sidebar ===== */
+.sidebar.collapsed {
+  width: 64px;
+}
+
+.sidebar.collapsed .sidebar-title {
+  display: none;
+}
+
+.sidebar.collapsed .nav-section-label {
+  opacity: 0;
+  height: 0;
+  padding: 0;
+  margin: 0;
+  overflow: hidden;
+}
+
+.sidebar.collapsed .nav-item {
+  justify-content: center;
+  padding-left: 0;
+  padding-right: 0;
+}
+
+.sidebar.collapsed .nav-item-text {
+  display: none;
+}
+
+.sidebar.collapsed .nav-item:hover > * {
+  transform: none; /* disable horizontal shift */
+}
+
+.sidebar.collapsed .nav-item.active > * {
+  transform: none; /* disable horizontal shift */
+}

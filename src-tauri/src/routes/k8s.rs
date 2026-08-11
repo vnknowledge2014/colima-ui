@@ -20,6 +20,10 @@ pub async fn api_k8s_action(Query(q): Query<K8sQuery>) -> (StatusCode, Json<ApiR
         if !valid_actions.contains(&action.as_str()) {
             return Err(format!("Invalid kubernetes action: {}", action));
         }
+        // This route builds the colima argv itself instead of delegating to
+        // commands::colima, so it needs its own guard — the profile is pushed
+        // straight into argv below.
+        crate::validation::ensure_valid_profile(&profile)?;
         let mut args = vec!["kubernetes".to_string(), action.clone()];
         if profile != "default" && !profile.is_empty() {
             args.push("--profile".to_string());
@@ -241,58 +245,12 @@ pub async fn api_k8s_events(Query(q): Query<K8sNsQuery>) -> (StatusCode, Json<Ap
 pub async fn api_k8s_resources(
     Query(q): Query<K8sResourceQuery>,
 ) -> (StatusCode, Json<ApiResponse<String>>) {
-    let resource = q.resource;
-    let ns = q.namespace;
-    // Whitelist allowed resource types
-    let allowed = [
-        "pods",
-        "deployments",
-        "services",
-        "namespaces",
-        "configmaps",
-        "secrets",
-        "statefulsets",
-        "daemonsets",
-        "replicasets",
-        "jobs",
-        "cronjobs",
-        "ingresses",
-        "persistentvolumes",
-        "persistentvolumeclaims",
-        "pv",
-        "pvc",
-        "endpoints",
-        "serviceaccounts",
-        "roles",
-        "rolebindings",
-        "clusterroles",
-        "clusterrolebindings",
-        "storageclasses",
-        "networkpolicies",
-        "horizontalpodautoscalers",
-        "hpa",
-        "limitranges",
-        "resourcequotas",
-        "poddisruptionbudgets",
-        "pdb",
-    ];
-    if !allowed.contains(&resource.as_str()) {
-        return err(format!("Resource type '{}' not allowed", resource));
-    }
-    match run_blocking(move || {
-        if ns.is_empty() || ns == "all" {
-            run_cmd(
-                "kubectl",
-                &["get", &resource, "-o", "json", "--all-namespaces"],
-            )
-        } else {
-            run_cmd("kubectl", &["get", &resource, "-o", "json", "-n", &ns])
-        }
-    })
-    .await
-    {
+    // Delegates to the command so both transports share one allowlist and one
+    // implementation; they used to diverge, and the Tauri side simply did not
+    // exist.
+    match crate::commands::kubernetes::k8s_resources(q.resource, q.namespace).await {
         Ok(out) => ok(out),
-        Err(e) => err(e.to_string()),
+        Err(e) => err(e),
     }
 }
 

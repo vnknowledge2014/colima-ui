@@ -38,7 +38,16 @@
   /* Spacing */
   --sidebar-width: 240px;
   --sidebar-collapsed-width: 64px;
-  --header-height: 48px;
+
+  /* The three top bars — sidebar, page content, AI panel — sit side by side,
+     so their bottom borders have to form one line. Each used to hard-code its
+     own height and its own overlay allowance, and they disagreed: 68/48/48 in
+     the browser, 92/84/84 under Tauri. Everything derives from these instead,
+     and `.tauri-app` below restates them once for the overlay title bar.
+     Values are set so the inner content box stays 36px in both modes. */
+  --header-height: 68px;
+  --header-pad-top: 16px;
+  --header-pad-bottom: 16px;
 
   /* Radius */
   --radius-sm: 4px;
@@ -62,4 +71,14 @@
   --transition-fast: 150ms ease;
   --transition-normal: 250ms ease;
   --transition-slow: 400ms ease;
+}
+
+/* Tauri draws the window controls over the page, so every top bar needs the
+   same clearance for the macOS traffic lights. Overriding the tokens in one
+   place keeps the three bars in step — previously each carried its own
+   `.tauri-app` rule and they drifted apart. */
+.tauri-app {
+  --header-height: 92px;
+  --header-pad-top: 44px;
+  --header-pad-bottom: 12px;
 }

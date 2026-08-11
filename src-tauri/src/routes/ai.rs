@@ -87,7 +87,7 @@ pub async fn api_ai_search(
             Json(ApiResponse {
                 success: false,
                 data: None,
-                error: Some(e.to_string()),
+                error: Some(e.to_string().into()),
             }),
         ),
     }
@@ -103,6 +103,119 @@ pub async fn api_ai_fetch_page(
 
     match crate::commands::searxng::fetch_page_as_markdown(url, max_length, mode).await {
         Ok(md) => ok(md),
+        Err(e) => err(e.to_string()),
+    }
+}
+
+
+// ===== Chat history & conversations =====
+//
+// These mirror the `ai_chat_*` Tauri commands. Browser mode reaches the same
+// SQLite store through them; without these routes the AI panel silently kept no
+// history outside the desktop app.
+
+fn conversation_id_of(params: &std::collections::HashMap<String, String>) -> Option<String> {
+    params.get("conversationId").or_else(|| params.get("conversation_id")).cloned()
+}
+
+pub async fn api_ai_load_history(
+    axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
+) -> (
+    StatusCode,
+    Json<ApiResponse<Vec<crate::commands::ai_chat::AiChatHistoryMessage>>>,
+) {
+    match crate::commands::ai_chat::ai_chat_load_history(conversation_id_of(&params)).await {
+        Ok(messages) => (
+            StatusCode::OK,
+            Json(ApiResponse { success: true, data: Some(messages), error: None }),
+        ),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ApiResponse { success: false, data: None, error: Some(e.to_string().into()) }),
+        ),
+    }
+}
+
+pub async fn api_ai_save_message(
+    Json(body): Json<serde_json::Value>,
+) -> (StatusCode, Json<ApiResponse<String>>) {
+    let message = crate::commands::ai_chat::AiChatHistoryMessage {
+        id: body["message"]["id"].as_str().unwrap_or("").to_string(),
+        role: body["message"]["role"].as_str().unwrap_or("").to_string(),
+        content: body["message"]["content"].as_str().unwrap_or("").to_string(),
+    };
+    let conversation_id = body["conversationId"]
+        .as_str()
+        .or_else(|| body["conversation_id"].as_str())
+        .map(|s| s.to_string());
+
+    match crate::commands::ai_chat::ai_chat_save_message(message, conversation_id).await {
+        Ok(()) => ok(String::new()),
+        Err(e) => err(e.to_string()),
+    }
+}
+
+pub async fn api_ai_clear_history(
+    Json(body): Json<serde_json::Value>,
+) -> (StatusCode, Json<ApiResponse<String>>) {
+    let conversation_id = body["conversationId"]
+        .as_str()
+        .or_else(|| body["conversation_id"].as_str())
+        .map(|s| s.to_string());
+
+    match crate::commands::ai_chat::ai_chat_clear_history(conversation_id).await {
+        Ok(()) => ok(String::new()),
+        Err(e) => err(e.to_string()),
+    }
+}
+
+pub async fn api_ai_list_conversations() -> (
+    StatusCode,
+    Json<ApiResponse<Vec<crate::commands::ai_chat::AiConversation>>>,
+) {
+    match crate::commands::ai_chat::ai_chat_list_conversations().await {
+        Ok(conversations) => (
+            StatusCode::OK,
+            Json(ApiResponse { success: true, data: Some(conversations), error: None }),
+        ),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ApiResponse { success: false, data: None, error: Some(e.to_string().into()) }),
+        ),
+    }
+}
+
+pub async fn api_ai_create_conversation(
+    Json(body): Json<serde_json::Value>,
+) -> (StatusCode, Json<ApiResponse<String>>) {
+    let id = body["id"].as_str().unwrap_or("").to_string();
+    let title = body["title"].as_str().unwrap_or("").to_string();
+
+    match crate::commands::ai_chat::ai_chat_create_conversation(id, title).await {
+        Ok(()) => ok(String::new()),
+        Err(e) => err(e.to_string()),
+    }
+}
+
+pub async fn api_ai_rename_conversation(
+    Json(body): Json<serde_json::Value>,
+) -> (StatusCode, Json<ApiResponse<String>>) {
+    let id = body["id"].as_str().unwrap_or("").to_string();
+    let title = body["title"].as_str().unwrap_or("").to_string();
+
+    match crate::commands::ai_chat::ai_chat_rename_conversation(id, title).await {
+        Ok(()) => ok(String::new()),
+        Err(e) => err(e.to_string()),
+    }
+}
+
+pub async fn api_ai_delete_conversation(
+    Json(body): Json<serde_json::Value>,
+) -> (StatusCode, Json<ApiResponse<String>>) {
+    let id = body["id"].as_str().unwrap_or("").to_string();
+
+    match crate::commands::ai_chat::ai_chat_delete_conversation(id).await {
+        Ok(()) => ok(String::new()),
         Err(e) => err(e.to_string()),
     }
 }
