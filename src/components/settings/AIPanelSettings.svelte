@@ -7,6 +7,7 @@
   import Icon from "../Icon.svelte";
   import { setAppSetting, getAppSetting } from "../../lib/settingsStore.svelte";
   import { normalizeError } from "../../lib/errors";
+  import SettingsSection from "./SettingsSection.svelte";
 
   export interface AgentMemoryItem {
     id: string;
@@ -174,10 +175,7 @@
 </script>
 
 <!-- AI & Diagnostics -->
-<div class="card" bind:this={aiCardEl} style="margin-bottom: 24px;">
-  <h3 style="font-size: var(--text-lg); font-weight: 600; margin-bottom: 20px; display: flex; align-items: center; gap: 8px;">
-    <Icon name="Robot" size={18} /> AI & Diagnostics
-  </h3>
+<SettingsSection title="AI & Diagnostics" icon="Robot" bind:el={aiCardEl}>
 
   <!-- AI Provider -->
   <div style="margin-bottom: 16px;">
@@ -299,17 +297,14 @@
       When enabled, any application error automatically opens the AI diagnostics bubble and starts investigation.
     </div>
   </div>
-</div>
+</SettingsSection>
 
 <!-- AI Knowledge & Memory -->
-<div class="card" style="margin-bottom: 24px;">
-  <h3 style="font-size: var(--text-lg); font-weight: 600; margin-bottom: 20px; display: flex; align-items: center; gap: 8px;">
-    <Icon name="Robot" size={18} /> AI Knowledge & Memory
-  </h3>
-  <p style="font-size: var(--text-sm); color: var(--text-secondary); margin-bottom: 16px;">
-    The AI learns from your interactions to provide better context. Memories are atomic and can be safely edited or deleted without breaking context.
-  </p>
-
+<SettingsSection
+  title="AI Knowledge & Memory"
+  icon="Robot"
+  description="The AI learns from your interactions to provide better context. Memories are atomic and can be safely edited or deleted without breaking context."
+>
   <div style="display: flex; flex-direction: column; gap: 12px;">
     {#if memories.length === 0}
       <div style="font-size: var(--text-sm); color: var(--text-muted); padding: 16px; background: rgba(255,255,255,0.03); border-radius: var(--radius-md); text-align: center;">
@@ -359,4 +354,4 @@
       {/each}
     {/if}
   </div>
-</div>
+</SettingsSection>

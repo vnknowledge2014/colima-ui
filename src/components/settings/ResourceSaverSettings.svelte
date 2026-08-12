@@ -1,6 +1,7 @@
 <script lang="ts">
   import { sysMethods } from "../../lib/api";
   import { setAppSetting, getAppSetting } from "../../lib/settingsStore.svelte";
+  import SettingsSection from "./SettingsSection.svelte";
 
   let autoPauseEnabled = $state(getAppSetting("colimaui_auto_pause") === "true");
   let autoPauseMinutes = $state(parseInt(getAppSetting("colimaui_auto_pause_mins") || "15", 10));
@@ -12,12 +13,10 @@
   });
 </script>
 
-<!-- Resource Saver Mode -->
-<div class="card" style="margin-bottom: 24px;">
-  <h3 style="font-size: var(--text-lg); font-weight: 600; margin-bottom: 8px;">Resource Saver Mode</h3>
-  <p style="font-size: var(--text-sm); color: var(--text-secondary); margin-bottom: 20px;">
-    Automatically pause the Colima instance if there are no active CPU spikes or running containers for a set period.
-  </p>
+<SettingsSection
+  title="Resource Saver Mode"
+  description="Automatically pause the Colima instance if there are no active CPU spikes or running containers for a set period."
+>
   <div style="display: flex; flex-direction: column; gap: 16px;">
     <div style="display: flex; align-items: center; justify-content: space-between;">
       <label style="font-size: var(--text-sm); font-weight: 500; cursor: pointer; display: flex; align-items: center; gap: 8px;">
@@ -34,4 +33,4 @@
     </div>
     {/if}
   </div>
-</div>
+</SettingsSection>

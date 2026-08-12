@@ -13,6 +13,7 @@
   } from "../../lib/api";
   import { t } from "../../lib/i18n.svelte";
   import { globalToast } from "../../lib/globalToast";
+  import SettingsSection from "../../components/settings/SettingsSection.svelte";
   import { reportError } from "../../lib/errorReporter";
   import { normalizeError, errorMessage } from "../../lib/errors";
   import { dashboardState, uiState } from "../../store.svelte";
@@ -287,22 +288,19 @@
   });
 </script>
 
-<div class="card" style="margin-bottom: 24px;">
-  <h3 style="font-size: var(--text-lg); font-weight: 600; margin-bottom: 8px;">
-    {t("colima_config.title", { default: "Colima Configuration" })}
-  </h3>
-  <p style="font-size: var(--text-sm); color: var(--text-secondary); margin-bottom: 20px;">
-    {t("colima_config.description", {
-      default:
-        "Edit colima.yaml directly. Settings you have added by hand are preserved; changes take effect on the next restart.",
-    })}
-  </p>
+<SettingsSection
+  title={t("colima_config.title", { default: "Colima Configuration" })}
+  description={t("colima_config.description", {
+    default:
+      "Edit colima.yaml directly. Settings you have added by hand are preserved; changes take effect on the next restart.",
+  })}
+>
 
   {#if profiles.length > 1}
     <label class="cfg-row">
       <span class="cfg-label">{t("colima_config.profile", { default: "Profile" })}</span>
       <select
-        class="input"
+        class="input select"
         value={profile}
         onchange={(e) => {
           profile = (e.currentTarget as HTMLSelectElement).value;
@@ -375,21 +373,21 @@
 
     <label class="cfg-row">
       <span class="cfg-label">{t("colima_config.runtime", { default: "Runtime" })}</span>
-      <select class="input" bind:value={form.runtime} onchange={refreshPreview}>
+      <select class="input select" bind:value={form.runtime} onchange={refreshPreview}>
         {#each RUNTIMES as value}<option {value}>{value}</option>{/each}
       </select>
     </label>
 
     <label class="cfg-row">
       <span class="cfg-label">{t("colima_config.vm_type", { default: "VM type" })}</span>
-      <select class="input" bind:value={form.vmType} onchange={refreshPreview}>
+      <select class="input select" bind:value={form.vmType} onchange={refreshPreview}>
         {#each VM_TYPES as value}<option {value}>{value}</option>{/each}
       </select>
     </label>
 
     <label class="cfg-row">
       <span class="cfg-label">{t("colima_config.mount_type", { default: "Mount type" })}</span>
-      <select class="input" bind:value={form.mountType} onchange={refreshPreview}>
+      <select class="input select" bind:value={form.mountType} onchange={refreshPreview}>
         {#each MOUNT_TYPES as value}<option {value}>{value}</option>{/each}
       </select>
     </label>
@@ -406,23 +404,23 @@
     </label>
 
     <label class="cfg-check">
+      <span class="cfg-label">{t("colima_config.network_address", { default: "Assign a reachable IP address to the VM" })}</span>
       <input
         type="checkbox"
         class="checkbox"
         bind:checked={form.networkAddress}
         onchange={refreshPreview}
       />
-      <span>{t("colima_config.network_address", { default: "Assign a reachable IP address to the VM" })}</span>
     </label>
 
     <label class="cfg-check">
+      <span class="cfg-label">{t("colima_config.kubernetes", { default: "Enable Kubernetes" })}</span>
       <input
         type="checkbox"
         class="checkbox"
         bind:checked={form.kubernetes}
         onchange={refreshPreview}
       />
-      <span>{t("colima_config.kubernetes", { default: "Enable Kubernetes" })}</span>
     </label>
 
     {#if errors.length > 0 || warnings.length > 0}
@@ -464,7 +462,7 @@
       </button>
     </div>
   {/if}
-</div>
+</SettingsSection>
 
 <style>
   .cfg-row {
@@ -474,6 +472,9 @@
     gap: 16px;
     padding: 10px 0;
     border-bottom: 1px solid var(--border-subtle);
+  }
+  .cfg-row:last-child {
+    border-bottom: none;
   }
   .cfg-row .input {
     max-width: 220px;
@@ -509,11 +510,18 @@
   .cfg-check {
     display: flex;
     align-items: center;
-    gap: 8px;
+    justify-content: space-between;
+    gap: 16px;
     padding: 10px 0;
     font-size: var(--text-sm);
     cursor: pointer;
     border-bottom: 1px solid var(--border-subtle);
+  }
+  .cfg-check:last-child {
+    border-bottom: none;
+  }
+  .cfg-check .checkbox {
+    flex-shrink: 0;
   }
   .cfg-presets {
     padding: 10px 0 16px;
