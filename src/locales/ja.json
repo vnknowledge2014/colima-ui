@@ -513,6 +513,9 @@
     "outcome_off": "オフ",
     "suggestions": "自己修復からの提案",
     "suggestions_heading": "自己修復から {count} 件の提案があります",
-    "open_settings": "ルール"
+    "open_settings": "ルール",
+    "rules_count": "{count} 件のルール",
+    "none_acting": "自動実行するものはありません",
+    "some_acting": "{count} 件が自動実行します"
   }
 }

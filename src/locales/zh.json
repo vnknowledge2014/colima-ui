@@ -513,6 +513,9 @@
     "outcome_off": "已关闭",
     "suggestions": "自我修复的建议",
     "suggestions_heading": "自我修复有 {count} 条建议",
-    "open_settings": "规则"
+    "open_settings": "规则",
+    "rules_count": "{count} 条规则",
+    "none_acting": "没有规则会自动执行",
+    "some_acting": "{count} 条规则会自动执行"
   }
 }

@@ -513,6 +513,9 @@
     "outcome_off": "switched off",
     "suggestions": "Self-healing suggestions",
     "suggestions_heading": "Self-healing has {count} suggestions",
-    "open_settings": "Rules"
+    "open_settings": "Rules",
+    "rules_count": "{count} rules",
+    "none_acting": "none act on their own",
+    "some_acting": "{count} act on their own"
   }
 }

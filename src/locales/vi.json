@@ -513,6 +513,9 @@
     "outcome_off": "đang tắt",
     "suggestions": "Đề xuất từ tự phục hồi",
     "suggestions_heading": "Tự phục hồi có {count} đề xuất",
-    "open_settings": "Các luật"
+    "open_settings": "Các luật",
+    "rules_count": "{count} quy tắc",
+    "none_acting": "không quy tắc nào tự hành động",
+    "some_acting": "{count} quy tắc tự hành động"
   }
 }
