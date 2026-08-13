@@ -29,8 +29,7 @@ impl DockerAdapter {
     /// Get a Command pre-configured with the correct runtime binary and PATH.
     #[allow(dead_code)]
     fn docker_cmd(&self) -> std::process::Command {
-        let runtime_cmd = crate::commands::runtime::get_runtime_cmd();
-        runtime_cmd
+        crate::commands::runtime::get_runtime_cmd()
     }
 
     /// Execute a Docker CLI command on a blocking thread pool with timeout.
