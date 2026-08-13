@@ -8,6 +8,9 @@
     aiState,
     initAiHistory,
     pushAiMessage,
+    updateAiMessage,
+    deleteAiMessage,
+    persistAiMessages,
     clearAiHistory,
     createConversation,
     switchConversation,
@@ -259,17 +262,15 @@
     aiState.isProcessing = true;
     abortController = new AbortController();
 
+    // Every message this turn creates or fills, so the history is written once
+    // the agent settles instead of on each streamed chunk.
+    const touched = new Set<string>();
+
     const callbacks: AgentCallbacks = {
       onStatus: (t) => { statusText = t; },
-      onMessage: (msg) => { pushAiMessage(msg as AiMessage); },
-      onMessageUpdate: (id, content) => {
-        const idx = aiState.messages.findIndex(m => m.id === id);
-        if (idx !== -1) aiState.messages[idx].content = content;
-      },
-      onMessageDelete: (id) => {
-        const idx = aiState.messages.findIndex(m => m.id === id);
-        if (idx !== -1) aiState.messages.splice(idx, 1);
-      },
+      onMessage: (msg) => { touched.add(msg.id); pushAiMessage(msg as AiMessage); },
+      onMessageUpdate: (id, content) => { touched.add(id); updateAiMessage(id, content); },
+      onMessageDelete: (id) => { touched.delete(id); deleteAiMessage(id); },
       onApprovalRequired: (id, command) => {
         return new Promise<boolean>((resolve) => {
           pendingApprovals.push({ id, command, resolve });
@@ -327,6 +328,9 @@
         abortController.signal
       );
     } finally {
+      // Before clearing the run state, and in the `finally` so a failed or
+      // stopped turn still keeps whatever the assistant managed to say.
+      await persistAiMessages(touched);
       // isProcessing gates the send button — leaving it true locks the panel.
       aiState.isProcessing = false;
       statusText = "";
