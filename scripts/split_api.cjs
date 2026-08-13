@@ -1,3 +1,4 @@
+// eslint-disable-next-line @typescript-eslint/no-require-imports -- CommonJS build script; require is the only module mechanism available in .cjs
 const fs = require('fs');
 
 const content = fs.readFileSync('src/lib/api.ts', 'utf-8');
