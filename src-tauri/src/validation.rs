@@ -171,6 +171,25 @@ pub fn ensure_valid_profile(profile: &str) -> Result<(), String> {
 ///
 /// Canonicalizes the *parent* of `candidate`, not `candidate` itself, so this
 /// works for paths that do not exist yet (a file about to be written).
+///
+/// # Which base to pass
+///
+/// The base is a policy decision per operation, not a constant. Callers that
+/// write to the host filesystem use:
+///
+/// | Operation | Base |
+/// |---|---|
+/// | `docker cp` container→host | The directory the user picked in the system dialog |
+/// | `docker save` → TAR | The directory the user picked in the system dialog |
+/// | `docker cp` host→container | No host-side confinement — it is a read. The *container* side is validated with [`is_valid_container_id`] and passed via `Command::args`, never interpolated into a shell |
+///
+/// Container-side paths deliberately do **not** go through this function: they
+/// name a different filesystem, so canonicalizing them against a host directory
+/// would be meaningless. Safety there comes from never invoking `sh -c`.
+///
+/// Note that [`contains_shell_injection`] is a metacharacter denylist for
+/// user-typed exec commands. It is **not** a path guard and must not be
+/// substituted for this function.
 pub fn assert_path_within(base: &std::path::Path, candidate: &std::path::Path) -> Result<(), String> {
     let base = base
         .canonicalize()

@@ -1,0 +1,66 @@
+{
+  "SchemaVersion": 2,
+  "ArtifactName": "app:1.0",
+  "Metadata": {
+    "ImageID": "sha256:bbb"
+  },
+  "Results": [
+    {
+      "Target": "app:1.0 (alpine 3.19.1)",
+      "Class": "os-pkgs",
+      "Type": "alpine",
+      "Vulnerabilities": [
+        {
+          "VulnerabilityID": "CVE-2024-0001",
+          "PkgName": "openssl",
+          "InstalledVersion": "3.0.12-r1",
+          "FixedVersion": "3.0.13-r0",
+          "Severity": "CRITICAL",
+          "DataSource": {
+            "ID": "alpine",
+            "Name": "Alpine Secdb"
+          },
+          "CVSS": {
+            "nvd": {
+              "V2Score": 7.5,
+              "V3Score": 9.8
+            }
+          },
+          "PublishedDate": "2024-01-30T00:00:00Z"
+        },
+        {
+          "VulnerabilityID": "CVE-2024-0002",
+          "PkgName": "busybox",
+          "InstalledVersion": "1.36.1-r15",
+          "FixedVersion": "",
+          "Severity": "MEDIUM",
+          "DataSource": {
+            "ID": "alpine"
+          }
+        }
+      ]
+    },
+    {
+      "Target": "usr/local/bin/app",
+      "Class": "lang-pkgs",
+      "Type": "gobinary",
+      "Vulnerabilities": [
+        {
+          "VulnerabilityID": "GHSA-xxxx-yyyy-zzzz",
+          "PkgName": "golang.org/x/net",
+          "InstalledVersion": "v0.17.0",
+          "FixedVersion": "v0.23.0",
+          "Severity": "HIGH",
+          "DataSource": {
+            "ID": "ghsa"
+          },
+          "CVSS": {
+            "ghsa": {
+              "V3Score": 7.5
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

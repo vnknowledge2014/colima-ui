@@ -48,8 +48,8 @@ static PENDING: LazyLock<Mutex<HashSet<String>>> = LazyLock::new(|| Mutex::new(H
 
 /// Last rendered snapshot, so the menu is only rebuilt when it would differ.
 /// Rebuilding on every 5s tick makes the menu flicker while open.
-static LAST_SNAPSHOT: LazyLock<Mutex<Option<Vec<(String, String)>>>> =
-    LazyLock::new(|| Mutex::new(None));
+type LastSnapshot = LazyLock<Mutex<Option<Vec<(String, String)>>>>;
+static LAST_SNAPSHOT: LastSnapshot = LazyLock::new(|| Mutex::new(None));
 
 fn snapshot_of(instances: &[ColimaInstance]) -> Vec<(String, String)> {
     instances
@@ -83,6 +83,12 @@ pub enum MenuAction {
     OpenContainer(String),
     ShowWindow,
     Help,
+    /// Stop self-healing from here, without opening the window.
+    ///
+    /// The second of the two switches the feature is required to have. The
+    /// first lives in Settings; this one works when the window is closed, and
+    /// neither is behind the Pro gate.
+    StopSelfHealing,
     Quit,
 }
 
@@ -96,6 +102,7 @@ pub fn parse_menu_id(id: &str) -> Option<MenuAction> {
         "show" => return Some(MenuAction::ShowWindow),
         "quit" => return Some(MenuAction::Quit),
         "help" => return Some(MenuAction::Help),
+        "self-heal:stop" => return Some(MenuAction::StopSelfHealing),
         _ => {}
     }
 
@@ -268,6 +275,23 @@ fn build_menu(
     items.push(Box::new(MenuItem::with_id(
         app, "help", "Help", true, None::<&str>,
     )?));
+    // Offered only when something could actually be acting: the switch is on,
+    // and a rule is set to act by itself. An entry reading "Stop self-healing"
+    // on an install where nothing can act invites the user to fix a problem
+    // they do not have.
+    let can_act = crate::commands::self_heal::is_enabled()
+        && crate::commands::self_heal::list_rules()
+            .map(|rules| rules.iter().any(|r| r.enabled && r.mode == crate::commands::self_heal::HealMode::Auto))
+            .unwrap_or(false);
+    if can_act {
+        items.push(Box::new(MenuItem::with_id(
+            app,
+            "self-heal:stop",
+            "Stop self-healing",
+            true,
+            None::<&str>,
+        )?));
+    }
     items.push(Box::new(PredefinedMenuItem::separator(app)?));
     items.push(Box::new(MenuItem::with_id(
         app, "quit", "Quit", true, None::<&str>,
@@ -338,6 +362,14 @@ fn handle_menu_event(app: &AppHandle, id: &str) {
         MenuAction::Help => {
             show_main_window(app);
             let _ = app.emit("navigate", serde_json::json!({ "page": "help" }));
+        }
+        MenuAction::StopSelfHealing => {
+            // Written before anything is reported, so the switch has taken
+            // effect by the time the menu redraws without the entry.
+            if let Err(e) = crate::commands::self_heal::set_enabled(false) {
+                eprintln!("[Tray] could not stop self-healing: {e}");
+            }
+            let _ = app.emit("self-heal-stopped", serde_json::json!({}));
         }
         MenuAction::OpenContainer(_name) => {
             // Opening a container means jumping into the app's Containers page.
@@ -507,6 +539,10 @@ mod tests {
     fn parses_valid_menu_ids() {
         assert_eq!(parse_menu_id("show"), Some(MenuAction::ShowWindow));
         assert_eq!(parse_menu_id("quit"), Some(MenuAction::Quit));
+        assert_eq!(
+            parse_menu_id("self-heal:stop"),
+            Some(MenuAction::StopSelfHealing)
+        );
         assert_eq!(
             parse_menu_id("instance:start:dev"),
             Some(MenuAction::StartInstance("dev".into()))

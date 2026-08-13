@@ -1,0 +1,37 @@
+{
+  "SchemaVersion": 3,
+  "ArtifactName": "future:1",
+  "SomethingNew": {
+    "nested": [
+      1,
+      2,
+      3
+    ]
+  },
+  "Results": [
+    {
+      "Target": "future:1",
+      "Class": "os-pkgs",
+      "AnotherNewField": true,
+      "Vulnerabilities": [
+        {
+          "VulnerabilityID": "CVE-2030-0001",
+          "PkgName": "libfuture",
+          "Severity": "Spicy",
+          "BrandNewField": {
+            "x": 1
+          }
+        },
+        {
+          "VulnerabilityID": "CVE-2030-0002",
+          "InstalledVersion": "1.0",
+          "Severity": "LOW"
+        },
+        {
+          "PkgName": "no-id-so-not-a-finding",
+          "Severity": "HIGH"
+        }
+      ]
+    }
+  ]
+}

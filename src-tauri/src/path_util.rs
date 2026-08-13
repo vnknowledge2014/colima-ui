@@ -46,7 +46,32 @@ const USER_PATHS: &[&str] = &[
 /// The computed PATH, stored for use by `apply_path_to_cmd()` in late-spawned contexts.
 static COMPUTED_PATH: std::sync::OnceLock<String> = std::sync::OnceLock::new();
 
+/// `~/.colima-ui` — where this app keeps everything it writes.
+///
+/// Extracted when a third caller appeared (crash reports). Two ad-hoc copies of
+/// a path is a coincidence; three is a convention that should live in one place,
+/// so a future move does not leave one directory behind.
+///
+/// An empty `HOME` counts as missing, not as a valid prefix. `env::var` returns
+/// `Ok("")` for a variable that is set but blank, and
+/// `PathBuf::from("").join(".colima-ui")` is the *relative* path `.colima-ui` —
+/// which would put the knowledge bank and the crash reports in whatever
+/// directory the app happened to be launched from, silently, a different one
+/// each time.
+///
+/// The `/tmp` fallback matches what the two original callers did. A process with
+/// no `HOME` is not a normal desktop session, and losing the knowledge bank
+/// there is better than refusing to start.
+pub fn app_data_dir() -> PathBuf {
+    let home = env::var("HOME")
+        .ok()
+        .filter(|h| !h.is_empty())
+        .unwrap_or_else(|| "/tmp".to_string());
+    PathBuf::from(home).join(".colima-ui")
+}
+
 /// Ensure common binary paths are in the PATH environment variable.
+///
 /// Call this once at app startup **before any threads are spawned** to fix
 /// the PATH for all subsequent Command calls.
 ///
@@ -60,10 +85,8 @@ pub fn fix_path_env() {
 
     for extra in EXTRA_PATHS {
         let extra_str = extra.to_string();
-        if !paths.contains(&extra_str) {
-            if PathBuf::from(extra).exists() {
-                paths.push(extra_str);
-            }
+        if !paths.contains(&extra_str) && PathBuf::from(extra).exists() {
+            paths.push(extra_str);
         }
     }
 
@@ -191,7 +214,6 @@ pub fn detect_docker_host() -> Option<(String, String)> {
             if name.starts_with('_') || name.starts_with('.') || !entry.path().is_dir() {
                 continue;
             }
-
             // Map profile to lima instance name
             let lima_name = if name == "default" {
                 "colima".to_string()
@@ -210,7 +232,9 @@ pub fn detect_docker_host() -> Option<(String, String)> {
         }
     }
 
-    // Fallback: check the colima-level docker.sock symlink
+    // Fallback: the colima-level docker.sock symlink, which Colima repoints at
+    // whichever profile started last. Reached when the scan above found nothing
+    // running.
     let fallback = colima_path.join("docker.sock");
     if fallback.exists() {
         return Some((format!("unix://{}", fallback.display()), "default".to_string()));

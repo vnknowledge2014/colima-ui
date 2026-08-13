@@ -3,6 +3,8 @@ name = "colima-ui"
 version = "0.1.10"
 description = "A modern desktop & web GUI for Colima — manage Docker, Kubernetes, and Linux VMs"
 authors = ["vnknowledge2014"]
+license = "MIT"
+repository = "https://github.com/vnknowledge2014/colima-ui"
 edition = "2021"
 default-run = "colima-ui"
 
@@ -37,7 +39,12 @@ scraper = "0.20"
 html2md = "0.2"
 rusqlite = { version = "0.32", features = ["bundled"] }
 regex-lite = "0.1"
+chrono = { version = "0.4", features = ["serde"] }
 tauri-plugin-http = "2.5.9"
+tauri-plugin-updater = "2"
+# OAuth return path: the provider redirects to colimaui://auth-callback and the
+# OS hands the URL back to the running app.
+tauri-plugin-deep-link = "2"
 rand = "0.8"
 sha2 = "0.11.0"
 # Real pseudo-terminal. Replaces the `script(1)` wrapper, which only bought
@@ -45,6 +52,21 @@ sha2 = "0.11.0"
 portable-pty = "0.9"
 async-trait = "0.1"
 clap = { version = "4", features = ["derive"], optional = true }
+tauri-plugin-dialog = "2"
+tauri-plugin-notification = "2"
+
+# The auth session (tokens + PKCE verifier) lives in the macOS Keychain, never
+# on disk. Only macOS has a backend here; elsewhere the session is in-memory and
+# the user re-signs-in each launch (see account_session.rs).
+[target.'cfg(target_os = "macos")'.dependencies]
+security-framework = "3"
+
+# `tower::ServiceExt::oneshot` drives the router in-process, so the tests in
+# `api_server` can assert which routes are reachable without a credential.
+# Already in the lock file as a transitive dependency of axum — this only makes
+# it nameable from test code.
+[dev-dependencies]
+tower = { version = "0.5", features = ["util"] }
 
 [features]
 default = []
@@ -54,3 +76,32 @@ cli = ["clap"]
 name = "colimaui"
 path = "src/bin/cli.rs"
 required-features = ["cli"]
+
+# ------------------------------------------------------------------
+# Lint policy — enforced by CI (`cargo clippy --all-targets -- -D warnings`)
+# and by the pre-push hook. Agents MUST NOT introduce any of these.
+# ------------------------------------------------------------------
+[lints.rust]
+# Dead code / unused detection is the primary gate.
+dead_code = "warn"
+unused = "warn"
+unused_imports = "warn"
+unused_variables = "warn"
+unused_mut = "warn"
+unused_assignments = "warn"
+unused_must_use = "warn"
+unreachable_code = "warn"
+unreachable_patterns = "warn"
+
+[lints.clippy]
+all = "warn"
+# Error-prone / dead-code focused additions beyond the default group.
+unused_async = "warn"
+needless_return = "warn"
+redundant_closure = "warn"
+useless_conversion = "warn"
+let_and_return = "warn"
+redundant_pattern_matching = "warn"
+map_unwrap_or = "warn"
+collapsible_if = "warn"
+needless_borrow = "warn"

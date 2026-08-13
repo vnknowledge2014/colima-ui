@@ -116,7 +116,9 @@ pub async fn start_instance(config: StartConfig) -> Result<String, crate::error:
     crate::validation::ensure_valid_profile(&config.profile)
         .map_err(crate::error::ColimaError::validation)?;
     let is_first_start = !profile_config_exists(&config.profile);
-    async move {
+    // The block below takes ownership, so what the record needs is kept here.
+    let logged_profile = config.profile.clone();
+    let result = async move {
     // `colima start` blocks for 60-120s — run on thread pool to avoid starving tokio
     tokio::task::spawn_blocking(move || {
         let mut args = vec!["start".to_string()];
@@ -198,7 +200,19 @@ pub async fn start_instance(config: StartConfig) -> Result<String, crate::error:
     .await
     .map_err(|e| crate::error::ColimaError::internal(format!("Task join error: {}", e)))?
     }
-    .await
+    .await;
+
+    crate::commands::activity::record(
+        crate::commands::activity::ActivityEntry::new(
+            crate::commands::activity::ActivityKind::Lifecycle,
+            "start",
+            "instance",
+            &logged_profile,
+        )
+        .outcome_of(&result),
+    );
+
+    result
 }
 
 /// Start a Colima instance using the settings already saved for that profile.
@@ -298,7 +312,9 @@ pub async fn delete_instance_cli(profile: String, force: bool) -> Result<String,
 #[tauri::command]
 pub async fn stop_instance(     app: tauri::AppHandle,     docker_state: tauri::State<'_, std::sync::Arc<tokio::sync::RwLock<crate::docker_state::DockerState>>>,     profile: String,     force: bool, ) -> Result<String, crate::error::ColimaError> {
     crate::validation::ensure_valid_profile(&profile).map_err(crate::error::ColimaError::validation)?;
-    async move {
+    // The block below takes ownership, so what the record needs is kept here.
+    let logged_profile = profile.clone();
+    let result = async move {
     // Proactively clear Docker state BEFORE stopping — user may navigate to Docker
     // tabs while colima stop is still running (fire-and-forget pattern in the UI).
     // If we clear after, Bollard queries succeed during the shutdown window.
@@ -347,14 +363,28 @@ pub async fn stop_instance(     app: tauri::AppHandle,     docker_state: tauri::
     .await
     .map_err(|e| format!("Task join error: {}", e))?
     }
-    .await.map_err(|e: String| crate::error::ColimaError::from(e))
+    .await;
+
+    crate::commands::activity::record(
+        crate::commands::activity::ActivityEntry::new(
+            crate::commands::activity::ActivityKind::Lifecycle,
+            "stop",
+            "instance",
+            &logged_profile,
+        )
+        .outcome_of(&result),
+    );
+
+    result.map_err(|e: String| crate::error::ColimaError::from(e))
 }
 
 /// Delete a Colima instance
 #[tauri::command]
 pub async fn delete_instance(     app: tauri::AppHandle,     docker_state: tauri::State<'_, std::sync::Arc<tokio::sync::RwLock<crate::docker_state::DockerState>>>,     profile: String,     force: bool, ) -> Result<String, crate::error::ColimaError> {
     crate::validation::ensure_valid_profile(&profile).map_err(crate::error::ColimaError::validation)?;
-    async move {
+    // The block below takes ownership, so what the record needs is kept here.
+    let logged_profile = profile.clone();
+    let result = async move {
     {
         let mut lock = docker_state.write().await;
         lock.docker = None;
@@ -400,7 +430,19 @@ pub async fn delete_instance(     app: tauri::AppHandle,     docker_state: tauri
     .await
     .map_err(|e| format!("Task join error: {}", e))?
     }
-    .await.map_err(|e: String| crate::error::ColimaError::from(e))
+    .await;
+
+    crate::commands::activity::record(
+        crate::commands::activity::ActivityEntry::new(
+            crate::commands::activity::ActivityKind::Destructive,
+            "delete",
+            "instance",
+            &logged_profile,
+        )
+        .outcome_of(&result),
+    );
+
+    result.map_err(|e: String| crate::error::ColimaError::from(e))
 }
 
 /// Get extended status of an instance
@@ -534,17 +576,14 @@ pub async fn collect_diagnostic_logs(profile: String) -> Result<String, crate::e
         report.push_str("## Lima VM Logs\n\n");
         for log_file in &["ha.stderr.log", "ha.stdout.log", "serial.log", "serialv.log"] {
             let path = format!("{}/{}", lima_dir, log_file);
-            match std::fs::read_to_string(&path) {
-                Ok(content) => {
-                    // Take last 30 lines (most recent errors)
-                    let lines: Vec<&str> = content.lines().collect();
-                    let start = lines.len().saturating_sub(30);
-                    let tail: String = lines[start..].join("\n");
-                    if !tail.trim().is_empty() {
-                        report.push_str(&format!("### {}\n```\n{}\n```\n\n", log_file, tail));
-                    }
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                // Take last 30 lines (most recent errors)
+                let lines: Vec<&str> = content.lines().collect();
+                let start = lines.len().saturating_sub(30);
+                let tail: String = lines[start..].join("\n");
+                if !tail.trim().is_empty() {
+                    report.push_str(&format!("### {}\n```\n{}\n```\n\n", log_file, tail));
                 }
-                Err(_) => {}
             }
         }
 
@@ -582,7 +621,7 @@ pub async fn collect_diagnostic_logs(profile: String) -> Result<String, crate::e
                 .map(|e| {
                     let name = e.file_name().to_string_lossy().to_string();
                     let meta = e.metadata().ok();
-                    let size = meta.as_ref().map(|m| m.len()).unwrap_or(0);
+                    let size = meta.as_ref().map_or(0, |m| m.len());
                     // For .pid files, read the content (it's a process ID)
                     let content = if name.ends_with(".pid") {
                         std::fs::read_to_string(e.path()).unwrap_or_default().trim().to_string()

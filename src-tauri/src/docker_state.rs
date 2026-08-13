@@ -10,7 +10,13 @@ use tokio::sync::RwLock;
 /// Connect to Docker via the Colima socket.
 /// This is essential because macOS .app bundles don't inherit DOCKER_HOST,
 /// and Colima doesn't create /var/run/docker.sock (which Bollard defaults to).
-fn connect_bollard() -> Option<Docker> {
+/// Connect to whichever daemon this machine has.
+///
+/// `pub(crate)` because the SSE watcher needs the *same* answer: it once had its
+/// own copy, and when that copy was removed in favour of calling this, the
+/// difference between them turned out to be the `connect_with_defaults()`
+/// fallback — i.e. every machine running Docker Desktop rather than colima.
+pub(crate) fn connect_bollard() -> Option<Docker> {
     // Try Colima socket detection first
     if let Some((host, _)) = crate::path_util::detect_docker_host() {
         // host is like "unix:///Users/mike/.colima/default/docker.sock"
@@ -53,6 +59,12 @@ impl DockerState {
     #[allow(dead_code)]
     pub fn docker(&self) -> Result<&Docker, String> {
         self.docker.as_ref().ok_or_else(|| "Docker daemon is not connected".to_string())
+    }
+}
+
+impl Default for DockerState {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -107,11 +119,18 @@ pub async fn start_docker_watcher(app: AppHandle, state: Arc<RwLock<DockerState>
             lock.docker = Some(docker.clone());
         }
 
-        // Initial fetch on (re)connect — push to frontend immediately
+        // Initial fetch on (re)connect — push to frontend immediately.
+        //
+        // Both transports, not just Tauri. Browser-mode clients are driven by
+        // container events, and a recovery produces none: after a VM restart
+        // with nothing running there is simply nothing to report, so a client
+        // that only reacts to events would sit on pre-outage data forever.
         if let Ok(data) = update_cache(&docker, &state).await {
+            crate::sse::publish_sse_event("docker-state-updated", &data);
             let _ = app.emit("docker-state-updated", data);
         }
         // Notify frontend of reconnection so it can refetch volumes/networks/compose
+        crate::sse::publish_sse_event("docker-reconnected", &serde_json::json!({}));
         let _ = app.emit("docker-reconnected", serde_json::json!({}));
 
         // Stream Docker events until connection drops
@@ -129,7 +148,16 @@ pub async fn start_docker_watcher(app: AppHandle, state: Arc<RwLock<DockerState>
             };
 
             match event {
-                Some(Ok(_)) => {
+                Some(Ok(ev)) => {
+                    // Fork before debouncing. This watcher only needs "something
+                    // changed", but the events themselves carry information the
+                    // debounce is about to destroy — five restarts in ten seconds
+                    // collapse into one refresh here, and a crash-loop rule reading
+                    // only this path would never see the loop. See `docker_events`.
+                    if let Some(e) = crate::docker_events::from_bollard(&ev) {
+                        crate::docker_events::publish(e);
+                    }
+
                     // Event received — now drain any further events within the debounce window
                     // (trailing-edge: keep resetting the timer while events keep coming)
                     loop {
@@ -139,7 +167,14 @@ pub async fn start_docker_watcher(app: AppHandle, state: Arc<RwLock<DockerState>
                         )
                         .await
                         {
-                            Ok(Some(Ok(_))) => {
+                            Ok(Some(Ok(ev))) => {
+                                // Drained for this watcher's purposes, but still
+                                // published: these are exactly the events a burst
+                                // is made of, and they are the ones that matter to
+                                // anything counting.
+                                if let Some(e) = crate::docker_events::from_bollard(&ev) {
+                                    crate::docker_events::publish(e);
+                                }
                                 // Another event within the window — keep draining
                                 continue;
                             }
@@ -194,12 +229,14 @@ pub async fn start_docker_watcher(app: AppHandle, state: Arc<RwLock<DockerState>
             lock.containers_cache = vec![];
             lock.images_cache = vec![];
         }
-        // Emit specific connection-lost event so frontend can clear ALL Docker state
+        // Emit specific connection-lost event so frontend can clear ALL Docker state.
+        // Browser mode needs this as much as Tauri does — more, since a stale
+        // container list there is indistinguishable from a live one.
+        let empty = serde_json::json!({ "containers": [], "images": [] });
+        crate::sse::publish_sse_event("docker-connection-lost", &serde_json::json!({}));
+        crate::sse::publish_sse_event("docker-state-updated", &empty);
         let _ = app.emit("docker-connection-lost", serde_json::json!({}));
-        let _ = app.emit("docker-state-updated", serde_json::json!({
-            "containers": [],
-            "images": []
-        }));
+        let _ = app.emit("docker-state-updated", empty);
 
         eprintln!("[DockerWatcher] Connection lost — will retry in 2s");
         tokio::time::sleep(std::time::Duration::from_secs(2)).await;
@@ -218,8 +255,10 @@ pub fn map_containers(containers: &[bollard::models::ContainerSummary]) -> Vec<s
                     let typ_str = p
                         .typ
                         .as_ref()
-                        .map(|t| format!("{:?}", t).to_lowercase().replace("\"", ""))
-                        .unwrap_or_else(|| "tcp".to_string());
+                        .map_or_else(
+                            || "tcp".to_string(),
+                            |t| format!("{:?}", t).to_lowercase().replace("\"", ""),
+                        );
                     if let Some(ip) = &p.ip {
                         format!(
                             "{}:{}->{}/{}",
