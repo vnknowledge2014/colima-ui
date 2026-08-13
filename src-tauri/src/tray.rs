@@ -278,7 +278,9 @@ fn build_menu(
     // Offered only when something could actually be acting: the switch is on,
     // and a rule is set to act by itself. An entry reading "Stop self-healing"
     // on an install where nothing can act invites the user to fix a problem
-    // they do not have.
+    // they do not have. The Auto rule is the signal rather than entitlement,
+    // because a rule set while subscribed outlives the subscription — which is
+    // the case this menu entry exists for.
     let can_act = crate::commands::self_heal::is_enabled()
         && crate::commands::self_heal::list_rules()
             .map(|rules| rules.iter().any(|r| r.enabled && r.mode == crate::commands::self_heal::HealMode::Auto))

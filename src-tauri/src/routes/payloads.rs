@@ -783,6 +783,28 @@ pub struct ComposeDiagnoseBody {
 
 
 #[derive(Deserialize)]
+pub struct ComposeAutofixApplyBody {
+    #[serde(alias = "filePath")]
+    pub file_path: String,
+    #[serde(alias = "newContent")]
+    pub new_content: String,
+    pub explanation: String,
+    /// Keys the patch removes deliberately. Absent means "none", which is the
+    /// strict reading: an omitted field must not widen what the gate allows.
+    #[serde(alias = "declaredRemovals", default)]
+    pub declared_removals: Vec<String>,
+}
+
+
+#[derive(Deserialize)]
+pub struct ComposeAutofixUndoBody {
+    #[serde(alias = "fixId")]
+    pub fix_id: String,
+}
+
+
+
+#[derive(Deserialize)]
 pub struct ComposePsQuery {
     #[serde(alias = "projectName")]
     pub project_name: String,

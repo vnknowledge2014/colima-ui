@@ -4,6 +4,9 @@
   import { globalToast } from "../../lib/globalToast";
   import { t } from "../../lib/i18n.svelte";
   import Icon from "../Icon.svelte";
+  import ProGate from "../ProGate.svelte";
+  import PatchDiff from "./PatchDiff.svelte";
+  import FixHistory from "./FixHistory.svelte";
 
   let { configFiles } = $props<{ configFiles: string }>();
 
@@ -115,6 +118,41 @@
         <pre style="font-size: var(--text-xs); font-family: var(--font-mono); white-space: pre-wrap; margin: 0; color: var(--text-secondary);">{result.validation.raw_error}</pre>
       </div>
 
+      <!-- Flagship Pro offer. The free panel diagnoses (compose config + KB + AI
+           suggestion); auto-fix — applying the patch — is what Pro buys.
+
+           Gated on entitlement, not on a sidecar capability. Auto-fix is planned
+           as Rust in this binary, so requiring a capability nothing declares
+           would lock it away from the very customers who paid for it. Never
+           blocks the free diagnosis around it. -->
+      <ProGate
+        id="compose.autofix"
+        variant="preview"
+        feature={t('compose.diagnose.autofix_feature', { default: 'Compose auto-fix' })}
+        description={t('compose.diagnose.autofix_desc', { default: 'Apply the fix to your compose file automatically, not just read the diagnosis.' })}
+      >
+        {#snippet preview()}
+          <!-- Representative (not fabricated) sample of what auto-fix produces: a
+               patch for a common compose mistake. Labelled as an example. -->
+          <div style="padding: 16px;">
+            <div style="font-size: var(--text-xs); color: var(--text-muted); margin-bottom: 6px;">
+              {t('compose.diagnose.autofix_example', { default: 'Example fix' })}
+            </div>
+            <pre style="font-size: var(--text-xs); font-family: var(--font-mono); margin: 0; line-height: 1.6;">services:
+  web:
+    image: nginx
+<span style="color: var(--accent-red);">-   buld: .</span>
+<span style="color: var(--accent-green);">+   build: .</span>
+    ports:
+      - "8080:80"</pre>
+          </div>
+        {/snippet}
+        <!-- Auto-fix runs in this binary, so it needs no sidecar: a paying
+             customer gets it whether or not any optional component is
+             installed. -->
+        <PatchDiff composeFile={composeFile} />
+        <FixHistory />
+      </ProGate>
 
       {#if result.kb_solutions.length > 0}
         <div style="font-weight: 600; font-size: var(--text-sm);">

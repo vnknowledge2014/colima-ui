@@ -3,6 +3,13 @@ import { call } from "./client";
 /**
  * Self-healing rules: what the app may repair without being asked each time.
  *
+ * Two things about this surface are deliberate and worth keeping.
+ *
+ * **The kill switch is not gated.** `isEnabled` and `setEnabled` are readable
+ * and writable whatever the subscription says. Somebody whose plan lapsed still
+ * has rules stored, and has to be able to see that self-healing is off — and to
+ * turn it off — without buying anything back.
+ *
  * **`autoCapable` is the backend's word, not a UI guess.** Two of the five
  * rules only ever suggest, and the executor has no branch that could run them.
  * The UI reads that flag rather than hard-coding which rules those are, so the
@@ -31,6 +38,7 @@ export type HealOutcome =
   | "failed"
   | "suggested"
   | "quota_blocked"
+  | "not_entitled"
   | "switched_off";
 
 export interface HealRule {

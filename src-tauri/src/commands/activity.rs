@@ -25,6 +25,14 @@
 //! [`redact`](crate::redact::redact) is applied **here** rather than trusted to
 //! the caller — this database travels inside the diagnostic bundle a user
 //! sends when asking for help.
+//!
+//! ## Why rows carry the entitlement they were written under
+//!
+//! The plan asks for two things that look contradictory: a Free install keeps
+//! seven days, and a lapsed subscriber does not lose the year they paid for.
+//! Both hold only if retention can tell which rows were written while entitled,
+//! so that is stored per row. Free limits then prune only the rows a Free
+//! install produced, and history bought under Pro is never what gets deleted.
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -33,12 +41,13 @@ use std::sync::{LazyLock, Mutex};
 use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
 
-/// What the log keeps: a week, or five hundred actions, whichever comes first.
-///
-/// A store with no upper bound is a slow disk leak nobody notices until it
-/// matters, and a week is far longer than the window anyone reads back.
-const RETENTION_DAYS: i64 = 7;
-const MAX_ROWS: i64 = 500;
+/// Free keeps a week, or five hundred actions, whichever comes first.
+const FREE_RETENTION_DAYS: i64 = 7;
+const FREE_MAX_ROWS: i64 = 500;
+
+/// The ceiling for everyone. A paid install keeps a year; nothing keeps more.
+const PRO_RETENTION_DAYS: i64 = 365;
+const PRO_MAX_ROWS: i64 = 50_000;
 
 /// Retention runs on this many writes rather than on a timer.
 ///
@@ -120,7 +129,7 @@ impl ActivityActor {
 pub enum ActivityOutcome {
     Ok,
     Failed,
-    /// Refused before it ran — a guard, or a confirmation declined.
+    /// Refused before it ran — no entitlement, a guard, a confirmation declined.
     Denied,
     /// Started, then stopped because the user asked it to.
     ///
@@ -296,9 +305,9 @@ pub fn db_path() -> PathBuf {
 
 /// The one connection this store writes through.
 ///
-/// Shared rather than reopened per call: recording sits on the path of every
-/// user action, and opening a file to write one row would be the slowest part
-/// of pressing a button. Nothing here holds the lock
+/// Shared rather than reopened per call, unlike `security_history`: recording
+/// sits on the path of every user action, and opening a file to write one row
+/// would be the slowest part of pressing a button. Nothing here holds the lock
 /// for long — every write is a single `INSERT`, and retention is a handful of
 /// `DELETE`s every fiftieth one.
 static DB: LazyLock<Mutex<Option<Connection>>> = LazyLock::new(|| Mutex::new(None));
@@ -332,7 +341,11 @@ fn create_schema(conn: &Connection) -> Result<(), String> {
             actor TEXT NOT NULL,
             outcome TEXT NOT NULL,
             detail TEXT NOT NULL DEFAULT '',
-            duration_ms INTEGER
+            duration_ms INTEGER,
+            -- Whether the install was entitled when this row was written. Read
+            -- by retention so a lapsed subscription does not delete the history
+            -- it paid for; see the module docblock.
+            entitled INTEGER NOT NULL DEFAULT 0
         );
         CREATE INDEX IF NOT EXISTS idx_activity_ts ON activity_log(ts);
         CREATE INDEX IF NOT EXISTS idx_activity_kind_ts ON activity_log(kind, ts);
@@ -361,7 +374,8 @@ fn with_db<T>(f: impl FnOnce(&mut Connection) -> Result<T, String>) -> Result<T,
 
 /// Write one action down. Never fails upward — see the module docblock.
 pub fn record(entry: ActivityEntry) {
-    if let Err(e) = with_db(|conn| insert(conn, &entry, now_ms())) {
+    let entitled = crate::commands::metrics_store::entitled_now_cached();
+    if let Err(e) = with_db(|conn| insert(conn, &entry, now_ms(), entitled)) {
         eprintln!("[Activity] could not record {}: {e}", entry.verb);
         return;
     }
@@ -369,22 +383,27 @@ pub fn record(entry: ActivityEntry) {
     // Opportunistic, and after the write rather than before it: pruning is
     // never the reason an action's record is late.
     if WRITES.fetch_add(1, Ordering::Relaxed).is_multiple_of(RETENTION_EVERY) {
-        if let Err(e) = with_db(|conn| run_retention(conn, now_ms())) {
+        if let Err(e) = with_db(|conn| run_retention(conn, now_ms(), entitled)) {
             eprintln!("[Activity] retention failed: {e}");
         }
     }
 }
 
 /// The insert itself, separated so tests can drive it against a temp database.
-fn insert(conn: &mut Connection, entry: &ActivityEntry, ts: i64) -> Result<(), String> {
+fn insert(
+    conn: &mut Connection,
+    entry: &ActivityEntry,
+    ts: i64,
+    entitled: bool,
+) -> Result<(), String> {
     // Redacted here rather than at the call site: thirty callers each
     // remembering to do it is thirty chances to forget, and the one that
     // forgets is the one that logs a password.
     let detail = crate::redact::redact(&entry.detail);
     conn.execute(
         "INSERT INTO activity_log
-         (ts, kind, verb, target_kind, target, target_name, actor, outcome, detail, duration_ms)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+         (ts, kind, verb, target_kind, target, target_name, actor, outcome, detail, duration_ms, entitled)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
         params![
             ts,
             entry.kind.as_str(),
@@ -396,6 +415,7 @@ fn insert(conn: &mut Connection, entry: &ActivityEntry, ts: i64) -> Result<(), S
             entry.outcome.as_str(),
             detail,
             entry.duration_ms,
+            entitled as i64,
         ],
     )
     .map_err(|e| e.to_string())?;
@@ -404,16 +424,37 @@ fn insert(conn: &mut Connection, entry: &ActivityEntry, ts: i64) -> Result<(), S
 
 /// Delete what this install is no longer keeping.
 ///
-/// Both bounds apply together: whichever is reached first is the one that cuts.
-fn run_retention(conn: &mut Connection, now: i64) -> Result<usize, String> {
+/// The paid ceiling applies to every row. The Free limits apply only to rows
+/// written while unentitled, which is what lets a lapsed subscriber keep the
+/// year they paid for while a Free install still keeps only a week.
+fn run_retention(conn: &mut Connection, now: i64, entitled: bool) -> Result<usize, String> {
     let day_ms = 24 * 60 * 60 * 1000i64;
     let tx = conn.transaction().map_err(|e| e.to_string())?;
     let mut removed = 0usize;
 
+    if !entitled {
+        removed += tx
+            .execute(
+                "DELETE FROM activity_log WHERE entitled = 0 AND ts < ?1",
+                [now - FREE_RETENTION_DAYS * day_ms],
+            )
+            .map_err(|e| e.to_string())?;
+        removed += tx
+            .execute(
+                "DELETE FROM activity_log WHERE entitled = 0 AND id NOT IN (
+                     SELECT id FROM activity_log WHERE entitled = 0 ORDER BY ts DESC, id DESC LIMIT ?1
+                 )",
+                [FREE_MAX_ROWS],
+            )
+            .map_err(|e| e.to_string())?;
+    }
+
+    // The hard ceiling, applied whatever the tier: a store with no upper bound
+    // is a slow disk leak nobody notices until it matters.
     removed += tx
         .execute(
             "DELETE FROM activity_log WHERE ts < ?1",
-            [now - RETENTION_DAYS * day_ms],
+            [now - PRO_RETENTION_DAYS * day_ms],
         )
         .map_err(|e| e.to_string())?;
     removed += tx
@@ -421,7 +462,7 @@ fn run_retention(conn: &mut Connection, now: i64) -> Result<usize, String> {
             "DELETE FROM activity_log WHERE id NOT IN (
                  SELECT id FROM activity_log ORDER BY ts DESC, id DESC LIMIT ?1
              )",
-            [MAX_ROWS],
+            [PRO_MAX_ROWS],
         )
         .map_err(|e| e.to_string())?;
 
@@ -449,6 +490,9 @@ fn row_to_entry(r: &rusqlite::Row) -> rusqlite::Result<ActivityRow> {
 }
 
 /// Read the log back, newest first.
+///
+/// Not gated on entitlement. A Free install keeps a shorter history, but what
+/// it kept is its own record of its own machine.
 pub fn query(filter: &ActivityFilter) -> Result<Vec<ActivityRow>, String> {
     with_db(|conn| select(conn, filter))
 }
@@ -533,7 +577,7 @@ mod tests {
         e.outcome = ActivityOutcome::Failed;
         e.actor = ActivityActor::App;
         e.kind = ActivityKind::Task;
-        insert(&mut conn, &e, 5_000).expect("insert");
+        insert(&mut conn, &e, 5_000, true).expect("insert");
 
         let rows = select(&conn, &ActivityFilter::default()).expect("select");
         assert_eq!(rows.len(), 1);
@@ -605,7 +649,7 @@ mod tests {
     fn a_store_that_cannot_be_written_to_fails_quietly() {
         let mut conn = Connection::open_in_memory().expect("open");
         // Deliberately no `create_schema`: the table is missing.
-        let outcome = insert(&mut conn, &entry("remove", "gone"), 1);
+        let outcome = insert(&mut conn, &entry("remove", "gone"), 1, false);
         assert!(
             outcome.is_err(),
             "a missing table must surface as Err, which `record` swallows"
@@ -621,7 +665,13 @@ mod tests {
     #[test]
     fn a_secret_in_the_detail_never_reaches_the_disk() {
         let mut conn = temp_conn();
-        insert(&mut conn, &entry("run", "started with PASSWORD=hunter2"), 1).expect("insert");
+        insert(
+            &mut conn,
+            &entry("run", "started with PASSWORD=hunter2"),
+            1,
+            false,
+        )
+        .expect("insert");
 
         let stored: String = conn
             .query_row("SELECT detail FROM activity_log", [], |r| r.get(0))
@@ -637,7 +687,7 @@ mod tests {
         let mut conn = temp_conn();
         let mut e = entry("prune", "refused");
         e.outcome = ActivityOutcome::Denied;
-        insert(&mut conn, &e, 1).expect("insert");
+        insert(&mut conn, &e, 1, false).expect("insert");
 
         let rows = select(&conn, &ActivityFilter::default()).expect("select");
         assert_eq!(rows.len(), 1, "a denied action must not be filtered away");
@@ -645,17 +695,17 @@ mod tests {
     }
 
     #[test]
-    fn keeps_only_the_five_hundred_newest() {
+    fn free_keeps_only_its_five_hundred_newest() {
         let mut conn = temp_conn();
         for i in 0..600 {
-            insert(&mut conn, &entry("start", "x"), 1_000_000 + i).expect("insert");
+            insert(&mut conn, &entry("start", "x"), 1_000_000 + i, false).expect("insert");
         }
-        run_retention(&mut conn, 1_000_000 + 600).expect("retention");
+        run_retention(&mut conn, 1_000_000 + 600, false).expect("retention");
 
         let kept: i64 = conn
             .query_row("SELECT COUNT(*) FROM activity_log", [], |r| r.get(0))
             .expect("count");
-        assert_eq!(kept, MAX_ROWS);
+        assert_eq!(kept, FREE_MAX_ROWS);
 
         // The newest survive, so the oldest are what went.
         let oldest: i64 = conn
@@ -665,14 +715,14 @@ mod tests {
     }
 
     #[test]
-    fn drops_anything_older_than_a_week() {
+    fn free_drops_anything_older_than_a_week() {
         let mut conn = temp_conn();
         let day = 24 * 60 * 60 * 1000i64;
         let now = 100 * day;
-        insert(&mut conn, &entry("start", "old"), now - 8 * day).expect("insert");
-        insert(&mut conn, &entry("start", "new"), now - day).expect("insert");
+        insert(&mut conn, &entry("start", "old"), now - 8 * day, false).expect("insert");
+        insert(&mut conn, &entry("start", "new"), now - day, false).expect("insert");
 
-        run_retention(&mut conn, now).expect("retention");
+        run_retention(&mut conn, now, false).expect("retention");
 
         let rows = select(&conn, &ActivityFilter::default()).expect("select");
         assert_eq!(rows.len(), 1);
@@ -680,13 +730,48 @@ mod tests {
     }
 
     #[test]
+    fn losing_pro_does_not_delete_the_history_it_paid_for() {
+        let mut conn = temp_conn();
+        let day = 24 * 60 * 60 * 1000i64;
+        let now = 100 * day;
+        // Written while entitled, thirty days ago — well past the Free window.
+        insert(&mut conn, &entry("prune", "paid-for"), now - 30 * day, true).expect("insert");
+        // Written after the subscription lapsed, and equally old.
+        insert(&mut conn, &entry("prune", "free-era"), now - 30 * day, false).expect("insert");
+
+        run_retention(&mut conn, now, false).expect("retention");
+
+        let rows = select(&conn, &ActivityFilter::default()).expect("select");
+        assert_eq!(rows.len(), 1, "exactly one row should have been cut");
+        assert_eq!(
+            rows[0].detail, "paid-for",
+            "the row written under Pro is the one that must survive"
+        );
+    }
+
+    #[test]
+    fn pro_keeps_a_month_old_row_that_free_would_have_cut() {
+        let mut conn = temp_conn();
+        let day = 24 * 60 * 60 * 1000i64;
+        let now = 100 * day;
+        insert(&mut conn, &entry("prune", "kept"), now - 30 * day, true).expect("insert");
+
+        run_retention(&mut conn, now, true).expect("retention");
+
+        assert_eq!(
+            select(&conn, &ActivityFilter::default()).expect("select").len(),
+            1
+        );
+    }
+
+    #[test]
     fn everything_is_cut_past_the_paid_ceiling() {
         let mut conn = temp_conn();
         let day = 24 * 60 * 60 * 1000i64;
         let now = 500 * day;
-        insert(&mut conn, &entry("prune", "ancient"), now - 400 * day).expect("insert");
+        insert(&mut conn, &entry("prune", "ancient"), now - 400 * day, true).expect("insert");
 
-        run_retention(&mut conn, now).expect("retention");
+        run_retention(&mut conn, now, true).expect("retention");
 
         assert!(
             select(&conn, &ActivityFilter::default()).expect("select").is_empty(),
@@ -703,8 +788,8 @@ mod tests {
         lifecycle.kind = ActivityKind::Lifecycle;
         lifecycle.target = "sha256:two".into();
 
-        insert(&mut conn, &destructive, 1_000).expect("insert");
-        insert(&mut conn, &lifecycle, 2_000).expect("insert");
+        insert(&mut conn, &destructive, 1_000, false).expect("insert");
+        insert(&mut conn, &lifecycle, 2_000, false).expect("insert");
 
         let by_kind = select(
             &conn,
@@ -734,8 +819,8 @@ mod tests {
     #[test]
     fn the_newest_row_is_read_first() {
         let mut conn = temp_conn();
-        insert(&mut conn, &entry("first", "a"), 1_000).expect("insert");
-        insert(&mut conn, &entry("second", "b"), 2_000).expect("insert");
+        insert(&mut conn, &entry("first", "a"), 1_000, false).expect("insert");
+        insert(&mut conn, &entry("second", "b"), 2_000, false).expect("insert");
 
         let rows = select(&conn, &ActivityFilter::default()).expect("select");
         assert_eq!(rows[0].verb, "second");
@@ -746,7 +831,7 @@ mod tests {
         let mut conn = temp_conn();
         let start = std::time::Instant::now();
         for i in 0..1000 {
-            insert(&mut conn, &entry("start", "x"), i).expect("insert");
+            insert(&mut conn, &entry("start", "x"), i, false).expect("insert");
         }
         let elapsed = start.elapsed();
         assert!(

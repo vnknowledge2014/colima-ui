@@ -140,17 +140,38 @@ pub fn build_router() -> Router {
         .route("/api/security/scan/cancel", post(api_security_scan_cancel))
         .route("/api/security/sbom", post(api_security_sbom))
         .route("/api/security/audit", post(api_security_audit))
+        .route("/api/security/triage", post(api_security_triage))
+        .route("/api/security/autofix/propose", post(api_security_autofix_propose))
+        .route("/api/security/history", get(api_security_history))
+        .route("/api/security/policy", get(api_security_policy_list).post(api_security_policy_save))
+        .route("/api/security/policy/delete", post(api_security_policy_delete))
+        .route("/api/security/watch", get(api_security_watch_state).post(api_security_watch_set))
         .route("/api/security/rules", get(api_security_rule_pack))
         .route("/api/security/alternatives", get(api_security_alternatives))
         // Detonation. Start returns a session id immediately; the timeline
         // arrives on SSE, because the interesting part is what happens while
         // the sample runs rather than the value at the end.
+        .route("/api/detonation/start", post(crate::routes::detonation::api_detonation_start))
+        .route("/api/detonation/cancel", post(crate::routes::detonation::api_detonation_cancel))
+        .route("/api/detonation/session", post(crate::routes::detonation::api_detonation_get))
+        .route("/api/detonation/list", get(crate::routes::detonation::api_detonation_list))
+        .route("/api/detonation/export", post(crate::routes::detonation::api_detonation_export))
         // Runtime events. Falco does the detecting; these only read what it
         // wrote and say whether it is in a state where it can detect at all.
+        .route("/api/security/falco/state", get(api_falco_state))
+        .route("/api/security/falco/events", get(api_falco_events))
+        .route("/api/security/falco/watch", get(api_falco_watch_state).post(api_falco_watch))
+        .route("/api/security/falco/explain", post(api_falco_explain))
         // Live metrics: samples arrive on the SSE stream under the
         // `metrics.sample` topic; this only tunes the sampling period.
         .route("/api/metrics/interval", post(api_set_metrics_interval))
+        .route("/api/metrics/history", get(crate::routes::metrics::api_metrics_history))
+        .route("/api/metrics/health", get(crate::routes::metrics::api_metrics_health))
         // Alert rules are the user's own configuration, so these write.
+        .route("/api/alerts/rules", get(crate::routes::metrics::api_alerts_list_rules).post(crate::routes::metrics::api_alerts_save_rule))
+        .route("/api/alerts/rules/delete", post(crate::routes::metrics::api_alerts_delete_rule))
+        .route("/api/alerts/events", get(crate::routes::metrics::api_alerts_events))
+        .route("/api/alerts/backtest", post(crate::routes::metrics::api_alerts_backtest))
         .route("/api/self-heal/rules", get(crate::routes::self_heal::api_self_heal_list_rules).post(crate::routes::self_heal::api_self_heal_save_rule))
         .route("/api/self-heal/log", get(crate::routes::self_heal::api_self_heal_log))
         .route("/api/self-heal/enabled", get(crate::routes::self_heal::api_self_heal_enabled).post(crate::routes::self_heal::api_self_heal_set_enabled))
@@ -177,6 +198,19 @@ pub fn build_router() -> Router {
         .route("/api/compose/logs", get(api_compose_logs))
         .route("/api/compose/ps", get(api_compose_ps))
         .route("/api/compose/diagnose", post(api_compose_diagnose))
+        .route("/api/compose/autofix/propose", post(api_compose_autofix_propose))
+        .route("/api/compose/autofix/apply", post(api_compose_autofix_apply))
+        .route("/api/compose/autofix/undo", post(api_compose_autofix_undo))
+        .route("/api/compose/autofix/history", get(api_compose_autofix_history))
+        .route("/api/pro/status", get(crate::pro::api_pro_status))
+        .route("/api/subscription", get(crate::subscription::api_subscription_state))
+        .route("/api/subscription/store", post(crate::subscription::api_subscription_store))
+        .route(
+            "/api/telemetry/consent",
+            get(crate::telemetry::api_telemetry_consent).post(crate::telemetry::api_telemetry_set_consent),
+        )
+        .route("/api/telemetry/should-prompt", get(crate::telemetry::api_telemetry_should_prompt))
+        .route("/api/telemetry/preview", get(crate::telemetry::api_telemetry_preview))
         // Kubernetes
         .route("/api/k8s/check", get(api_k8s_check))
         .route("/api/k8s/namespaces", get(api_k8s_namespaces))

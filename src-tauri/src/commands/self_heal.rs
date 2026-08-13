@@ -35,6 +35,12 @@
 //! that decision was keeping user configuration out of the prunable metrics
 //! store, and `knowledge.db` satisfies it; inventing a third file to match a
 //! name would split configuration across two places for nothing.
+//!
+//! ## Entitlement is checked when the action runs
+//!
+//! Not when the rule is registered. A subscription that lapses overnight has to
+//! stop the executor, and a check performed at startup would let it keep acting
+//! for as long as the process lives. See [`HealExecutor::run`].
 
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -197,6 +203,8 @@ pub enum HealOutcome {
     Suggested,
     /// Would have acted, but the hourly quota was already spent.
     QuotaBlocked,
+    /// Would have acted, but the subscription had lapsed by the time it ran.
+    NotEntitled,
     /// Would have acted, but the kill switch was off.
     SwitchedOff,
 }
@@ -204,11 +212,12 @@ pub enum HealOutcome {
 impl HealOutcome {
     /// Every variant, so the quota query can ask which ones spend budget
     /// instead of repeating the list in SQL.
-    const ALL: [Self; 5] = [
+    const ALL: [Self; 6] = [
         Self::Executed,
         Self::Failed,
         Self::Suggested,
         Self::QuotaBlocked,
+        Self::NotEntitled,
         Self::SwitchedOff,
     ];
 
@@ -218,6 +227,7 @@ impl HealOutcome {
             Self::Failed => "failed",
             Self::Suggested => "suggested",
             Self::QuotaBlocked => "quota_blocked",
+            Self::NotEntitled => "not_entitled",
             Self::SwitchedOff => "switched_off",
         }
     }
@@ -227,6 +237,7 @@ impl HealOutcome {
             "executed" => Self::Executed,
             "failed" => Self::Failed,
             "quota_blocked" => Self::QuotaBlocked,
+            "not_entitled" => Self::NotEntitled,
             "switched_off" => Self::SwitchedOff,
             _ => Self::Suggested,
         }
@@ -610,8 +621,9 @@ pub struct Firing {
 
 /// Runs a firing through the same path whether it acts or only advises.
 ///
-/// The gates are ordered by what they protect: the kill switch first, because a
-/// person asking it to stop outranks everything; quota last, because it only
+/// The gates are ordered by what they protect: the kill switch first because a
+/// person asking it to stop outranks everything, entitlement next because
+/// acting without it is acting without permission, quota last because it only
 /// limits how often something already permitted may happen.
 pub async fn execute(firing: Firing) -> HealOutcome {
     let rule = &firing.rule;
@@ -622,6 +634,8 @@ pub async fn execute(firing: Firing) -> HealOutcome {
         // The advisory path. Note there is no `else` below that can run an
         // advisory action: `SuggestPrune` and `SuggestMemLimit` end here.
         HealOutcome::Suggested
+    } else if !crate::commands::metrics_store::entitled_now() {
+        HealOutcome::NotEntitled
     } else if quota_spent(rule) {
         HealOutcome::QuotaBlocked
     } else {
@@ -636,6 +650,9 @@ pub async fn execute(firing: Firing) -> HealOutcome {
             "{} — blocked, already acted {} times this hour",
             firing.detail, rule.max_per_hour
         ),
+        HealOutcome::NotEntitled => {
+            format!("{} — not run, subscription is not active", firing.detail)
+        }
         HealOutcome::SwitchedOff => format!("{} — not run, self-healing is off", firing.detail),
         _ => firing.detail.clone(),
     };
@@ -872,13 +889,34 @@ pub async fn sweep_unhealthy() {
     }
 }
 
-/// What can be said about a memory-limit suggestion without recorded history.
+/// The real numbers behind a memory-limit suggestion.
 ///
-/// Sizing a limit takes a peak to multiply, and peaks come from stored metric
-/// samples, which this build does not keep. Saying so beats inventing a number:
-/// a suggestion the user cannot check is a suggestion they should not follow.
-fn suggest_mem_limit_detail(_container_id: &str) -> String {
-    "killed for using too much memory; no recorded history to size a new limit from".into()
+/// Peak of the last seven days times 1.3. Falls back to saying so when there is
+/// no history, rather than inventing a number: a suggestion the user cannot
+/// check is a suggestion they should not follow.
+fn suggest_mem_limit_detail(container_id: &str) -> String {
+    let now = now_ms();
+    let week_ago = now - 7 * 24 * 60 * 60 * 1000;
+    match crate::commands::metrics_store::history(week_ago, now, &[container_id.to_string()]) {
+        Ok(series) => {
+            let peak = series
+                .points
+                .iter()
+                .map(|p| p.mem_bytes)
+                .max()
+                .unwrap_or_default();
+            if peak <= 0 {
+                return "killed for using too much memory; no recorded history to size a new limit from".into();
+            }
+            let suggested = (peak as f64 * 1.3) as i64;
+            format!(
+                "killed for using too much memory; peak over 7 days was {} MB, so a limit of about {} MB would hold it",
+                peak / 1_048_576,
+                suggested / 1_048_576
+            )
+        }
+        Err(_) => "killed for using too much memory; metric history is unavailable".into(),
+    }
 }
 
 /// Poll the conditions that no event reports.
@@ -1016,6 +1054,9 @@ pub async fn self_heal_recent_log(
 }
 
 /// Whether self-healing may act.
+///
+/// Deliberately not gated on entitlement: a person whose subscription lapsed
+/// still has to be able to see that the switch is off, and to turn it off.
 #[tauri::command]
 pub async fn self_heal_is_enabled() -> bool {
     is_enabled()
@@ -1065,6 +1106,7 @@ mod tests {
         assert!(HealOutcome::Failed.spends_quota());
         assert!(!HealOutcome::QuotaBlocked.spends_quota());
         assert!(!HealOutcome::Suggested.spends_quota());
+        assert!(!HealOutcome::NotEntitled.spends_quota());
         assert!(!HealOutcome::SwitchedOff.spends_quota());
     }
 

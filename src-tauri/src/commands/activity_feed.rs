@@ -1,19 +1,19 @@
-//! One timeline, read from two stores.
+//! One timeline, read from five stores.
 //!
-//! Each store was built for its own question — "what did the user do to this
-//! machine", "what did self-healing do" — and each answers it well. Neither
-//! answers *what happened to this machine, in order*, because that answer is
-//! spread across both.
+//! Each store was built for its own question — "how has this image's score
+//! moved", "which alerts fired", "what did self-healing do" — and each answers
+//! it well. None of them answers *what happened to this machine, in order*,
+//! because that answer is spread across all five.
 //!
-//! This module does not add a third store. It reads the two, normalises them to
-//! one shape, and merges. Writing a combined table instead would mean every
+//! This module does not add a sixth store. It reads the five, normalises them
+//! to one shape, and merges. Writing a combined table instead would mean every
 //! action is recorded twice and the two copies can disagree; a read-time merge
 //! cannot drift from its own sources.
 //!
 //! # A failing source must be visible
 //!
-//! If one store is locked, the timeline is still built from the other — and
-//! says so. A timeline that silently drops a source reads as "nothing
+//! If `security.db` is locked, the timeline is still built from the other four
+//! — and says so. A timeline that silently drops a source reads as "nothing
 //! happened", which is the one thing it must never say when something did.
 //!
 //! # Why anything needs de-duplicating
@@ -164,11 +164,26 @@ pub fn feed(filter: &ActivityFilter) -> Feed {
         Err(e) => partial.push(format!("self-healing log: {e}")),
     }
 
+    match super::alerts::recent_events(read_limit) {
+        Ok(rows) => items.extend(rows.into_iter().map(from_alert)),
+        Err(e) => partial.push(format!("alerts: {e}")),
+    }
+
+    match super::security_history::recent(read_limit) {
+        Ok(rows) => items.extend(rows.into_iter().map(from_scan)),
+        Err(e) => partial.push(format!("scan history: {e}")),
+    }
+
+    match super::compose_autofix_apply::history_records() {
+        Ok(rows) => items.extend(rows.into_iter().filter_map(from_compose_fix)),
+        Err(e) => partial.push(format!("compose fixes: {e}")),
+    }
+
     // Every filter applies to every source, not only to the one that can
     // express it as SQL. `activity::query` already narrowed its own rows; the
-    // self-healing log cannot, so the same conditions are re-applied here.
-    // Without this, choosing "Lifecycle" still returned every heal entry — a
-    // filter that visibly does nothing to half the list.
+    // other four cannot, so the same conditions are re-applied here. Without
+    // this, choosing "Lifecycle" still returned every alert, scan and compose
+    // fix — a filter that visibly does nothing to four fifths of the list.
     if let Some(kind) = filter.kind.as_deref() {
         // `as_str`, not `Debug`: the two agree for today's single-word variants
         // but would diverge the moment one has two words — which is exactly how
@@ -240,12 +255,94 @@ fn from_heal(r: super::self_heal::HealLogEntry) -> FeedItem {
             // rather than a refusal.
             HealOutcome::Suggested => ActivityOutcome::Denied,
             HealOutcome::QuotaBlocked
+            | HealOutcome::NotEntitled
             | HealOutcome::SwitchedOff => ActivityOutcome::Denied,
         },
         detail: format!("{}: {}", r.rule_name, r.detail),
         duration_ms: None,
         merged_from: vec![],
     }
+}
+
+fn from_alert(r: super::alerts::AlertEvent) -> FeedItem {
+    let (target_kind, target, target_name) = match &r.image_ref {
+        Some(image) => ("image".to_string(), image.clone(), image.clone()),
+        None => ("container".to_string(), r.container_id, r.container_name),
+    };
+    FeedItem {
+        id: format!("alert-{}", r.id),
+        ts: r.ts,
+        source: FeedSource::Alert,
+        // An alert changes nothing; it reports. Config is the closest of the
+        // four buckets to "the machine told you something".
+        kind: ActivityKind::Config,
+        verb: "alert".to_string(),
+        target_kind,
+        target,
+        target_name,
+        actor: ActivityActor::App,
+        outcome: ActivityOutcome::Ok,
+        detail: format!(
+            "{} — {} crossed {} ({})",
+            r.rule_name,
+            r.metric.as_str(),
+            r.threshold,
+            r.value
+        ),
+        duration_ms: None,
+        merged_from: vec![],
+    }
+}
+
+fn from_scan(r: super::security_history::ScanRun) -> FeedItem {
+    FeedItem {
+        id: format!("scan-{}-{}", r.image_digest, r.scanned_at),
+        ts: r.scanned_at,
+        source: FeedSource::SecurityScan,
+        kind: ActivityKind::Task,
+        verb: "scan".to_string(),
+        target_kind: "image".to_string(),
+        target: r.image_digest,
+        target_name: r.image_ref,
+        actor: ActivityActor::User,
+        outcome: ActivityOutcome::Ok,
+        detail: format!(
+            "scored {} — {} critical, {} high",
+            r.score, r.critical, r.high
+        ),
+        duration_ms: None,
+        merged_from: vec![],
+    }
+}
+
+/// Compose fixes store their time as RFC 3339 text, which has to become
+/// milliseconds to sit on the same axis. A record whose timestamp cannot be
+/// parsed is dropped rather than placed at the epoch, where it would claim to
+/// be the oldest thing that ever happened.
+fn from_compose_fix(r: super::compose_autofix_apply::FixRecord) -> Option<FeedItem> {
+    let ts = chrono::DateTime::parse_from_rfc3339(&r.applied_at)
+        .ok()?
+        .timestamp_millis();
+    Some(FeedItem {
+        id: format!("compose-{}", r.fix_id),
+        ts,
+        source: FeedSource::ComposeFix,
+        kind: ActivityKind::Config,
+        verb: if r.undone { "undo-fix" } else { "fix" }.to_string(),
+        target_kind: "compose".to_string(),
+        target: r.file_path.clone(),
+        target_name: r
+            .file_path
+            .rsplit('/')
+            .next()
+            .unwrap_or(&r.file_path)
+            .to_string(),
+        actor: ActivityActor::User,
+        outcome: ActivityOutcome::Ok,
+        detail: r.explanation,
+        duration_ms: None,
+        merged_from: vec![],
+    })
 }
 
 /// Render the timeline as CSV.
@@ -292,6 +389,16 @@ pub async fn activity_export(
     format: String,
     overwrite: Option<bool>,
 ) -> Result<String, crate::error::ColimaError> {
+    // Exporting is the Pro half of this feature; reading the timeline is not.
+    // Checked here rather than borrowing another module's guard, which would
+    // tell the user their *security policy* needs a subscription when they
+    // asked to export their history.
+    if !super::metrics_store::entitled_now() {
+        return Err(crate::error::ColimaError::validation(
+            "Exporting the activity history needs an active subscription",
+        ));
+    }
+
     crate::helpers::run_blocking(move || {
         if dest_dir.trim().is_empty() || file_name.trim().is_empty() {
             return Err("Choose a folder and a file name".to_string());
@@ -441,11 +548,12 @@ mod tests {
     fn a_heal_that_was_blocked_is_not_reported_as_done() {
         use super::super::self_heal::{HealAction, HealLogEntry, HealMode};
 
-        // The quota and the kill switch both mean the app did nothing.
+        // Quota, entitlement and the kill switch all mean the app did nothing.
         // Rendering those as `Ok` had the timeline claim a restart that never
         // happened.
         for outcome in [
             HealOutcome::QuotaBlocked,
+            HealOutcome::NotEntitled,
             HealOutcome::SwitchedOff,
             HealOutcome::Suggested,
         ] {

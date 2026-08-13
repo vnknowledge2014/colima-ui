@@ -445,6 +445,14 @@ pub async fn sample_now() -> Result<Vec<MetricSample>, String> {
         .map_err(|e| e.to_string())
 }
 
+/// The instant a batch describes.
+///
+/// Taken from the samples rather than from the clock, so an alert's duration
+/// arithmetic uses the same timeline the samples were stamped with.
+fn ts_of(samples: &[MetricSample]) -> i64 {
+    samples.first().map_or(0, |s| s.ts)
+}
+
 async fn collect_once() {
     TICKS.fetch_add(1, Ordering::Relaxed);
 
@@ -465,6 +473,12 @@ async fn collect_once() {
     if let Some(writer) = writer {
         writer(&samples);
     }
+
+    // Alerts read the same batch rather than querying the database afterwards:
+    // the data is already here, and a poller would have to guess how far back to
+    // look. Cheap enough to sit on the tick — one pass over rules × containers,
+    // and it returns immediately when no rule exists.
+    crate::commands::alerts::on_batch(&samples, ts_of(&samples));
 
     crate::sse::publish_sse_event(
         TOPIC,

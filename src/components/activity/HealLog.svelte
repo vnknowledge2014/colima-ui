@@ -5,8 +5,8 @@
    * Blocked firings are listed beside executed ones rather than filtered out.
    * A log that only records successes cannot answer the question people
    * actually bring to it — "why did nothing happen?" — and the answers here
-   * (quota spent, switch off) are the ones that make the difference between a
-   * broken feature and one working as configured.
+   * (quota spent, subscription lapsed, switch off) are the ones that make the
+   * difference between a broken feature and one working as configured.
    */
   import { t } from "../../lib/i18n.svelte";
   import type { HealLogEntry, HealOutcome } from "../../lib/api/self-heal";
@@ -23,6 +23,8 @@
         return t("self_heal.outcome_suggested", { default: "suggested" });
       case "quota_blocked":
         return t("self_heal.outcome_quota", { default: "over hourly limit" });
+      case "not_entitled":
+        return t("self_heal.outcome_not_entitled", { default: "not subscribed" });
       case "switched_off":
         return t("self_heal.outcome_off", { default: "switched off" });
     }

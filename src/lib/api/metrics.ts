@@ -127,6 +127,48 @@ export function subscribeMetrics(handlers: MetricsHandlers): () => void {
   };
 }
 
+// ===== History (Pro) =====
+
+export interface HistoryPoint {
+  ts: number;
+  containerId: string;
+  cpuPct: number;
+  memBytes: number;
+  memPct: number;
+  netRxBytes: number;
+  netTxBytes: number;
+  blockReadBytes: number;
+  blockWriteBytes: number;
+}
+
+export interface HistorySeries {
+  /**
+   * `raw` (the collector's tick) or `1m` (per-minute averages). Say which: a
+   * one-minute average is a different claim from a two-second sample.
+   */
+  resolution: "raw" | "1m";
+  /**
+   * Break the line when two points are further apart than this. Interpolating
+   * across a gap draws data nobody collected — usually while the machine slept.
+   */
+  expectedStepMs: number;
+  points: HistoryPoint[];
+  /** Names for every container id, including ones since deleted. */
+  names: Record<string, string>;
+}
+
+/** Why history might have holes. */
+export interface WriterHealth {
+  acceptedBatches: number;
+  /** Lost because the disk could not keep up — a real hole in the data. */
+  droppedBatches: number;
+  /** Not written because Pro had lapsed. A different sentence entirely. */
+  skippedBatches: number;
+  dbBytes: number;
+  /** False when this build is not recording history at all. */
+  writing: boolean;
+}
+
 export const metricsApi = {
   /** Sampling period, in milliseconds. Clamped by the backend. */
   setInterval: (ms: number) =>
@@ -140,4 +182,84 @@ export const metricsApi = {
    */
   containerTop: (containerId: string) =>
     call<string>("container_top", { containerId }, "GET", "/api/containers/top", { containerId }),
+
+  history: (fromMs: number, toMs: number, containerIds: string[] = []) =>
+    call<HistorySeries>("", undefined, "GET", "/api/metrics/history", {
+      from: String(fromMs),
+      to: String(toMs),
+      ...(containerIds.length ? { containers: containerIds.join(",") } : {}),
+    }),
+
+  health: () => call<WriterHealth>("", undefined, "GET", "/api/metrics/health"),
+};
+
+// ===== Alerts (Pro) =====
+
+export type AlertMetric = "cpu_pct" | "mem_pct" | "mem_bytes";
+
+export interface AlertRule {
+  /** 0 for a rule that has not been saved yet. */
+  id: number;
+  name: string;
+  metric: AlertMetric;
+  threshold: number;
+  /** The threshold must hold this long before the rule fires. */
+  durationSecs: number;
+  /** Silence after firing, so one incident is one notification. */
+  cooldownSecs: number;
+  /** Absent means every container. */
+  containerId?: string;
+  enabled: boolean;
+}
+
+export interface AlertEvent {
+  id: number;
+  ruleId: number;
+  ruleName: string;
+  containerId: string;
+  containerName: string;
+  ts: number;
+  value: number;
+  threshold: number;
+  metric: AlertMetric;
+}
+
+export interface BacktestResult {
+  /** How many times this rule would have fired over the stored window. */
+  wouldFire: number;
+  fromMs: number;
+  toMs: number;
+  sampleCount: number;
+}
+
+export const alertsApi = {
+  listRules: () => call<AlertRule[]>("alerts_list_rules", undefined, "GET", "/api/alerts/rules"),
+
+  saveRule: (rule: AlertRule) =>
+    call<number>("alerts_save_rule", { rule }, "POST", "/api/alerts/rules", undefined, rule),
+
+  deleteRule: (id: number) =>
+    call<void>("alerts_delete_rule", { id }, "POST", "/api/alerts/rules/delete", undefined, { id }),
+
+  recentEvents: (limit = 50) =>
+    call<AlertEvent[]>("alerts_recent_events", { limit }, "GET", "/api/alerts/events", {
+      limit: String(limit),
+    }),
+
+  /**
+   * Replay a rule over stored history before saving it.
+   *
+   * This is how somebody picks a sensible threshold on the first try: "80% for
+   * five minutes" means nothing until you know it would have fired eleven times
+   * last week.
+   */
+  backtest: (rule: AlertRule, fromMs: number, toMs: number) =>
+    call<BacktestResult>(
+      "alerts_backtest",
+      { rule, fromMs, toMs },
+      "POST",
+      "/api/alerts/backtest",
+      undefined,
+      { rule, fromMs, toMs },
+    ),
 };

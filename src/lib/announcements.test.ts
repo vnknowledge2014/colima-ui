@@ -33,6 +33,7 @@ import {
   ANNOUNCEMENTS_READ_KEY,
 } from "./announcements";
 import { settingsState } from "./settingsStore.svelte";
+import { proState } from "./pro.svelte";
 import {
   notificationState,
   pushNotification,
@@ -55,12 +56,13 @@ function feed(...items: Announcement[]): AnnouncementFeed {
   return { version: 1, announcements: items };
 }
 
-const ctx = { now: Date.parse("2026-08-12T00:00:00Z"), appVersion: "1.10.0" };
+const ctx = { now: Date.parse("2026-08-12T00:00:00Z"), appVersion: "1.10.0", paid: false };
 
 beforeEach(() => {
   fetchMock.mockReset();
   _resetNotificationsForTest();
   for (const key of Object.keys(settingsState)) delete settingsState[key];
+  proState.paid = false;
 });
 
 describe("compareVersions", () => {
@@ -83,18 +85,14 @@ describe("compareVersions", () => {
 });
 
 describe("visibility", () => {
-  it("shows content addressed to everyone, and to this build's own audience", () => {
-    expect(isVisible(announcement({ audience: null }), ctx)).toBe(true);
-    expect(isVisible(announcement({ audience: "free" }), ctx)).toBe(true);
-  });
-
-  it("hides an audience this build is not part of", () => {
+  it("hides pro content from free installs", () => {
     expect(isVisible(announcement({ audience: "pro" }), ctx)).toBe(false);
+    expect(isVisible(announcement({ audience: "pro" }), { ...ctx, paid: true })).toBe(true);
   });
 
-  it("shows a critical advisory addressed to another audience", () => {
-    // An audience this build has no name for must not be able to hide a
-    // security advisory.
+  it("shows a critical advisory even when entitlement says not paid", () => {
+    // `paid: false` covers both "free" and "the entitlement read failed". A
+    // security advisory must not depend on which of those it was.
     const advisory = announcement({ audience: "pro", severity: "critical" });
     expect(isVisible(advisory, ctx)).toBe(true);
   });

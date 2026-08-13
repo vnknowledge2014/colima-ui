@@ -164,6 +164,86 @@ export interface CatalogSuggestions {
   alternatives: Alternative[];
 }
 
+// A security patch is a compose patch with a rule attached: one patch shape and
+// one apply path, so a fix cannot go wrong in two different ways.
+import type { ComposePatch } from "./compose";
+
+/** How much work a fix is. Mirrors `Effort` in `security_triage.rs`. */
+export type Effort = "oneclick" | "review" | "manual";
+
+/** Mirrors `TriageItem` in `security_triage.rs`. */
+export interface TriageItem {
+  ruleId: string;
+  title: string;
+  severity: Severity;
+  component: RuleComponent;
+  effort: Effort;
+  /** Points the total gains if this rule alone starts passing. Measured by
+   *  re-scoring — never a model's estimate. */
+  scoreDeltaEst: number;
+  whyFirst: string;
+  remediation: string;
+  evidence?: string;
+}
+
+/** Mirrors `TriageResult` in `security_triage.rs`. */
+export interface TriageResult {
+  items: TriageItem[];
+  currentScore: number;
+  /** Upper bound: every listed fix done. */
+  potentialScore: number;
+  /** Redacted. Nothing is sent until the user asks. */
+  llmPayloadPreview: string;
+}
+
+/** Mirrors `SecurityPatch` in `security_autofix.rs`. */
+export interface SecurityPatch {
+  rule_id: string;
+  patch: ComposePatch;
+  /** False when applying could break a build that currently works. */
+  auto_applicable: boolean;
+  risk_note?: string | null;
+}
+
+/** Mirrors `ScanRun` in `security_history.rs`. */
+export interface ScanRun {
+  imageRef: string;
+  imageDigest: string;
+  score: number;
+  breakdownJson: string;
+  /** Two runs are only comparable under the same pack and scanner. */
+  packVersion: string;
+  scanner: string;
+  scannerVersion: string;
+  dbSnapshotDate?: string | null;
+  critical: number;
+  high: number;
+  medium: number;
+  low: number;
+  scannedAt: number;
+}
+
+/** Mirrors `PolicyRule` in `security_policy.rs`. */
+export interface PolicyRule {
+  id: number;
+  name: string;
+  /** `*`, a `prefix*`, or an exact image reference. */
+  pattern: string;
+  minScore?: number;
+  maxSeverity?: Severity;
+  /** Warn is the only action. Blocking is a separate decision, not yet taken. */
+  action: "warn";
+  enabled: boolean;
+}
+
+/** Mirrors `WatchState` in `security_watch.rs`. */
+export interface WatchState {
+  enabled: boolean;
+  intervalHours: number;
+  /** Whether a thread is alive — not the same as `enabled` once Pro lapses. */
+  running: boolean;
+}
+
 export const securityApi = {
   /**
    * Scan one image. `scanId` is chosen by the caller so the scan can be
@@ -198,6 +278,66 @@ export const securityApi = {
 
   /** The rule pack this build carries: titles, rationale, remediation. */
   rules: () => call<RulePack>("security_rule_pack", undefined, "GET", "/api/security/rules"),
+
+  /** This image's recorded scans, oldest first. Pro. */
+  history: (imageDigest: string) =>
+    call<ScanRun[]>("security_score_history", { imageDigest }, "GET", "/api/security/history", {
+      imageDigest,
+    }),
+
+  policyList: () =>
+    call<PolicyRule[]>("security_policy_list", undefined, "GET", "/api/security/policy"),
+  policySave: (rule: PolicyRule) =>
+    call<number>("security_policy_save", { rule }, "POST", "/api/security/policy", undefined, rule),
+  policyDelete: (id: number) =>
+    call<boolean>("security_policy_delete", { id }, "POST", "/api/security/policy/delete", undefined, {
+      id,
+    }),
+
+  /**
+   * Scheduled rescans. Reading the state is never gated, and neither is
+   * switching them **off** — a stop control behind the gate of the feature it
+   * stops leaves a lapsed user watching a job they cannot reach.
+   */
+  watchState: () => call<WatchState>("security_watch_state", undefined, "GET", "/api/security/watch"),
+  watchSetEnabled: (enabled: boolean) =>
+    call<WatchState>("security_watch_set_enabled", { enabled }, "POST", "/api/security/watch", undefined, {
+      enabled,
+    }),
+  watchSetInterval: (hours: number) =>
+    call<WatchState>("security_watch_set_interval", { hours }, "POST", "/api/security/watch", undefined, {
+      intervalHours: hours,
+    }),
+
+  /**
+   * Order this image's failing rules by what fixing each is worth.
+   *
+   * The audit is sent back rather than re-run: triage is a re-scoring of a
+   * result the caller already holds, and scanning again would be both slower
+   * and a different measurement.
+   */
+  triage: (audit: SecurityAudit, level: Level = "l1") =>
+    call<TriageResult>("security_triage", { audit, level }, "POST", "/api/security/triage", undefined, {
+      audit,
+      level,
+    }),
+
+  /**
+   * Concrete Dockerfile patches for the rules that have one.
+   *
+   * Takes a path, not the file's text: the backend reads it, so the contents
+   * never travel through the client, and the name is checked before anything
+   * is opened.
+   */
+  autofixPropose: (dockerfilePath: string) =>
+    call<SecurityPatch[]>(
+      "security_autofix_propose",
+      { dockerfilePath },
+      "POST",
+      "/api/security/autofix/propose",
+      undefined,
+      { dockerfilePath },
+    ),
 
   /**
    * Base images worth considering instead of this one.

@@ -5,6 +5,8 @@ use axum::{
 };
 use crate::api_server::*;
 use crate::commands::compose;
+use crate::commands::compose_autofix;
+use crate::commands::compose_autofix_apply;
 use crate::commands::compose_diagnose;
 use crate::routes::payloads::*;
 
@@ -60,6 +62,52 @@ pub async fn api_compose_diagnose(
     Json(body): Json<ComposeDiagnoseBody>,
 ) -> (StatusCode, Json<ApiResponse<compose_diagnose::ComposeDiagnosis>>) {
     match compose_diagnose::compose_diagnose(body.file_path).await {
+        Ok(out) => ok(out),
+        Err(e) => err(e.to_string()),
+    }
+}
+
+
+pub async fn api_compose_autofix_propose(
+    Json(body): Json<ComposeDiagnoseBody>,
+) -> (StatusCode, Json<ApiResponse<compose_autofix::AutofixProposal>>) {
+    match compose_autofix::compose_autofix_propose(body.file_path).await {
+        Ok(out) => ok(out),
+        Err(e) => err(e.to_string()),
+    }
+}
+
+
+pub async fn api_compose_autofix_apply(
+    Json(body): Json<ComposeAutofixApplyBody>,
+) -> (StatusCode, Json<ApiResponse<compose_autofix_apply::FixRecord>>) {
+    match compose_autofix_apply::compose_autofix_apply(
+        body.file_path,
+        body.new_content,
+        body.explanation,
+        body.declared_removals,
+    )
+    .await
+    {
+        Ok(out) => ok(out),
+        Err(e) => err(e.to_string()),
+    }
+}
+
+
+pub async fn api_compose_autofix_undo(
+    Json(body): Json<ComposeAutofixUndoBody>,
+) -> (StatusCode, Json<ApiResponse<compose_autofix_apply::FixRecord>>) {
+    match compose_autofix_apply::compose_autofix_undo(body.fix_id).await {
+        Ok(out) => ok(out),
+        Err(e) => err(e.to_string()),
+    }
+}
+
+
+pub async fn api_compose_autofix_history(
+) -> (StatusCode, Json<ApiResponse<Vec<compose_autofix_apply::FixRecord>>>) {
+    match compose_autofix_apply::compose_autofix_history().await {
         Ok(out) => ok(out),
         Err(e) => err(e.to_string()),
     }

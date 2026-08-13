@@ -79,7 +79,7 @@ describe("isSafeExternalUrl", () => {
 describe("isAllowedAnnouncementLink", () => {
   it("allows the vendor's own hosts", () => {
     expect(isAllowedAnnouncementLink("https://github.com/x/y/releases")).toBe(true);
-    expect(isAllowedAnnouncementLink("https://www.github.com/x/y")).toBe(true);
+    expect(isAllowedAnnouncementLink("https://polar.sh/portal")).toBe(true);
   });
 
   it("refuses a host that is merely similar", () => {

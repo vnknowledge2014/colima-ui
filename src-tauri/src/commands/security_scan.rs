@@ -728,6 +728,22 @@ pub fn audit_image_blocking(
     let score = crate::commands::security_score::score(&scan, &evaluation, level);
     let audit = SecurityAudit { scan, evaluation, score };
 
+    // History is written here rather than at each transport, because there are
+    // three ways in — two commands and the background watcher — and a trend
+    // with holes in it where one caller forgot is worse than no trend.
+    //
+    // Only for entitled installs. A Free install accumulating a history it
+    // cannot open would be collecting data for no one, and `metrics_store` set
+    // the precedent: no entitlement, no store on disk at all.
+    if crate::commands::metrics_store::entitled_now_cached() {
+        if let Err(e) = crate::commands::security_history::record_audit(&audit, now_ms) {
+            // A scan the user asked for must not fail because the history
+            // could not be written; the result in hand is still the answer.
+            eprintln!("security history: cannot record run: {e}");
+        }
+        crate::commands::security_policy::evaluate_and_warn(&audit, now_ms);
+    }
+
     Ok(audit)
 }
 

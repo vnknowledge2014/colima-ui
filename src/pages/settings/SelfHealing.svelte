@@ -2,20 +2,28 @@
   /**
    * Self-healing: the few repairs this app may make on its own.
    *
-   * ## The brake sits above everything it stops
+   * ## The brake is outside the gate, but only where there is something to brake
    *
-   * The master switch renders first and unconditionally — outside the disclosure
-   * below it. It is the control that stops every rule at once, including
-   * anything already waiting to run, so it must never be nested inside
-   * something that can stop rendering. Somebody who wants it off must not have
-   * to expand anything to find it.
+   * The master switch renders above `ProGate`, never inside it. A gate that has
+   * locked renders its upsell *instead of* its children, so a switch placed in
+   * there would vanish exactly when a lapsed subscription left rules configured
+   * and a user wanting them stopped. Configuration is gated; the brake is not.
    *
-   * ## The rules are folded away, and say what they are doing while folded
+   * That is not the same as showing the brake to everybody. Somebody who never
+   * subscribed has every rule at Suggest and an executor that refuses on
+   * entitlement, so there is nothing for them to stop — and a live switch above
+   * an upsell reads as a working feature they are being asked to pay for again.
+   * The condition is therefore "could this be acting": paid, or holding a rule
+   * that was set to Auto while it was paid. Derived from state already loaded,
+   * so no subscription history has to be kept to answer it.
    *
-   * Five rules with four controls each is the longest thing on the Settings
-   * page, and most visits are not about editing them. The summary carries the
-   * part that matters at a glance — how many rules can act on their own — so
-   * collapsing hides detail rather than hiding state.
+   * ## The badge has to be drawn here
+   *
+   * `ProGate` only renders `ProBadge` on its locked and needs-update branches;
+   * when unlocked it renders its children bare. A paying customer would
+   * otherwise see this section with no mark at all, indistinguishable from a
+   * free setting — so the badge is drawn beside the heading instead of being
+   * left to the gate.
    *
    * ## Turning a rule to Auto is a decision, so it is asked as one
    *
@@ -38,6 +46,9 @@
   import { uiState } from "../../store.svelte";
   import { globalToast } from "../../lib/globalToast";
   import { t } from "../../lib/i18n.svelte";
+  import { isPaid } from "../../lib/pro.svelte";
+  import ProBadge from "../../components/pro/ProBadge.svelte";
+  import ProGate from "../../components/ProGate.svelte";
   import SettingsSection from "../../components/settings/SettingsSection.svelte";
   import HealLog from "../../components/activity/HealLog.svelte";
 
@@ -47,13 +58,16 @@
   let loaded = $state(false);
   /** The rule awaiting confirmation of its move to Auto. */
   let confirming = $state<HealRule | null>(null);
-  /** Rules start folded: the summary answers the usual question on its own. */
-  let showRules = $state(false);
 
-  /** Rules that are switched on *and* allowed to act without being asked. */
-  const actingCount = $derived(
-    rules.filter((r) => r.enabled && r.mode === "auto").length,
-  );
+  /**
+   * Whether self-healing could be acting on this machine, and therefore whether
+   * there is anything for the master switch to stop.
+   *
+   * An Auto rule outlives the subscription that allowed it to be set, which is
+   * exactly the state the always-visible brake exists for. A never-subscribed
+   * install has neither, so it gets the honest upsell and no switch.
+   */
+  const canAct = $derived(isPaid() || rules.some((r) => r.mode === "auto"));
 
   /** The section card, so the Activity banner's link can scroll to it. */
   let sectionEl = $state<HTMLDivElement | null>(null);
@@ -181,6 +195,10 @@
   }
 </script>
 
+<!--
+  Outside ProGate on purpose — see the docblock. This is the control that stops
+  the feature, and it has to survive the feature becoming unavailable.
+-->
 <SettingsSection
   bind:el={sectionEl}
   title={t("self_heal.title", { default: "Self-healing" })}
@@ -190,54 +208,44 @@
       "Rules that repair a container for you. Every rule only suggests until you say otherwise.",
   })}
 >
-  <label class="master">
-    <input
-      class="checkbox"
-      type="checkbox"
-      checked={enabled}
-      onchange={(e) => toggleMaster(e.currentTarget.checked)}
-    />
-    <span>
-      <strong>{t("self_heal.master", { default: "Allow self-healing to act" })}</strong>
-      <small>
-        {t("self_heal.master_hint", {
-          default:
-            "Off stops every rule immediately, including anything waiting to run. Rules keep their settings.",
-        })}
-      </small>
-    </span>
-  </label>
+  {#if isPaid()}
+    <!-- ProGate draws no badge once unlocked, so a paying customer would see
+         this section unmarked. Drawn here rather than by changing the shared
+         gate, whose locked branch already carries one. -->
+    <div class="pro-mark"><ProBadge /></div>
+  {/if}
 
-  {#if !loaded}
-    <p class="hint-text">{t("self_heal.loading", { default: "Loading…" })}</p>
-  {:else}
-    <button
-      type="button"
-      class="rules-toggle"
-      aria-expanded={showRules}
-      onclick={() => (showRules = !showRules)}
-    >
-      <span class="caret" class:open={showRules}>▾</span>
-      <span class="rules-summary">
-        {t("self_heal.rules_count", {
-          count: rules.length,
-          default: `${rules.length} rules`,
-        })}
-        <!-- The number that decides whether this section needs attention: a
-             rule that only suggests cannot surprise anybody. -->
+  {#if canAct}
+    <label class="master">
+      <input
+        class="checkbox"
+        type="checkbox"
+        checked={enabled}
+        onchange={(e) => toggleMaster(e.currentTarget.checked)}
+      />
+      <span>
+        <strong>{t("self_heal.master", { default: "Allow self-healing to act" })}</strong>
         <small>
-          {actingCount === 0
-            ? t("self_heal.none_acting", { default: "none act on their own" })
-            : t("self_heal.some_acting", {
-                count: actingCount,
-                default: `${actingCount} act on their own`,
-              })}
+          {t("self_heal.master_hint", {
+            default:
+              "Off stops every rule immediately, including anything waiting to run. Rules keep their settings.",
+          })}
         </small>
       </span>
-    </button>
+    </label>
+  {/if}
 
-    {#if showRules}
-    <ul class="rules">
+  <ProGate
+    id="self.healing"
+    feature={t("self_heal.feature", { default: "Self-healing" })}
+    description={t("self_heal.feature_desc", {
+      default: "Let a rule restart what broke, instead of finding it stopped in the morning.",
+    })}
+  >
+    {#if !loaded}
+      <p class="hint-text">{t("self_heal.loading", { default: "Loading…" })}</p>
+    {:else}
+      <ul class="rules">
         {#each rules as rule (rule.id)}
           <li class="rule" class:off={!rule.enabled}>
             <div class="rule-head">
@@ -306,7 +314,7 @@
       <h3 class="log-heading">{t("self_heal.log_heading", { default: "What it has done" })}</h3>
       <HealLog entries={log} />
     {/if}
-  {/if}
+  </ProGate>
 </SettingsSection>
 
 {#if confirming}
@@ -339,38 +347,8 @@
 {/if}
 
 <style>
-  .rules-toggle {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    width: 100%;
-    padding: 8px 4px;
-    background: none;
-    border: none;
-    color: inherit;
-    font: inherit;
-    text-align: left;
-    cursor: pointer;
-  }
-  .caret {
-    color: var(--text-muted);
-    /* Rotated rather than swapped for a second glyph: one character means the
-       arrow cannot end up pointing two ways in two themes. */
-    transition: transform 120ms ease;
-    transform: rotate(-90deg);
-  }
-  .caret.open {
-    transform: rotate(0deg);
-  }
-  .rules-summary {
-    display: flex;
-    align-items: baseline;
-    gap: 8px;
-    font-size: var(--text-sm);
-  }
-  .rules-summary small {
-    color: var(--text-muted);
-    font-size: var(--text-xs);
+  .pro-mark {
+    margin-bottom: 10px;
   }
   .master {
     display: flex;

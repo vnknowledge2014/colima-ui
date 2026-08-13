@@ -33,6 +33,9 @@ const NETWORKS: &str = include_str!("networks.rs");
 const COLIMA: &str = include_str!("colima.rs");
 const FILE_TRANSFER: &str = include_str!("file_transfer.rs");
 const COLIMA_CONFIG: &str = include_str!("colima_config.rs");
+const ALERTS: &str = include_str!("alerts.rs");
+const SECURITY_POLICY: &str = include_str!("security_policy.rs");
+const SECURITY_WATCH: &str = include_str!("security_watch.rs");
 const SELF_HEAL: &str = include_str!("self_heal.rs");
 
 /// Every command that changes the machine, and the source it lives in.
@@ -68,6 +71,11 @@ const MUTATING_COMMANDS: &[(&str, &str)] = &[
     ("start_copy_from_container", FILE_TRANSFER),
     // Config — why the machine behaves differently today.
     ("apply_colima_config", COLIMA_CONFIG),
+    ("alerts_save_rule", ALERTS),
+    ("alerts_delete_rule", ALERTS),
+    ("security_policy_save", SECURITY_POLICY),
+    ("security_policy_delete", SECURITY_POLICY),
+    ("security_watch_set_enabled", SECURITY_WATCH),
 ];
 
 /// The text of one function, from its signature to the closing brace in column
@@ -175,7 +183,7 @@ fn self_heal_records_its_action_using_the_shared_spelling() {
 #[test]
 fn the_list_covers_every_group() {
     assert!(
-        MUTATING_COMMANDS.len() >= 24,
+        MUTATING_COMMANDS.len() >= 29,
         "the list shrank — a command was removed from the guard rather than \
          from the app?"
     );

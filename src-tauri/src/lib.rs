@@ -2,6 +2,10 @@ pub mod error;
 pub mod routes;
 mod api_server;
 pub mod commands;
+pub mod pro;
+pub mod subscription;
+pub mod account_session;
+pub mod telemetry;
 pub mod crash;
 mod docker_state;
 pub mod docker_events;
@@ -28,6 +32,8 @@ use commands::ai_chat;
 use commands::announcements;
 use commands::colima;
 use commands::compose;
+use commands::compose_autofix;
+use commands::compose_autofix_apply;
 use commands::compose_diagnose;
 use commands::containers;
 use commands::diagnostics;
@@ -98,6 +104,13 @@ pub fn run() {
             // Initialize Knowledge Bank (SQLite)
             knowledge_bank::init_knowledge_bank();
 
+            // Record app startup (consent-gated; no-ops unless telemetry is on).
+            // After DB init so the consent read has a table to read from.
+            let app_version = app.package_info().version.to_string();
+            tauri::async_runtime::spawn(async move {
+                telemetry::record_app_started(app_version).await;
+            });
+
             // Start HTTP API server for browser-mode access
             api_server::start_api_server();
             // Start background instance poller
@@ -107,6 +120,14 @@ pub fn run() {
             // client subscribes to the `metrics.sample` topic, so starting it
             // here costs nothing when nobody has opened the Activity page.
             metrics_collector::spawn_collector();
+
+            // Durable history, for installs entitled to it. A Free install
+            // gets no writer and therefore no metrics.db at all.
+            commands::metrics_store::start_if_entitled();
+
+            // Scheduled rescans. A no-op unless the user switched them on, and
+            // the loop re-checks entitlement before every round.
+            commands::security_watch::start();
 
             // Setup DockerState
             use std::sync::Arc;
@@ -122,11 +143,19 @@ pub fn run() {
             });
 
             // Self-healing listens and counts unconditionally; whether anything
-            // is done about what it sees is decided per action, against the kill
-            // switch at the moment of acting.
+            // is done about what it sees is decided per action, against the
+            // kill switch and the subscription at the moment of acting. Wiring
+            // it up on entitlement instead would leave a lapsed install with a
+            // watcher it could not stop.
             commands::self_heal::spawn_watcher();
             commands::self_heal::spawn_sweeper();
 
+            // A detonation instance that outlived its session is a VM holding
+            // RAM with nobody watching it. Teardown covers every path the app
+            // controls; this covers the one it does not — being killed while a
+            // sample was running.
+            commands::detonation::spawn_orphan_sweep();
+            
             // Resource Saver Mode
             let resource_saver_state = Arc::new(RwLock::new(commands::system::ResourceSaverState::default()));
             app.manage(resource_saver_state.clone());
@@ -213,7 +242,32 @@ pub fn run() {
             security_scan::security_scan_cancel,
             security_scan::security_sbom_export,
             security_scan::security_audit_image,
+            commands::security_triage::security_triage,
+            commands::security_triage::security_autofix_propose,
+            commands::security_history::security_score_history,
+            commands::security_policy::security_policy_list,
+            commands::security_policy::security_policy_save,
+            commands::security_policy::security_policy_delete,
+            commands::security_watch::security_watch_state,
+            commands::security_watch::security_watch_set_enabled,
+            commands::security_watch::security_watch_set_interval,
+            commands::detonation::detonation_start,
+            commands::detonation::detonation_cancel,
+            commands::detonation::detonation_get,
+            commands::detonation::detonation_list,
+            commands::detonation::detonation_export,
+            commands::falco_bridge::falco_state,
+            commands::falco_bridge::falco_events,
+            commands::falco_bridge::falco_set_watching,
+            commands::falco_bridge::falco_watching,
+            commands::falco_triage::falco_explain_payload,
             commands::security_rules::security_rule_pack,
+            // Metrics history and alerts (Pro)
+            commands::alerts::alerts_list_rules,
+            commands::alerts::alerts_save_rule,
+            commands::alerts::alerts_delete_rule,
+            commands::alerts::alerts_recent_events,
+            commands::alerts::alerts_backtest,
             // Self-healing rules (Pro; the kill switch is not gated)
             commands::self_heal::self_heal_list_rules,
             commands::self_heal::self_heal_save_rule,
@@ -248,6 +302,28 @@ pub fn run() {
             compose::compose_ps,
             compose_diagnose::compose_validate,
             compose_diagnose::compose_diagnose,
+            compose_autofix::compose_autofix_propose,
+            compose_autofix_apply::compose_autofix_apply,
+            compose_autofix_apply::compose_autofix_undo,
+            compose_autofix_apply::compose_autofix_history,
+            pro::pro_status,
+            telemetry::telemetry_consent,
+            telemetry::telemetry_should_prompt,
+            telemetry::telemetry_set_consent,
+            telemetry::telemetry_preview,
+            telemetry::telemetry_feature_used,
+            telemetry::telemetry_pro_gate_reached,
+            telemetry::telemetry_checkout_opened,
+            subscription::subscription_state,
+            subscription::subscription_store,
+            subscription::subscription_clear,
+            // Account identity (Supabase session storage). Deliberately separate
+            // from `subscription::*` above: the session says who you are, the
+            // subscription cache says what you have paid for.
+            account_session::account_session_available,
+            account_session::account_session_get,
+            account_session::account_session_set,
+            account_session::account_session_delete,
             // Kubernetes commands
             kubernetes::k8s_check,
             kubernetes::k8s_namespaces,

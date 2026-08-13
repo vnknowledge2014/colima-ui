@@ -232,9 +232,10 @@
           was locked for every user including paying ones, while the backend it
           calls (`/api/compose/diagnose`) shipped and worked.
 
-          Diagnosing costs nothing per use: Docker's own validation plus a local
-          Knowledge Bank lookup, no network. The AI step inside the panel runs on
-          the user's own key.
+          `docs/pricing-rationale.md` puts Free at "the whole app as it exists
+          today", and this exists today. It also costs nothing per use: Docker's
+          own validation plus a local Knowledge Bank lookup, no network. The AI
+          step inside the panel is the user's own key.
 
           The Pro offer lives one level down, in `DiagnosePanel`: applying the
           fix, not reading it.

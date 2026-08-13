@@ -19,7 +19,7 @@
    *
    * The banner reports and links to the settings that govern it. Putting a
    * "do it now" button here would be a second path to the same action that the
-   * executor guards with a quota and a kill switch.
+   * executor guards with a quota, a kill switch and an entitlement check.
    */
   import { onMount } from "svelte";
   import { selfHealApi, type HealLogEntry } from "../../lib/api/self-heal";

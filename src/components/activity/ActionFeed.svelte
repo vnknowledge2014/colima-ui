@@ -2,12 +2,16 @@
   /**
    * What was done to this machine, newest first.
    *
-   * Read straight back from the local record, and exportable to JSON or CSV so
-   * the log can leave the app without being retyped.
+   * The list itself is **not** behind a Pro gate. It shows what already
+   * happened on the user's own machine, recorded locally; charging to read it
+   * back would be charging somebody to see their own history. What Pro buys is
+   * reach and export — a longer retention window, and a way to take the log
+   * somewhere else — which is added around this component, not inside it.
    */
   import { activityApi, type ActivityFeed, type ActivityKind, type FeedItem } from "../../lib/api";
   import { globalToast } from "../../lib/globalToast";
   import { t } from "../../lib/i18n.svelte";
+  import ProGate from "../ProGate.svelte";
 
   const isTauri = "__TAURI_INTERNALS__" in window;
   let exporting = $state(false);
@@ -102,13 +106,23 @@
       </button>
     {/each}
 
+    <!-- Only the export is gated. The list beside it stays readable on every
+         install: it is the machine's own record of its own history. -->
     <span class="spacer"></span>
-    <button type="button" class="btn btn-ghost" disabled={exporting} onclick={() => exportFeed("csv")}>
-      {t("activity.actions.export_csv", { default: "Export CSV" })}
-    </button>
-    <button type="button" class="btn btn-ghost" disabled={exporting} onclick={() => exportFeed("json")}>
-      {t("activity.actions.export_json", { default: "Export JSON" })}
-    </button>
+    <ProGate
+      id="activity.export"
+      feature={t("activity.actions.export_feature", { default: "Export history" })}
+      description={t("activity.actions.export_desc", {
+        default: "Take the log somewhere else — JSON or CSV — and keep a longer window of it.",
+      })}
+    >
+      <button type="button" class="btn btn-ghost" disabled={exporting} onclick={() => exportFeed("csv")}>
+        {t("activity.actions.export_csv", { default: "Export CSV" })}
+      </button>
+      <button type="button" class="btn btn-ghost" disabled={exporting} onclick={() => exportFeed("json")}>
+        {t("activity.actions.export_json", { default: "Export JSON" })}
+      </button>
+    </ProGate>
   </div>
 
   {#if feed && feed.partial.length > 0}

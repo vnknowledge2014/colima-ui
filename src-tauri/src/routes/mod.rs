@@ -18,6 +18,7 @@ pub mod networks;
 pub mod topology;
 pub mod models;
 /// History queries for the Activity page.
+pub mod metrics;
 /// Self-healing rules, their log, and the switch that stops them.
 pub mod self_heal;
 /// The local record of what was done to this machine.
@@ -33,6 +34,7 @@ pub mod capabilities;
 /// Image vulnerability scanning and SBOM export.
 pub mod security;
 /// Sessions that run an untrusted image in a disposable isolated instance.
+pub mod detonation;
 /// Host tool detection. Distinct from `capabilities`, which is the static
 /// API schema published for AI agents — the two are unrelated contracts.
 pub mod system_capabilities;

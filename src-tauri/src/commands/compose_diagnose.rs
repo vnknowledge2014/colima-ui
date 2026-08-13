@@ -275,6 +275,12 @@ pub async fn compose_validate(file_path: String) -> Result<ComposeValidation, cr
 /// user decides whether the model is worth asking.
 #[tauri::command]
 pub async fn compose_diagnose(file_path: String) -> Result<ComposeDiagnosis, crate::error::ColimaError> {
+    // Funnel: a Pro-adjacent feature was used. Consent-gated; no free strings.
+    crate::telemetry::record(crate::telemetry::events::TelemetryEvent::FeatureUsed {
+        feature: crate::telemetry::events::Feature::ComposeDiagnose,
+    })
+    .await;
+
     let validation = compose_validate(file_path.clone()).await?;
 
     if validation.valid {

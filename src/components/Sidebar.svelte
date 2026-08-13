@@ -6,6 +6,7 @@
   import { t, getLanguage } from "../lib/i18n.svelte";
   import { dashboardState } from "../store.svelte";
   import type { SystemInfo } from "../lib/api";
+  import UserBadge from "./account/UserBadge.svelte";
   import { Bell } from "./Icons.svelte";
   import {
     unreadCount,
@@ -422,6 +423,10 @@
   </nav>
 
   <div class="sidebar-footer">
+    <!-- Identity, above the machine status: it is about the person, not the VM.
+         Carries no Pro state by design — see UserBadge.svelte. -->
+    <UserBadge />
+
     <!-- Status row. Actionable: a dead "Colima not detected" label told the
          user something was wrong and gave them nowhere to go. -->
     <button
