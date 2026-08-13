@@ -285,6 +285,17 @@
     gap: 8px;
   }
 
+  /* The panel scrolls; it does not squash what it holds.
+     Its children sit on a column flex container's main axis, so they shrink
+     by default once the content is taller than the panel — which flattened the
+     bordered button below the height of its own text. `overflow-y: auto` is
+     the statement of intent: overflow becomes scroll, never compression.
+     Buttons inside `.actions` never showed it because that row is a nested
+     flex container, so their heights are on a different axis. */
+  .node-detail > * {
+    flex-shrink: 0;
+  }
+
   .open-in {
     align-self: flex-start;
   }
