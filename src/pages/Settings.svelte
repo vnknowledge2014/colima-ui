@@ -1,63 +1,16 @@
 <script lang="ts">
-  import { onMount } from "svelte";
-  import { type SystemInfo, dockerApi, aiApi, knowledgeBankApi, sysMethods } from "../lib/api";
-  import { globalToast } from "../lib/globalToast";
-  import { confirm } from "../store/confirm.svelte";
-  import Icon from "../components/Icon.svelte";
+  import { type SystemInfo } from "../lib/api";
   import { setLanguage, getLanguage, t } from "../lib/i18n.svelte";
   import AIPanelSettings from "../components/settings/AIPanelSettings.svelte";
+  import SettingsSection from "../components/settings/SettingsSection.svelte";
+  import UpdateSettings from "../components/settings/UpdateSettings.svelte";
   import ResourceSaverSettings from "../components/settings/ResourceSaverSettings.svelte";
   import TraySettings from "../components/settings/TraySettings.svelte";
+  import NotificationSettings from "../components/settings/NotificationSettings.svelte";
+  import SelfHealing from "./settings/SelfHealing.svelte";
   import ColimaConfig from "./settings/ColimaConfig.svelte";
 
   let { systemInfo } = $props<{ systemInfo: SystemInfo | null }>();
-
-  // Dependency state
-  let diskUsage = $state<DiskUsage[]>([]);
-  let pruning = $state(false);
-
-  onMount(() => {
-    fetchDiskUsage();
-  });
-
-  async function fetchDiskUsage() {
-    try {
-      const raw = await dockerApi.systemDf();
-      if (!raw) return;
-      const text = typeof raw === 'string' ? raw : String(raw);
-      const lines = text.split("\n").filter(l => l.trim());
-      const rows: any[] = [];
-      for (const line of lines) {
-        if (line.startsWith("TYPE") || line.startsWith("---")) continue;
-        const parts = line.split(/\s{2,}/);
-        if (parts.length >= 4) {
-          rows.push({
-            type: parts[0],
-            total: parts[1],
-            active: parts[2],
-            size: parts[3],
-            reclaimable: parts[4] || "0B",
-          });
-        }
-      }
-      diskUsage = rows;
-    } catch { /* ignore */ }
-  }
-
-  async function handlePrune() {
-    const ok = await confirm({ title: "System Prune", message: "Remove all unused Docker data (stopped containers, unused networks, dangling images, build cache)?", confirmText: "Prune All", variant: "warning" });
-    if (!ok) return;
-    pruning = true;
-    try {
-      await dockerApi.systemPrune();
-      globalToast("success", "System pruned successfully");
-      fetchDiskUsage();
-    } catch (e) {
-      globalToast("error", String(e));
-    } finally {
-      pruning = false;
-    }
-  }
 
   // Fix: use version string presence as fallback for installed status in case backend boolean is unreliable
   const deps = $derived([
@@ -78,37 +31,29 @@
   <div style="max-width: 800px; padding-bottom: 60px;">
   
     <!-- Appearance Settings -->
-    <div class="card" style="margin-bottom: 24px; padding: 0;">
-      <div style="padding: 16px 20px; border-bottom: 1px solid var(--border-primary); font-weight: 600; font-size: var(--text-lg); display: flex; align-items: center; gap: 8px;">
-        <Icon name="Settings" size={18} />
-        {t('settings.appearance', { default: 'Appearance' })}
-      </div>
-      <div style="padding: 24px 20px;">
-        <div style="display: flex; flex-direction: column; gap: 16px;">
-          <div style="border-top: 1px solid var(--border-subtle); padding-top: 16px; display: flex; justify-content: space-between; align-items: center;">
-            <div>
-              <div style="font-weight: 500;">{t('settings.language', { default: 'Language' })}</div>
-              <div style="font-size: var(--text-sm); color: var(--text-secondary); margin-top: 2px;">{t('settings.language_desc', { default: 'Change the application language' })}</div>
-            </div>
-            <!-- Fix: .select adds proper arrow icon + appearance:none styling -->
-            <select class="input select" style="width: 200px;" value={getLanguage()} onchange={(e) => {
-              setLanguage(e.currentTarget.value);
-            }}>
-              <option value="en">English</option>
-              <option value="vi">Tiếng Việt</option>
-              <option value="zh">中文</option>
-              <option value="ja">日本語</option>
-            </select>
+    <SettingsSection title={t('settings.appearance', { default: 'Appearance' })} icon="Settings">
+      <div style="display: flex; flex-direction: column; gap: 16px;">
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+          <div>
+            <div style="font-weight: 500;">{t('settings.language', { default: 'Language' })}</div>
+            <div style="font-size: var(--text-sm); color: var(--text-secondary); margin-top: 2px;">{t('settings.language_desc', { default: 'Change the application language' })}</div>
           </div>
+          <select class="input select" style="width: 200px;" value={getLanguage()} onchange={(e) => {
+            setLanguage(e.currentTarget.value);
+          }}>
+            <option value="en">English</option>
+            <option value="vi">Tiếng Việt</option>
+            <option value="zh">中文</option>
+            <option value="ja">日本語</option>
+          </select>
         </div>
       </div>
-    </div>
+    </SettingsSection>
 
   <!-- System Dependencies -->
-  <div class="card" style="margin-bottom: 24px;">
-    <h3 style="font-size: var(--text-lg); font-weight: 600; margin-bottom: 20px;">System Dependencies</h3>
+  <SettingsSection title="System Dependencies">
     <div style="display: flex; flex-direction: column; gap: 0;">
-      {#each deps as dep, i}
+      {#each deps as dep, i (dep.name)}
         <div style="display: flex; justify-content: space-between; align-items: center; padding: 12px 0; border-bottom: {i < deps.length - 1 ? '1px solid var(--border-subtle)' : 'none'};">
           <div>
             <div style="font-weight: 500;">{dep.name}</div>
@@ -127,26 +72,51 @@
         </div>
       {/each}
     </div>
-  </div>
+  </SettingsSection>
 
   <ColimaConfig />
   <TraySettings />
+
+  <NotificationSettings />
+  <SelfHealing />
   <ResourceSaverSettings />
   <AIPanelSettings />
+  <UpdateSettings />
 
   <!-- About -->
-  <div class="card">
-    <h3 style="font-size: var(--text-lg); font-weight: 600; margin-bottom: 16px;">About ColimaUI</h3>
+  <SettingsSection title="About ColimaUI">
     <p style="font-size: var(--text-sm); color: var(--text-secondary); line-height: 1.7; margin: 0;">
       ColimaUI is a cross-platform graphical interface for managing Colima instances,
       Docker containers, Kubernetes clusters, and Linux VMs. Built with Tauri v2 and Svelte 5.
     </p>
     <div style="margin-top: 16px; display: flex; gap: 12px; flex-wrap: wrap;">
-      <span class="badge" style="background: rgba(88, 166, 255, 0.1); color: var(--accent-blue);">v0.1.0</span>
-      <span class="badge" style="background: rgba(188, 140, 255, 0.1); color: var(--accent-purple);">Tauri v2</span>
-      <span class="badge" style="background: rgba(255, 62, 0, 0.1); color: #ff3e00;">Svelte 5</span>
-      <span class="badge" style="background: rgba(63,185,80,0.1); color: var(--accent-green);">Rust</span>
+      <!-- Each tint is mixed from the colour it sits next to, so text and
+           background can never come from two different palettes. Svelte's
+           orange is a brand colour and stays a literal. -->
+      <span class="badge" style="background: color-mix(in srgb, var(--accent-blue) 12%, transparent); color: var(--accent-blue);">v0.1.0</span>
+      <span class="badge" style="background: color-mix(in srgb, var(--accent-purple) 12%, transparent); color: var(--accent-purple);">Tauri v2</span>
+      <span class="badge" style="background: color-mix(in srgb, #ff3e00 12%, transparent); color: #ff3e00;">Svelte 5</span>
+      <span class="badge" style="background: color-mix(in srgb, var(--accent-green) 12%, transparent); color: var(--accent-green);">Rust</span>
     </div>
-    </div>
+  </SettingsSection>
+
+  <!-- Third-party notices. EPL-2.0 obliges us to name the component, state the
+       licence, and point at the source we redistribute. -->
+  <SettingsSection title="Open Source Licenses">
+    <p style="font-size: var(--text-sm); color: var(--text-secondary); line-height: 1.7; margin: 0;">
+      ColimaUI bundles third-party components. Their licenses apply to those components only.
+    </p>
+    <ul style="font-size: var(--text-sm); color: var(--text-secondary); line-height: 1.8; margin: 12px 0 0; padding-left: 18px;">
+      <li>
+        <strong>ELK (elkjs)</strong> — graph layout for the Topology view.
+        Eclipse Public License 2.0 —
+        <a href="https://github.com/kieler/elkjs" target="_blank" rel="noreferrer noopener">github.com/kieler/elkjs</a>
+      </li>
+      <li>
+        <strong>xterm.js</strong> — terminal emulator. MIT License —
+        <a href="https://github.com/xtermjs/xterm.js" target="_blank" rel="noreferrer noopener">github.com/xtermjs/xterm.js</a>
+      </li>
+    </ul>
+  </SettingsSection>
   </div>
 </div>

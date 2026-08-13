@@ -4,8 +4,10 @@
   import { globalToast } from "../lib/globalToast";
   import { resourceState } from "../store.svelte";
   import * as Icons from "../components/Icons.svelte";
+  import RowActions from "../components/RowActions.svelte";
   import { t } from "../lib/i18n.svelte";
   import { blockingCapability, capabilityNotice } from "../store/capabilities.svelte";
+  import { viewInTopology } from "../lib/topology-link";
 
   let searchTerm = $state("");
   let showCreate = $state(false);
@@ -24,7 +26,7 @@
     try {
       const list = await networksApi.listNetworks();
       resourceState.networks = list;
-    } catch (e) {
+    } catch {
       resourceState.networks = [];
     } finally {
       resourceState.networksLoading = false;
@@ -84,7 +86,9 @@
         confirm = null;
         try {
           await executeRemove(name);
-        } catch (e) {}
+        } catch {
+          // A failed single removal surfaces through the toast in executeRemove.
+        }
       },
       onCancel: () => { confirm = null; }
     };
@@ -164,7 +168,7 @@
         batchLoading = true;
         let ok_count = 0;
         for (const name of names) {
-          try { await networksApi.removeNetwork(name); ok_count++; } catch {}
+          try { await networksApi.removeNetwork(name); ok_count++; } catch { /* continue with the rest */ }
         }
         selected = new Set();
         batchLoading = false;
@@ -181,7 +185,8 @@
 
   function toggleSelect(id: string) {
     const next = new Set(selected);
-    next.has(id) ? next.delete(id) : next.add(id);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
     selected = next;
   }
 
@@ -274,15 +279,17 @@
       {/if}
     </div>
   {:else}
-    <div style="display: flex; flex-direction: column; gap: 8px;">
+    <div class="resource-card-list">
       {#each filteredNetworks as net (net.Id)}
-        <div style="padding: 16px; background: {selected.has(net.Id) ? 'rgba(88,166,255,0.06)' : 'var(--bg-secondary)'}; border-radius: 12px; border: {selected.has(net.Id) ? '1px solid rgba(88,166,255,0.25)' : '1px solid var(--border-primary)'}; transition: all 150ms;">
-          <div style="display: flex; justify-content: space-between; align-items: center; gap: 12px;">
-            <div style="display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0;">
+        <div class="resource-card {selected.has(net.Id) ? 'selected' : ''}">
+          <!-- Only the header row toggles inspect, so the output it reveals stays
+               selectable without collapsing under the click. -->
+          <div role="button" tabindex="0" class="resource-card-body" style="cursor: pointer;" onkeydown={(e) => e.key === 'Enter' && e.currentTarget.click()} onclick={() => handleInspect(net.Name)}>
+            <div class="resource-card-main">
               {#if isSystemNetwork(net.Name)}
-                <input type="checkbox" class="checkbox" disabled checked={false} title="System network — cannot be removed" />
+                <input type="checkbox" class="checkbox" disabled checked={false} title="System network — cannot be removed" onclick={(e) => e.stopPropagation()} />
               {:else}
-                <input type="checkbox" class="checkbox" checked={selected.has(net.Id)} onchange={() => toggleSelect(net.Id)} />
+                <input type="checkbox" class="checkbox" checked={selected.has(net.Id)} onchange={() => toggleSelect(net.Id)} onclick={(e) => e.stopPropagation()} />
               {/if}
               <div style="min-width: 0;">
                 <div style="display: flex; align-items: center; gap: 8px;">
@@ -291,26 +298,44 @@
                     <span style="font-size: var(--text-xs); padding: 2px 6px; border-radius: 4px; background: rgba(139,148,158,0.2); color: var(--text-muted); flex-shrink: 0;">system</span>
                   {/if}
                 </div>
-                <div style="color: var(--text-muted); font-size: var(--text-sm); margin-top: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                <div class="resource-card-meta">
                   Driver: <span style="color: {driverColor(net.Driver)};">{net.Driver}</span>
                   {#if net.Scope} · Scope: {net.Scope}{/if}
                   · ID: {net.Id.substring(0, 12)}
                 </div>
               </div>
             </div>
-            <div style="display: flex; gap: 6px; flex-shrink: 0;">
-              <button class="btn btn-ghost" onclick={() => handleInspect(net.Name)} style="font-size: var(--text-xs); padding: 4px 10px;">
-                {inspecting === net.Name ? "Hide" : "Inspect"}
-              </button>
-              {#if !isSystemNetwork(net.Name)}
-                <button class="btn btn-ghost" onclick={() => handleRemove(net.Name)} disabled={actionLoading === net.Name} style="font-size: var(--text-xs); padding: 4px 10px; color: var(--accent-red);">
-                  {actionLoading === net.Name ? "..." : "Remove"}
-                </button>
-              {/if}
-            </div>
+            <!-- A system network has no Remove entry at all: the daemon refuses
+                 it, so offering a disabled item would only invite the attempt. -->
+            <RowActions
+              inline={[{
+                icon: Icons.Topology,
+                label: t('common.view_in_topology', { default: 'View in topology' }),
+                onclick: () => viewInTopology("network", net.Id),
+              }]}
+              menu={[
+                {
+                  label: inspecting === net.Name
+                    ? t('common.hide_details', { default: 'Hide details' })
+                    : t('common.inspect', { default: 'Inspect' }),
+                  icon: Icons.Search,
+                  action: () => handleInspect(net.Name),
+                },
+                ...(isSystemNetwork(net.Name) ? [] : [
+                  { divider: true, label: '', action: () => {} },
+                  {
+                    label: t('networks.remove', { default: 'Remove' }),
+                    icon: Icons.Trash,
+                    danger: true,
+                    disabled: actionLoading === net.Name,
+                    action: () => handleRemove(net.Name),
+                  },
+                ]),
+              ]}
+            />
           </div>
           {#if inspecting === net.Name}
-            <pre style="margin-top: 12px; padding: 12px; background: var(--bg-primary); border-radius: 8px; font-size: var(--text-xs); overflow: auto; max-height: 300px; color: var(--text-secondary);">{inspectData}</pre>
+            <pre class="resource-card-inspect">{inspectData}</pre>
           {/if}
         </div>
       {/each}

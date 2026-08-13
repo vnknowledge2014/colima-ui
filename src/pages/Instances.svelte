@@ -124,7 +124,7 @@ Format: {"minimal": {"cpus": N, "memory": N, "disk": N}, ...}`;
           aiOptimizing = false;
         }
       }
-    } catch (e) {
+    } catch {
       globalToast("error", "Hardware detection failed");
     } finally {
       detecting = false;
@@ -164,9 +164,10 @@ Format: {"minimal": {"cpus": N, "memory": N, "disk": N}, ...}`;
   });
 
   $effect(() => {
-    if (selected?.type === "colima") {
-      const fresh = dashboardState.colimaInstances.find(i => i.name === (selected as any).data.name);
-      if (fresh && JSON.stringify(fresh) !== JSON.stringify(selected.data)) {
+    const sel = selected;
+    if (sel?.type === "colima") {
+      const fresh = dashboardState.colimaInstances.find(i => i.name === sel.data.name);
+      if (fresh && JSON.stringify(fresh) !== JSON.stringify(sel.data)) {
         selected = { type: "colima", data: fresh };
       }
     }
@@ -192,7 +193,7 @@ Format: {"minimal": {"cpus": N, "memory": N, "disk": N}, ...}`;
       return;
     }
 
-    const labels: any = { start: "Starting", stop: "Stopping", restart: "Restarting" };
+    const labels: Record<string, string> = { start: "Starting", stop: "Stopping", restart: "Restarting" };
     globalToast("success", `${labels[action]} instance '${profile}'...`);
     actionLoading = `${profile}-${action}`;
 
@@ -229,7 +230,7 @@ Format: {"minimal": {"cpus": N, "memory": N, "disk": N}, ...}`;
         await colimaApi.startInstance(finalConfig);
         await handleInstanceStarted(profile, getCurrentPresetForInstance(profile));
       }
-      const past: any = { start: "started", stop: "stopped", restart: "restarted" };
+      const past: Record<string, string> = { start: "started", stop: "stopped", restart: "restarted" };
       globalToast("success", `Instance '${profile}' ${past[action]}`);
       onRefresh();
     } catch (e) {
@@ -259,18 +260,27 @@ Format: {"minimal": {"cpus": N, "memory": N, "disk": N}, ...}`;
   let runningColima = $derived(dashboardState.colimaInstances.filter(i => i.status === "Running").length);
   let totalItems = $derived(dashboardState.colimaInstances.length + kindClusters.length);
 
-  let customPresets = $state<any[]>([]);
+  interface CustomPreset {
+    id: string;
+    label: string;
+    cpus: number;
+    memory: number;
+    disk: number;
+  }
+
+  let customPresets = $state<CustomPreset[]>([]);
   onMount(() => {
     const saved = getAppSetting("ColimaCustomProfiles");
     if (saved) {
       try {
-        customPresets = JSON.parse(saved);
-      } catch {}
+        customPresets = JSON.parse(saved) as CustomPreset[];
+      } catch {
+        // A corrupt custom-profile setting should not block the page.
+      }
     }
   });
 
-  let allPresets = $derived([...BUILT_IN_PRESETS, ...customPresets]);
-</script>
+  let allPresets = $derived([...BUILT_IN_PRESETS, ...customPresets]);</script>
 
 <div class="content-header" data-tauri-drag-region>
   <h1>
@@ -336,7 +346,7 @@ Format: {"minimal": {"cpus": N, "memory": N, "disk": N}, ...}`;
         <div style="padding: 10px 14px 6px; font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-muted);">
           Colima Instances ({dashboardState.colimaInstances.length})
         </div>
-        {#each dashboardState.colimaInstances as inst}
+        {#each dashboardState.colimaInstances as inst (inst.name)}
           {@const isRunning = inst.status === "Running"}
           {@const isSelected = selected?.type === "colima" && selected.data.name === inst.name}
           <div role="button" tabindex="0" onkeydown={(e) => e.key === 'Enter' && e.currentTarget.click()} onclick={() => selected = { type: "colima", data: inst }} class="inst-item" style="padding: 10px 14px; cursor: pointer; display: flex; align-items: center; gap: 10px; background: {isSelected ? 'var(--bg-card-hover)' : 'transparent'}; border-left: 3px solid {isSelected ? 'var(--accent-blue)' : 'transparent'};">
@@ -367,7 +377,7 @@ Format: {"minimal": {"cpus": N, "memory": N, "disk": N}, ...}`;
         {#if kindLoading}
           <div style="display: flex; justify-content: center; padding: 16px;"><div class="spinner" style="width: 16px; height: 16px;"></div></div>
         {:else}
-          {#each kindClusters as name}
+          {#each kindClusters as name (name)}
             {@const isSelected = selected?.type === "kind" && selected.name === name}
             <div role="button" tabindex="0" onkeydown={(e) => e.key === 'Enter' && e.currentTarget.click()} onclick={() => selected = { type: "kind", name }} class="inst-item" style="padding: 10px 14px; cursor: pointer; display: flex; align-items: center; gap: 10px; background: {isSelected ? 'rgba(167,139,250,0.08)' : 'transparent'}; border-left: 3px solid {isSelected ? 'var(--accent-purple)' : 'transparent'};">
               <div style="flex: 1; min-width: 0;">
@@ -562,7 +572,7 @@ Format: {"minimal": {"cpus": N, "memory": N, "disk": N}, ...}`;
           </div>
           
           <div style="display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px;">
-            {#each presets as p}
+            {#each presets as p (p.id)}
               <button 
                 onclick={() => applyPreset(p)}
                 style="background: var(--bg-primary); border: 1px solid {newConfig.cpus === p.cpus && newConfig.memory === p.memory && newConfig.disk === p.disk ? p.color || 'var(--accent-blue)' : 'var(--border-primary)'}; border-radius: 6px; padding: 8px; text-align: center; cursor: pointer; transition: all 0.2s; box-shadow: {newConfig.cpus === p.cpus && newConfig.memory === p.memory && newConfig.disk === p.disk ? '0 0 0 1px ' + (p.color || 'var(--accent-blue)') : 'none'};">
@@ -652,7 +662,7 @@ Format: {"minimal": {"cpus": N, "memory": N, "disk": N}, ...}`;
                 <div>
                   <label for="masterSelect" style="display: block; font-size: 11px; font-weight: 500; color: var(--text-secondary); margin-bottom: 4px;">Join Master Node</label>
                   <select id="masterSelect" bind:value={selectedMaster} class="input select" style="padding: 4px 8px; font-size: 12px;">
-                    {#each dashboardState.colimaInstances.filter(i => i.kubernetes) as m}
+                    {#each dashboardState.colimaInstances.filter(i => i.kubernetes) as m (m.name)}
                       <option value={m.name}>{m.name}</option>
                     {/each}
                   </select>
@@ -676,8 +686,8 @@ Format: {"minimal": {"cpus": N, "memory": N, "disk": N}, ...}`;
             globalToast("success", `Starting worker node joined to ${selectedMaster}...`);
             colimaApi.createWorkerNode(selectedMaster, newConfig.profile, newConfig.cpus, newConfig.memory)
               .then(onRefresh)
-              .catch(err => {
-                globalToast("error", `Failed to create worker: ${err}`);
+              .catch((err: unknown) => {
+                globalToast("error", `Failed to create worker: ${String(err)}`);
                 onRefresh();
               });
           } else {

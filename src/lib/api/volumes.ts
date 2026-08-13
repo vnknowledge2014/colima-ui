@@ -1,19 +1,19 @@
 import { call } from "./client";
-import type { ColimaInstance, InstanceStatus, StartConfig, DockerContainer, DockerImage, SystemInfo, AiModel, DockerVolume, DockerNetwork } from "./types";
+import type { DockerVolume } from "./types";
 
 // ===== Volumes API =====
 
 export const volumesApi = {
   listVolumes: async (): Promise<DockerVolume[]> => {
-    const raw = await call<any>("list_volumes", undefined, "GET", "/api/volumes");
+    const raw = await call<unknown>("list_volumes", undefined, "GET", "/api/volumes");
     if (!raw) return [];
     const items = Array.isArray(raw) ? raw : [];
-    return items.map((v: any) => ({
-      Name: v.Name || v.name || "",
-      Driver: v.Driver || v.driver || "",
-      Mountpoint: v.Mountpoint || v.mountpoint || v.mount_point || "",
-      Scope: v.Scope || v.scope || "",
-      Labels: v.Labels || v.labels || "",
+    return items.map((v: Record<string, unknown>) => ({
+      Name: String(v.Name || v.name || ""),
+      Driver: String(v.Driver || v.driver || ""),
+      Mountpoint: String(v.Mountpoint || v.mountpoint || v.mount_point || ""),
+      Scope: String(v.Scope || v.scope || ""),
+      Labels: String(v.Labels || v.labels || ""),
     }));
   },
 

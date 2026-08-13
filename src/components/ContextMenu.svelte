@@ -3,7 +3,7 @@
 
   interface ContextMenuItem {
     label: string;
-    icon?: any;
+    icon?: string;
     action: () => void;
     danger?: boolean;
     disabled?: boolean;
@@ -76,7 +76,7 @@
 
 <div role="button" tabindex="0" class="ctx-overlay" style="position: fixed; inset: 0; z-index: 99999;" onkeydown={(e) => e.key === 'Enter' && e.currentTarget.click()} onclick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
   <div bind:this={menuRef} class="ctx-menu" style="left: {adjustedX}px; top: {adjustedY}px; position: absolute;">
-    {#each items as item}
+    {#each items as item, index (index)}
       {#if item.divider}
         <div class="ctx-divider"></div>
       {:else}
@@ -89,7 +89,9 @@
           onmouseover={() => { activeIndex = actionableItems.indexOf(item); }}
         >
           {#if item.icon}
-            <span class="ctx-icon">{item.icon}</span>
+            <!-- Icons come from the Icons.svelte constants, never from user or
+                 daemon data, so the markup is inlined rather than escaped. -->
+            <span class="ctx-icon">{@html item.icon}</span>
           {/if}
           {item.label}
         </button>

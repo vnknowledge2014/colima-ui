@@ -5,6 +5,7 @@
   import { getLanguage, t } from "../lib/i18n.svelte";
   import { uiState } from "../store.svelte";
   import { normalizeError, errorMessage } from "../lib/errors";
+  import BundlePreview from "../components/diagnostics/BundlePreview.svelte";
 
   /**
    * Offline Help. Every article is compiled into the binary and seeded into
@@ -14,6 +15,12 @@
    * `uiState.helpArticle` is how the rest of the app deep-links here: an error
    * carrying a `doc_id` sets it and navigates.
    */
+
+  /**
+   * Help is where someone lands when the app misbehaved and the article did not
+   * solve it, which makes it the right place to offer a bug report.
+   */
+  let reporting = $state(false);
 
   let index = $state<ArticleSummary[]>([]);
   let results = $state<ArticleSummary[] | null>(null);
@@ -129,7 +136,16 @@
       {t("help.subtitle", { default: "Troubleshooting guides. Available offline." })}
     </div>
   </div>
+  <div class="content-header-actions">
+    <button class="btn btn-ghost" onclick={() => (reporting = true)}>
+      {t("diagnostics.title", { default: "Report a problem" })}
+    </button>
+  </div>
 </div>
+
+{#if reporting}
+  <BundlePreview onClose={() => (reporting = false)} />
+{/if}
 
 <div class="content-body">
   {#if loading}

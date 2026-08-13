@@ -3,7 +3,7 @@ import vi from '../locales/vi.json';
 import zh from '../locales/zh.json';
 import ja from '../locales/ja.json';
 
-const dictionaries: Record<string, any> = {
+const dictionaries: Record<string, Record<string, unknown>> = {
   en,
   vi,
   zh,
@@ -35,11 +35,12 @@ export function t(key: string, params?: Record<string, string | number>): string
   const dict = dictionaries[currentLang] || dictionaries['en'];
   
   const keys = key.split('.');
-  let value: any = dict;
-  
+  let value: unknown = dict;
+
   for (const k of keys) {
     if (value === undefined || value === null) break;
-    value = value[k];
+    if (typeof value !== "object") break;
+    value = (value as Record<string, unknown>)[k];
   }
   
   if (value === undefined || typeof value !== 'string') {

@@ -524,7 +524,8 @@
    declared nothing — which is how `.ai-panel-messages` ended up painting
    --bg-content over the panel's --bg-sidebar and split the panel into two
    tones. Two of the declarations here also referenced --bg-primary and
-   --bg-hover, neither of which is a defined token.
+   --bg-hover, which resolved to nothing until tokens.css gained aliases for
+   both.
 
    What stays below is deliberate: it targets markdown HTML injected at
    runtime, which a scoped component style cannot reach. */

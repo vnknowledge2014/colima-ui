@@ -8,7 +8,7 @@
 
 import { globalToast } from "./globalToast";
 import { normalizeError, errorMessage, errorHint, type AppError } from "./errors";
-import { recordError } from "../store/errorLog.svelte";
+import { recordError } from "../store/notifications.svelte";
 
 export interface ErrorContext {
   /** What the user was trying to do, already localized. e.g. "Stop container". */
@@ -29,8 +29,10 @@ export function reportError(e: unknown, ctx: ErrorContext = {}): AppError {
   const message = errorMessage(err);
   const text = ctx.action ? `${ctx.action}: ${message}` : message;
 
-  recordError(err, ctx.action);
-  globalToast("error", text, { error: err, hint: errorHint(err) });
+  // `record: false` because `recordError` above already made the entry. Without
+  // it the same failure would appear twice in the notification list.
+  recordError(err, ctx.action, text);
+  globalToast("error", text, { error: err, hint: errorHint(err), record: false });
   return err;
 }
 

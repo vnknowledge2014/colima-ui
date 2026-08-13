@@ -1,29 +1,37 @@
 import type { K8sResource } from "../store/k8s.svelte";
 
-export function parseItems(raw: any): K8sResource[] {
+type JsonRecord = Record<string, unknown>;
+
+const asRecord = (v: unknown): JsonRecord => (v && typeof v === "object" && !Array.isArray(v) ? (v as JsonRecord) : {});
+const asArray = (v: unknown): unknown[] => (Array.isArray(v) ? v : []);
+const asString = (v: unknown, fallback = ""): string => (typeof v === "string" ? v : String(v ?? fallback));
+
+export function parseItems(raw: unknown): K8sResource[] {
   if (!raw) return [];
   try {
-    const parsed = typeof raw === "string" ? JSON.parse(raw) : raw;
-    const items = parsed.items || (Array.isArray(parsed) ? parsed : []);
-    return items.map((item: any) => {
-      const meta = item.metadata || {};
-      const spec = item.spec || {};
-      const status = item.status || {};
-      const statuses = status.containerStatuses || [];
+    const parsed: JsonRecord = typeof raw === "string" ? (JSON.parse(raw) as JsonRecord) : asRecord(raw);
+    const items: JsonRecord[] = asArray(parsed.items).length
+      ? (asArray(parsed.items) as JsonRecord[])
+      : Array.isArray(raw) ? (raw as JsonRecord[]) : [];
+    return items.map((item) => {
+      const meta = asRecord(item.metadata);
+      const spec = asRecord(item.spec);
+      const status = asRecord(item.status);
+      const statuses = asArray(status.containerStatuses) as JsonRecord[];
 
       const base: K8sResource = {
-        name: meta.name || "",
-        namespace: meta.namespace || "",
-        age: meta.creationTimestamp || "",
+        name: asString(meta.name),
+        namespace: asString(meta.namespace),
+        age: asString(meta.creationTimestamp),
         _raw: item,
       };
 
       if (statuses.length > 0 || status.phase) {
-        const ready = statuses.filter((s: any) => s.ready).length;
-        base.status = status.phase || "Unknown";
-        base.ready = `${ready}/${statuses.length || spec.containers?.length || 0}`;
-        base.restarts = String(statuses.reduce((s: number, c: any) => s + (c.restartCount || 0), 0));
-        base.node = spec.nodeName || "";
+        const ready = statuses.filter((s) => s.ready).length;
+        base.status = asString(status.phase, "Unknown");
+        base.ready = `${ready}/${statuses.length || asArray(spec.containers).length || 0}`;
+        base.restarts = String(statuses.reduce((s: number, c: JsonRecord) => s + (typeof c.restartCount === "number" ? c.restartCount : 0), 0));
+        base.node = asString(spec.nodeName);
       }
 
       if (spec.replicas !== undefined) {
@@ -32,20 +40,20 @@ export function parseItems(raw: any): K8sResource[] {
       }
 
       if (spec.type) {
-        base.svcType = spec.type;
-        base.clusterIP = spec.clusterIP || "None";
-        base.ports = (spec.ports || []).map((p: any) => `${p.port}/${p.protocol}`).join(", ");
-        base._ports = spec.ports || [];
+        base.svcType = asString(spec.type);
+        base.clusterIP = asString(spec.clusterIP, "None");
+        base.ports = (asArray(spec.ports) as JsonRecord[]).map((p) => `${p.port}/${p.protocol}`).join(", ");
+        base._ports = asArray(spec.ports) as JsonRecord[];
       }
 
       if (status.nodeInfo) {
-        const conds = (status.conditions || []).find((c: any) => c.type === "Ready");
+        const conds = (asArray(status.conditions) as JsonRecord[]).find((c) => c.type === "Ready");
         base.status = conds?.status === "True" ? "Ready" : "NotReady";
-        base.roles = (Object.keys(meta.labels || {})
+        base.roles = (Object.keys(asRecord(meta.labels))
           .filter((k: string) => k.startsWith("node-role.kubernetes.io/"))
           .map((k: string) => k.replace("node-role.kubernetes.io/", "")) || ["<none>"]).join(",");
-        base.version = status.nodeInfo.kubeletVersion || "";
-        base.os = `${status.nodeInfo.operatingSystem}/${status.nodeInfo.architecture}`;
+        base.version = asString(asRecord(status.nodeInfo).kubeletVersion);
+        base.os = `${asString(asRecord(status.nodeInfo).operatingSystem)}/${asString(asRecord(status.nodeInfo).architecture)}`;
         base.schedulable = !spec.unschedulable;
       }
 
@@ -55,90 +63,94 @@ export function parseItems(raw: any): K8sResource[] {
       }
 
       if (spec.schedule) {
-        base.schedule = spec.schedule;
-        base.lastSchedule = status.lastScheduleTime || "Never";
-        base.status = status.active?.length ? "Active" : "Idle";
+        base.schedule = asString(spec.schedule);
+        base.lastSchedule = asString(status.lastScheduleTime, "Never");
+        base.status = asArray(status.active).length ? "Active" : "Idle";
       }
 
       if (spec.rules) {
-        base.hosts = (spec.rules || []).map((r: any) => r.host || "*").join(", ");
-        base.paths = (spec.rules || []).flatMap((r: any) =>
-          (r.http?.paths || []).map((p: any) => p.path || "/")
+        base.hosts = (asArray(spec.rules) as JsonRecord[]).map((r) => asString(r.host, "*")).join(", ");
+        base.paths = (asArray(spec.rules) as JsonRecord[]).flatMap((r) =>
+          asArray(asRecord(r.http).paths).map((p) => asString(asRecord(p).path, "/"))
         ).join(", ");
-        const lbIngress = status.loadBalancer?.ingress || [];
-        base.address = lbIngress.map((i: any) => i.ip || i.hostname || "").join(",") || "<pending>";
+        const lbIngress = asArray(asRecord(status.loadBalancer).ingress) as JsonRecord[];
+        base.address = lbIngress.map((i) => asString(i.ip) || asString(i.hostname) || "").join(",") || "<pending>";
       }
 
       if (item.data !== undefined && !spec.type && !spec.replicas) {
-        base.dataCount = String(Object.keys(item.data || {}).length);
+        base.dataCount = String(Object.keys(asRecord(item.data)).length);
       }
       if (item.type && !spec.type) {
-        base.secretType = item.type;
+        base.secretType = asString(item.type);
       }
 
       if (spec.capacity) {
-        base.capacity = spec.capacity?.storage || "";
-        base.accessModes = (spec.accessModes || []).join(",");
-        base.reclaimPolicy = spec.persistentVolumeReclaimPolicy || "";
-        base.status = status.phase || "";
-        base.storageClass = spec.storageClassName || "";
+        base.capacity = asString(asRecord(spec.capacity).storage);
+        base.accessModes = (asArray(spec.accessModes) as string[]).join(",");
+        base.reclaimPolicy = asString(spec.persistentVolumeReclaimPolicy);
+        base.status = asString(status.phase);
+        base.storageClass = asString(spec.storageClassName);
       }
 
       if (spec.accessModes && !spec.capacity) {
-        base.status = status.phase || "";
-        base.volume = spec.volumeName || "";
-        base.capacity = status.capacity?.storage || spec.resources?.requests?.storage || "";
-        base.accessModes = (spec.accessModes || []).join(",");
-        base.storageClass = spec.storageClassName || "";
+        base.status = asString(status.phase);
+        base.volume = asString(spec.volumeName);
+        base.capacity = asString(asRecord(status.capacity).storage) || asString(asRecord(asRecord(spec.resources).requests).storage);
+        base.accessModes = (asArray(spec.accessModes) as string[]).join(",");
+        base.storageClass = asString(spec.storageClassName);
       }
 
       if (!meta.namespace && status.phase && !status.nodeInfo && !statuses.length && !spec.type) {
-        base.status = status.phase || "";
+        base.status = asString(status.phase);
       }
 
       if (item.reason) {
-        base.type = item.type || "";
-        base.reason = item.reason || "";
-        base.message = item.message || "";
+        base.type = asString(item.type);
+        base.reason = asString(item.reason);
+        base.message = asString(item.message);
         base.count = String(item.count || 1);
-        base.source = item.source?.component || "";
-        base.object = item.involvedObject ? `${item.involvedObject.kind}/${item.involvedObject.name}` : "";
+        base.source = asString(asRecord(item.source).component);
+        base.object = item.involvedObject ? `${asRecord(item.involvedObject).kind}/${asRecord(item.involvedObject).name}` : "";
       }
 
       // Phase 10: Built-in Heuristic Linter
       const warnings: string[] = [];
-      let targetContainers = spec.containers || [];
-      let targetSecurity = spec.securityContext || {};
-      
-      if (!targetContainers.length && spec.template?.spec?.containers) {
-        targetContainers = spec.template.spec.containers;
-        targetSecurity = spec.template.spec.securityContext || {};
+      let targetContainers = asArray(spec.containers) as JsonRecord[];
+      let targetSecurity = asRecord(spec.securityContext);
+
+      if (!targetContainers.length) {
+        const tplSpec = asRecord(asRecord(spec.template).spec);
+        targetContainers = asArray(tplSpec.containers) as JsonRecord[];
+        targetSecurity = asRecord(tplSpec.securityContext);
       }
 
       if (targetContainers.length > 0) {
         for (const c of targetContainers) {
-          if (!c.image || c.image.endsWith(":latest") || (!c.image.includes(":") && !c.image.includes("@"))) {
-            warnings.push(`Container '${c.name || "unknown"}' uses 'latest' image tag.`);
+          const image = asString(c.image);
+          if (!image || image.endsWith(":latest") || (!image.includes(":") && !image.includes("@"))) {
+            warnings.push(`Container '${asString(c.name, "unknown")}' uses 'latest' image tag.`);
           }
-          if (!c.resources?.requests || !c.resources?.limits) {
-            warnings.push(`Container '${c.name || "unknown"}' lacks resource limits/requests.`);
+          if (!asRecord(c.resources).requests || !asRecord(c.resources).limits) {
+            warnings.push(`Container '${asString(c.name, "unknown")}' lacks resource limits/requests.`);
           }
-          if (c.securityContext?.privileged) {
-            warnings.push(`Container '${c.name || "unknown"}' runs in privileged mode.`);
+          if (asRecord(c.securityContext).privileged) {
+            warnings.push(`Container '${asString(c.name, "unknown")}' runs in privileged mode.`);
           }
-          if (c.securityContext?.runAsUser === 0 || targetSecurity.runAsUser === 0) {
-            warnings.push(`Container '${c.name || "unknown"}' runs as root user.`);
+          if (asRecord(c.securityContext).runAsUser === 0 || targetSecurity.runAsUser === 0) {
+            warnings.push(`Container '${asString(c.name, "unknown")}' runs as root user.`);
           }
         }
       }
-      
+
       if (warnings.length > 0) {
         base.warnings = warnings;
       }
 
       return base;
     });
-  } catch { return []; }
+  } catch {
+    return [];
+  }
 }
 
 export function timeAgo(ts: string): string {
@@ -161,7 +173,7 @@ export function statusColor(status: string): string {
   return "var(--text-secondary)";
 }
 
-export function getColumns(resourceId: string): { key: string; label: string; mono?: boolean; color?: (v: any, row: K8sResource) => string }[] {
+export function getColumns(resourceId: string): { key: string; label: string; mono?: boolean; color?: (v: string, row: K8sResource) => string }[] {
   switch (resourceId) {
     case "pods": return [
       { key: "name", label: "Name", mono: true },

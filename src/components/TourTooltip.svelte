@@ -33,7 +33,7 @@
   <div class="tour-tooltip-footer">
     <!-- Step dots -->
     <div class="tour-dots">
-      {#each Array(totalSteps) as _, i}
+      {#each Array(totalSteps) as _, i (i)}
         <div class="tour-dot {i === currentStep ? 'active' : i < currentStep ? 'done' : ''}"></div>
       {/each}
     </div>

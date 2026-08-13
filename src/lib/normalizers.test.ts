@@ -6,7 +6,11 @@ describe('normalizeContainer', () => {
     const raw = { Id: 'test-id', Names: ['/test-container'], State: 'running', Status: 'Up 5 minutes', Image: 'nginx:latest' };
     const normalized = normalizeContainer(raw);
     expect(normalized.Id).toBe('test-id');
-    expect(normalized.Names).toEqual(['/test-container']);
+    // `DockerContainer.Names` is a string, not a list: the runtime sends an array
+    // and the normalizer flattens it, which is what every consumer compares and
+    // renders. The sibling case below asserts the same string contract for a
+    // missing field.
+    expect(normalized.Names).toBe('/test-container');
     expect(normalized.State).toBe('running');
     expect(normalized.Status).toBe('Up 5 minutes');
     expect(normalized.Image).toBe('nginx:latest');
