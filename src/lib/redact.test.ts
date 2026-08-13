@@ -10,6 +10,25 @@ describe("redact", () => {
     expect(out).toContain("key=<redacted>");
   });
 
+  it("anonymises the account name in a stack-trace path", () => {
+    // crashReporter sends stack traces onward, and those carry absolute paths.
+    const out = redact("at loadConfig (/Users/longnd/app/src/lib/config.ts:12:5)");
+    expect(out).not.toContain("longnd");
+    expect(out).toContain("/app/src/lib/config.ts:12:5");
+  });
+
+  it("leaves shared directories named correctly", () => {
+    const msg = "reading /Users/Shared/config.yaml";
+    expect(redact(msg)).toBe(msg);
+  });
+
+  it("redacts an AWS access key id and a JWT", () => {
+    expect(redact("creds AKIAIOSFODNN7EXAMPLE here")).not.toContain("AKIAIOSFODNN7EXAMPLE");
+    const jwt =
+      "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dBjftJeZ4CVPmB92K27uhbUJU1p1r_wW1gFWFOEjXk";
+    expect(redact(`token ${jwt} expired`)).not.toContain(jwt);
+  });
+
   it("redacts an unknown provider's key by position", () => {
     const out = redact("GET https://example.invalid/v1/models?api_key=zzzz-not-a-known-shape-9999 failed");
     expect(out).not.toContain("zzzz-not-a-known-shape-9999");
