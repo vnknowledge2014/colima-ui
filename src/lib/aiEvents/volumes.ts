@@ -1,10 +1,5 @@
-import { isRunningInTauri } from "../env";
-// @ts-nocheck
 import { EventHandler } from "./types";
-import { 
-  colimaApi, dockerApi, volumesApi, networksApi, sysMethods, 
-  composeApi, modelsApi, k8sApi, kindApi, limaApi
-} from "../api";
+import { volumesApi, networksApi } from "../api";
 
 export const volumesRegistry: Record<string, EventHandler> = {
   "volume-list": {

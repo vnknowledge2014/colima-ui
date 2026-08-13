@@ -1,11 +1,7 @@
 import { isRunningInTauri } from "../env";
 import { runSandboxed } from "./shell";
-// @ts-nocheck
 import { EventHandler } from "./types";
-import { 
-  colimaApi, dockerApi, volumesApi, networksApi, sysMethods, 
-  composeApi, modelsApi, k8sApi, kindApi, limaApi
-} from "../api";
+import { modelsApi } from "../api";
 
 export const configRegistry: Record<string, EventHandler> = {
   "model-list": {
@@ -120,10 +116,10 @@ export const configRegistry: Record<string, EventHandler> = {
       if (isRunningInTauri()) {
         try {
           return await runSandboxed(p.command, p.args || []);
-        } catch (e: any) {
+        } catch (e) {
           // Includes the sandbox's own refusals — a `banned:` reason for
           // command chaining, or an argument the executor cannot represent.
-          return `Error executing command: ${e.message || e}`;
+          return `Error executing command: ${e instanceof Error ? e.message : String(e)}`;
         }
       }
       return `[SIMULATED] Executed ${p.command} ${p.args?.join(" ")}`;

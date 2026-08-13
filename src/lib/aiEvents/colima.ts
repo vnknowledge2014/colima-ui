@@ -1,10 +1,6 @@
-import { isRunningInTauri } from "../env";
-// @ts-nocheck
 import { EventHandler } from "./types";
-import { 
-  colimaApi, dockerApi, volumesApi, networksApi, sysMethods, 
-  composeApi, modelsApi, k8sApi, kindApi, limaApi
-} from "../api";
+import type { StartConfig } from "../api";
+import { colimaApi } from "../api";
 
 export const colimaRegistry: Record<string, EventHandler> = {
   "list-instances": {
