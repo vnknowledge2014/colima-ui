@@ -13,7 +13,17 @@
 
   --border-primary: #2a3349;
   --border-subtle: #1e2a40;
-  --border-accent: rgba(88, 166, 255, 0.25);
+  --border-accent: rgba(96, 165, 250, 0.25);
+
+  /* Selection tint, derived from --accent-blue so a picked row and a picked
+     card read as the same colour instead of two near-identical blues. */
+  --surface-selected: rgba(96, 165, 250, 0.08);
+  --border-selected: rgba(96, 165, 250, 0.35);
+
+  /* Recessed panel sitting inside a card — code samples, empty states, grouped
+     rows. One value so a settings page cannot drift into five near-identical
+     greys the way it did when each site picked its own rgba. */
+  --surface-inset: var(--bg-app);
 
   --text-primary: #e6edf3;
   --text-secondary: #8d99ae;
@@ -34,11 +44,43 @@
   --accent-cyan: #22d3ee;
   --accent-cyan-glow: rgba(34, 211, 238, 0.2);
 
+  /* Severity, named once so the findings table, the posture header and every
+     later security panel cannot drift into three different reds for the same
+     word. Low and unknown are deliberately not coloured: a scale where every
+     step is loud has no top. */
+  --sev-critical: var(--accent-red);
+  --sev-high: var(--accent-orange);
+  --sev-medium: var(--accent-yellow);
+  --sev-low: var(--text-muted);
+  --sev-unknown: var(--text-muted);
+
   /* Status Colors */
   --status-running: #34d399;
   --status-stopped: #f87171;
   --status-starting: #fbbf24;
   --status-broken: #5a6275;
+
+  /* Aliases for names the UI already uses but this file never defined, so those
+     declarations resolved to nothing and the property was dropped: a panel meant
+     to be dark painted transparent, a "danger" label inherited body text colour.
+     Each alias points at the canonical token that matches the intent at the call
+     sites, keeping one source of truth per colour.
+     --bg-primary maps to the sidebar surface because the one call site that
+     carried a literal fallback, ErrorDetailPanel.svelte, spelled it #0d1117. */
+  --bg-primary: var(--bg-sidebar);
+  --bg-tertiary: var(--bg-secondary);
+  --bg-elevated: var(--bg-card);
+  --bg-hover: var(--bg-card-hover);
+
+  --border-color: var(--border-primary);
+  --border-hover: var(--border-accent);
+
+  --color-primary: var(--accent-blue);
+  --color-info: var(--accent-blue);
+  --color-success: var(--accent-green);
+  --color-warning: var(--accent-yellow);
+  --color-danger: var(--accent-red);
+  --color-error: var(--accent-red);
 
   /* Glassmorphism */
   --glass-bg: rgba(22, 29, 46, 0.7);
@@ -77,11 +119,15 @@
   /* Typography */
   --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, system-ui, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
   --font-mono: 'JetBrains Mono', 'SF Mono', 'Fira Code', 'Cascadia Code', 'Menlo', 'Consolas', monospace;
+  --font-primary: var(--font-sans);
 
   --text-xs: 0.7rem;
   --text-sm: 0.8125rem;
   --text-base: 0.875rem;
   --text-lg: 1rem;
+  /* --text-md is used as the step between base and lg; it sits on --text-lg so
+     a heading asking for it does not fall back to the inherited size. */
+  --text-md: var(--text-lg);
   --text-xl: 1.125rem;
   --text-2xl: 1.375rem;
   --text-3xl: 1.75rem;

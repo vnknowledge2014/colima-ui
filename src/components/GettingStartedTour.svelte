@@ -95,7 +95,7 @@
 
   $effect(() => {
     // Re-run when currentStep changes
-    currentStep;
+    void currentStep;
     updatePosition();
   });
 

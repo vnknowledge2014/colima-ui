@@ -1,0 +1,18 @@
+{
+  "SchemaVersion": 2,
+  "ArtifactName": "nginx:alpine",
+  "ArtifactType": "container_image",
+  "Metadata": {
+    "ImageID": "sha256:aaa",
+    "RepoTags": [
+      "nginx:alpine"
+    ]
+  },
+  "Results": [
+    {
+      "Target": "nginx:alpine (alpine 3.20.3)",
+      "Class": "os-pkgs",
+      "Type": "alpine"
+    }
+  ]
+}

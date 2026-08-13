@@ -9,17 +9,17 @@
 import type { DockerContainer, DockerImage, DockerVolume, DockerNetwork } from "./api";
 
 /** Normalize a raw container object into a consistent DockerContainer shape. */
-export function normalizeContainer(v: Record<string, any>): DockerContainer {
+export function normalizeContainer(v: Record<string, unknown>): DockerContainer {
   return {
-    Id: v.Id || v.id || v.ID || "",
-    Names: v.Names || v.names || "",
-    Image: v.Image || v.image || "",
-    Status: v.Status || v.status || "",
-    State: v.State || v.state || "",
-    Ports: v.Ports || v.ports || "",
-    CreatedAt: v.CreatedAt || v.created_at || v.createdAt || "",
-    Size: v.Size || v.size || "",
-    Command: v.Command || v.command || "",
+    Id: String(v.Id || v.id || v.ID || ""),
+    Names: String(v.Names || v.names || ""),
+    Image: String(v.Image || v.image || ""),
+    Status: String(v.Status || v.status || ""),
+    State: String(v.State || v.state || ""),
+    Ports: String(v.Ports || v.ports || ""),
+    CreatedAt: String(v.CreatedAt || v.created_at || v.createdAt || ""),
+    Size: String(v.Size || v.size || ""),
+    Command: String(v.Command || v.command || ""),
     // The backend always sends an object; guard anyway so a container from an
     // older payload cannot break grouping.
     Labels:
@@ -30,36 +30,36 @@ export function normalizeContainer(v: Record<string, any>): DockerContainer {
 }
 
 /** Normalize a raw image object into a consistent DockerImage shape. */
-export function normalizeImage(v: Record<string, any>): DockerImage {
+export function normalizeImage(v: Record<string, unknown>): DockerImage {
   return {
-    Id: v.Id || v.id || v.ID || "",
-    Repository: v.Repository || v.repository || "",
-    Tag: v.Tag || v.tag || "",
-    Size: v.Size || v.size || "",
-    CreatedAt: v.CreatedAt || v.created_at || v.createdAt || "",
+    Id: String(v.Id || v.id || v.ID || ""),
+    Repository: String(v.Repository || v.repository || ""),
+    Tag: String(v.Tag || v.tag || ""),
+    Size: String(v.Size || v.size || ""),
+    CreatedAt: String(v.CreatedAt || v.created_at || v.createdAt || ""),
   };
 }
 
 /** Normalize a raw volume object into a consistent DockerVolume shape. */
-export function normalizeVolume(v: Record<string, any>): DockerVolume {
+export function normalizeVolume(v: Record<string, unknown>): DockerVolume {
   return {
-    Name: v.Name || v.name || "",
-    Driver: v.Driver || v.driver || "",
-    Mountpoint: v.Mountpoint || v.mountpoint || v.mount_point || "",
-    Scope: v.Scope || v.scope || "",
-    Labels: v.Labels || v.labels || "",
+    Name: String(v.Name || v.name || ""),
+    Driver: String(v.Driver || v.driver || ""),
+    Mountpoint: String(v.Mountpoint || v.mountpoint || v.mount_point || ""),
+    Scope: String(v.Scope || v.scope || ""),
+    Labels: String(v.Labels || v.labels || ""),
   };
 }
 
 /** Normalize a raw network object into a consistent DockerNetwork shape. */
-export function normalizeNetwork(v: Record<string, any>): DockerNetwork {
+export function normalizeNetwork(v: Record<string, unknown>): DockerNetwork {
   return {
-    Id: v.Id || v.id || v.ID || "",
-    Name: v.Name || v.name || "",
-    Driver: v.Driver || v.driver || "",
-    Scope: v.Scope || v.scope || "",
-    Ipv6: v.Ipv6 || v.ipv6 || v.IPv6 || "",
-    Internal: v.Internal || v.internal || "",
-    Labels: v.Labels || v.labels || "",
+    Id: String(v.Id || v.id || v.ID || ""),
+    Name: String(v.Name || v.name || ""),
+    Driver: String(v.Driver || v.driver || ""),
+    Scope: String(v.Scope || v.scope || ""),
+    Ipv6: String(v.Ipv6 || v.ipv6 || v.IPv6 || ""),
+    Internal: String(v.Internal || v.internal || ""),
+    Labels: String(v.Labels || v.labels || ""),
   };
 }

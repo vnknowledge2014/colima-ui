@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+#
+# Pre-push lint gate — runs before `git push` completes.
+#
+# Enforces the project lint policy (see AGENTS.md):
+#   - ESLint (dead code, unused vars/imports, error-prone patterns)
+#   - TypeScript + Svelte type checks
+#   - cargo clippy (Rust: dead code, unused imports, pedantic clippy)
+#
+# Escape hatch: SKIP_LINT_GATES=1 git push    (or)   git push --no-verify
+# There is no excuse to use it except emergencies.
+set -euo pipefail
+
+ROOT="$(git rev-parse --show-toplevel)"
+cd "$ROOT"
+
+if [ "${SKIP_LINT_GATES:-0}" = "1" ]; then
+  echo "⚠️  SKIP_LINT_GATES=1 — skipping lint gates (DO NOT do this lightly)"
+  exit 0
+fi
+
+run() {
+  echo "▶ $*"
+  "$@"
+}
+
+if [ -f package.json ]; then
+  if command -v pnpm >/dev/null 2>&1 && [ -f pnpm-lock.yaml ]; then
+    run pnpm lint
+    run pnpm typecheck
+    run pnpm check
+  else
+    run npm run lint
+    run npm run typecheck
+    run npm run check
+  fi
+fi
+
+if [ -f src-tauri/Cargo.toml ]; then
+  run pnpm lint:rust
+fi
+
+echo "✅ All lint gates passed — safe to push."

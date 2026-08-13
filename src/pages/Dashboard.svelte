@@ -90,7 +90,9 @@
     try {
       const compose = await composeApi.list();
       dashboardState.composeProjectsCount = compose ? compose.length : 0;
-    } catch {}
+    } catch {
+      // A transient backend hiccup should not break the whole dashboard.
+    }
   }
 
   async function fetchK8sStatus() {
@@ -488,7 +490,7 @@
             </tr>
           </thead>
           <tbody>
-            {#each dashboardState.colimaInstances as inst}
+            {#each dashboardState.colimaInstances as inst (inst.name)}
               <tr>
                 <td style="font-weight: 500;">{inst.name}</td>
                 <td>

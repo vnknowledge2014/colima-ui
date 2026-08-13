@@ -1,0 +1,5 @@
+services:
+  web:
+    image: nginx
+    env_file:
+      - ./nonexistent.env

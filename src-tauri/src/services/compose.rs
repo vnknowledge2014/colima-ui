@@ -11,7 +11,7 @@ pub struct ComposeService {
 }
 
 impl ComposeService {
-    pub async fn auto_detect() -> Self {
+    pub fn auto_detect() -> Self {
         // In the future, we could detect if podman-compose or docker-compose is available
         // For now, default to DockerComposeAdapter which resolves via get_runtime_cmd().
         let runtime: Box<dyn ComposeManager> = Box::new(DockerComposeAdapter::new());

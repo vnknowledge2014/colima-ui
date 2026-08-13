@@ -1,11 +1,6 @@
-import { isRunningInTauri } from "../env";
-// @ts-nocheck
 import { EventHandler } from "./types";
 import { openTerminalSession } from "../../store.svelte";
-import { 
-  colimaApi, dockerApi, volumesApi, networksApi, sysMethods, 
-  composeApi, modelsApi, k8sApi, kindApi, limaApi
-} from "../api";
+import { k8sApi, kindApi } from "../api";
 
 export const k8sRegistry: Record<string, EventHandler> = {
   "k8s-list-contexts": {

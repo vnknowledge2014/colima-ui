@@ -1,5 +1,5 @@
 import { call } from "./client";
-import type { ColimaInstance, InstanceStatus, StartConfig, DockerContainer, DockerImage, SystemInfo, AiModel, DockerVolume, DockerNetwork } from "./types";
+import type { ColimaInstance, InstanceStatus, StartConfig } from "./types";
 
 // ===== Colima API =====
 
@@ -24,4 +24,7 @@ export const colimaApi = {
 
   kubernetesAction: (profile: string, action: string) =>
     call<string>("kubernetes_action", { profile, action }, "POST", "/api/instances/k8s", { profile, action }),
+
+  createWorkerNode: (masterProfile: string, workerProfile: string, cpus: number, memory: number) =>
+    call<string>("create_worker_node", { master_profile: masterProfile, worker_profile: workerProfile, cpu: cpus, memory }, "POST", "/api/instances/create-worker", undefined, { master_profile: masterProfile, worker_profile: workerProfile, cpu: cpus, memory }),
 };

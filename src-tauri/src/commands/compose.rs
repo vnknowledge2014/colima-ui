@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 
+use crate::commands::runtime;
+
 /// Docker Compose project info
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ComposeProject {
@@ -12,30 +14,11 @@ pub struct ComposeProject {
 }
 
 
-/// Run a Docker CLI command on a blocking thread pool with a 10s timeout.
-async fn docker_output(args: Vec<String>) -> Result<std::process::Output, String> {
-    let result = tokio::time::timeout(
-        std::time::Duration::from_secs(10),
-        tokio::task::spawn_blocking(move || {
-            crate::commands::runtime::get_runtime_cmd()
-                .args(args.iter().map(|s| s.as_str()).collect::<Vec<&str>>())
-                .output()
-                .map_err(|e| format!("Failed to run docker command: {}", e))
-        }),
-    )
-    .await;
-
-    match result {
-        Ok(join_result) => join_result.map_err(|e| format!("Task join error: {}", e))?,
-        Err(_) => Err("Docker command timed out (daemon may be unresponsive)".to_string()),
-    }
-}
-
 /// List Docker Compose projects
 #[tauri::command]
 pub async fn list_compose_projects() -> Result<Vec<ComposeProject>, crate::error::ColimaError> {
     async move {
-    let output = docker_output(vec!["compose".into(), "ls".into(), "--format".into(), "json".into(), "-a".into()]).await?;
+    let output = runtime::run(vec!["compose".into(), "ls".into(), "--format".into(), "json".into(), "-a".into()], runtime::DEFAULT_TIMEOUT).await?;
 
     if !output.status.success() {
         return Err(format!(
@@ -78,7 +61,7 @@ pub async fn compose_up(project_dir: String, detach: bool) -> Result<String, cra
         args.push("-d".to_string());
     }
 
-    let output = docker_output(args).await?;
+    let output = runtime::run(args, runtime::DEFAULT_TIMEOUT).await?;
 
     if !output.status.success() {
         return Err(format!(
@@ -96,7 +79,7 @@ pub async fn compose_up(project_dir: String, detach: bool) -> Result<String, cra
 #[tauri::command]
 pub async fn compose_down(project_name: String) -> Result<String, crate::error::ColimaError> {
     async move {
-    let output = docker_output(vec!["compose".into(), "-p".into(), project_name.clone(), "down".into()]).await?;
+    let output = runtime::run(vec!["compose".into(), "-p".into(), project_name.clone(), "down".into()], runtime::DEFAULT_TIMEOUT).await?;
 
     if !output.status.success() {
         return Err(format!(
@@ -114,7 +97,7 @@ pub async fn compose_down(project_name: String) -> Result<String, crate::error::
 #[tauri::command]
 pub async fn compose_restart(project_name: String) -> Result<String, crate::error::ColimaError> {
     async move {
-    let output = docker_output(vec!["compose".into(), "-p".into(), project_name.clone(), "restart".into()]).await?;
+    let output = runtime::run(vec!["compose".into(), "-p".into(), project_name.clone(), "restart".into()], runtime::DEFAULT_TIMEOUT).await?;
 
     if !output.status.success() {
         return Err(format!(
@@ -133,10 +116,10 @@ pub async fn compose_restart(project_name: String) -> Result<String, crate::erro
 pub async fn compose_logs(project_name: String, lines: u32) -> Result<String, crate::error::ColimaError> {
     async move {
     let tail = lines.to_string();
-    let output = docker_output(vec![
+    let output = runtime::run(vec![
         "compose".into(), "-p".into(), project_name, "logs".into(),
         "--tail".into(), tail, "--no-color".into(),
-    ]).await?;
+    ], runtime::DEFAULT_TIMEOUT).await?;
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
@@ -156,9 +139,9 @@ pub async fn compose_logs(project_name: String, lines: u32) -> Result<String, cr
 #[tauri::command]
 pub async fn compose_ps(project_name: String) -> Result<String, crate::error::ColimaError> {
     async move {
-    let output = docker_output(vec![
+    let output = runtime::run(vec![
         "compose".into(), "-p".into(), project_name, "ps".into(), "--format".into(), "json".into(),
-    ]).await?;
+    ], runtime::DEFAULT_TIMEOUT).await?;
 
     if !output.status.success() {
         return Err(format!(

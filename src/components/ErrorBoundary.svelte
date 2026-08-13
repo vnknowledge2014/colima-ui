@@ -1,7 +1,8 @@
 <script lang="ts">
   import { onMount, onDestroy } from "svelte";
+  import type { Snippet } from "svelte";
 
-  let { children } = $props<{ children: any }>();
+  let { children } = $props<{ children: Snippet }>();
 
   let hasError = $state(false);
   let errorMsg = $state("");

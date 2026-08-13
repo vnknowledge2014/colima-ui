@@ -1,10 +1,5 @@
-import { isRunningInTauri } from "../env";
-// @ts-nocheck
 import { EventHandler } from "./types";
-import { 
-  colimaApi, dockerApi, volumesApi, networksApi, sysMethods, 
-  composeApi, modelsApi, k8sApi, kindApi, limaApi
-} from "../api";
+import { sysMethods } from "../api";
 
 export const systemRegistry: Record<string, EventHandler> = {
   "system-df": {

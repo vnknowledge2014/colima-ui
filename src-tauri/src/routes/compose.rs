@@ -5,6 +5,7 @@ use axum::{
 };
 use crate::api_server::*;
 use crate::commands::compose;
+use crate::commands::compose_diagnose;
 use crate::routes::payloads::*;
 
 pub async fn api_list_compose() -> (StatusCode, Json<ApiResponse<Vec<compose::ComposeProject>>>) {
@@ -49,6 +50,16 @@ pub async fn api_compose_logs(
     Query(q): Query<ComposeLogsQuery>,
 ) -> (StatusCode, Json<ApiResponse<String>>) {
     match compose::compose_logs(q.project_name, q.lines).await {
+        Ok(out) => ok(out),
+        Err(e) => err(e.to_string()),
+    }
+}
+
+
+pub async fn api_compose_diagnose(
+    Json(body): Json<ComposeDiagnoseBody>,
+) -> (StatusCode, Json<ApiResponse<compose_diagnose::ComposeDiagnosis>>) {
+    match compose_diagnose::compose_diagnose(body.file_path).await {
         Ok(out) => ok(out),
         Err(e) => err(e.to_string()),
     }

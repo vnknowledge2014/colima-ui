@@ -1,0 +1,167 @@
+{
+  "packVersion": "1.0.0",
+  "note": "Rule text is written by this project. standardRefs carry identifiers only — an identifier is a fact, the surrounding text is not. See NOTICE.",
+  "componentMax": {
+    "hardening": 25,
+    "provenance": 20,
+    "freshness": 15
+  },
+  "rules": [
+    {
+      "id": "runs-as-root",
+      "title": "Container runs as root by default",
+      "rationale": "With no USER instruction the image's processes start as uid 0. Anything that escapes a process then starts from the most privileged account inside the container, and any host directory mounted in is written as root.",
+      "remediation": "Create an unprivileged account in the image and end the Dockerfile with USER. If the process needs a low port, publish a high one instead of binding a privileged one as root.",
+      "severity": "high",
+      "component": "hardening",
+      "weight": 8,
+      "minLevel": "l1",
+      "standardRefs": [
+        { "standard": "CIS Docker Benchmark", "version": "1.8.0", "id": "4.1" }
+      ],
+      "check": { "kind": "runs_as_root" }
+    },
+    {
+      "id": "secret-like-env",
+      "title": "Environment variable looks like a credential",
+      "rationale": "A value baked into the image environment travels with every copy of that image and is readable by anyone who can reach the daemon. An image layer cannot be un-published.",
+      "remediation": "Pass the value at run time and rebuild without it. Rotate anything already pushed — deleting a tag does not delete the layer that held it.",
+      "severity": "critical",
+      "component": "hardening",
+      "weight": 7,
+      "minLevel": "l1",
+      "standardRefs": [
+        { "standard": "CIS Docker Benchmark", "version": "1.8.0", "id": "4.10" }
+      ],
+      "check": { "kind": "secret_like_env" }
+    },
+    {
+      "id": "no-healthcheck",
+      "title": "Image declares no health check",
+      "rationale": "Without a health check the runtime knows only that the process is alive, not that it works. A container serving nothing but errors stays \"running\" and keeps receiving traffic.",
+      "remediation": "Add a HEALTHCHECK that exercises the path the service actually serves, rather than only proving a port is open.",
+      "severity": "low",
+      "component": "hardening",
+      "weight": 3,
+      "minLevel": "l2",
+      "standardRefs": [
+        { "standard": "CIS Docker Benchmark", "version": "1.8.0", "id": "4.6" }
+      ],
+      "check": { "kind": "no_healthcheck" }
+    },
+    {
+      "id": "privileged-port",
+      "title": "Image exposes a port below 1024",
+      "rationale": "Ports under 1024 traditionally need privilege to bind, which pushes an image towards running as root. The exposure itself is harmless; the reason it is usually there is not.",
+      "remediation": "Listen on a high port inside the container and map it on the host, for example -p 80:8080.",
+      "severity": "medium",
+      "component": "hardening",
+      "weight": 3,
+      "minLevel": "l2",
+      "standardRefs": [],
+      "check": { "kind": "privileged_port" }
+    },
+    {
+      "id": "add-instead-of-copy",
+      "title": "Build step uses ADD where COPY would do",
+      "rationale": "ADD also fetches URLs and unpacks archives, which turns a file copy into something that can pull in content the build never reviewed.",
+      "remediation": "Use COPY for local files. Fetch remote content in a RUN step so the download and its checksum are visible in the build.",
+      "severity": "low",
+      "component": "hardening",
+      "weight": 2,
+      "minLevel": "l3",
+      "standardRefs": [
+        { "standard": "CIS Docker Benchmark", "version": "1.8.0", "id": "4.9" }
+      ],
+      "check": { "kind": "add_instead_of_copy" }
+    },
+    {
+      "id": "excessive-layers",
+      "title": "Image has an unusually large number of layers",
+      "rationale": "Every layer is a snapshot that keeps whatever the next step deleted. A long chain usually means removed files are still being shipped — including files removed because they were secret.",
+      "remediation": "Combine related RUN steps and use a multi-stage build so only the final artefacts reach the shipped image.",
+      "severity": "low",
+      "component": "hardening",
+      "weight": 2,
+      "minLevel": "l3",
+      "standardRefs": [],
+      "check": { "kind": "excessive_layers", "max": 40 }
+    },
+    {
+      "id": "no-digest-pin",
+      "title": "Image has no digest to pin to",
+      "rationale": "Without a repository digest there is no way to ask for exactly this image again. A deployment elsewhere gets whatever the tag points at that day.",
+      "remediation": "Push the image to a registry and refer to it as name@sha256:… wherever it is deployed.",
+      "severity": "medium",
+      "component": "provenance",
+      "weight": 10,
+      "minLevel": "l1",
+      "standardRefs": [
+        { "standard": "CIS Docker Benchmark", "version": "1.8.0", "id": "4.2" }
+      ],
+      "check": { "kind": "no_digest_pin" }
+    },
+    {
+      "id": "mutable-tag",
+      "title": "Image is referenced by a moving tag",
+      "rationale": "A tag names a position, not an image. Two machines pulling on different days run different software while reporting the same version.",
+      "remediation": "Tag releases with an immutable version and deploy by digest.",
+      "severity": "medium",
+      "component": "provenance",
+      "weight": 6,
+      "minLevel": "l1",
+      "standardRefs": [],
+      "check": { "kind": "mutable_tag" }
+    },
+    {
+      "id": "missing-source-label",
+      "title": "Image does not record where it came from",
+      "rationale": "Without a source or revision label, an image found on a machine cannot be traced to the commit that built it — the first question asked once it turns out to be vulnerable.",
+      "remediation": "Set org.opencontainers.image.source and org.opencontainers.image.revision at build time.",
+      "severity": "low",
+      "component": "provenance",
+      "weight": 4,
+      "minLevel": "l2",
+      "standardRefs": [],
+      "check": { "kind": "missing_source_label" }
+    },
+    {
+      "id": "built-over-90-days-ago",
+      "title": "Image was built more than 90 days ago",
+      "rationale": "Base images receive package updates continuously, so an image that has not been rebuilt cannot contain fixes published since it was built — however clean today's scan looks.",
+      "remediation": "Rebuild on a schedule so patched base layers are picked up, then scan again.",
+      "severity": "low",
+      "component": "freshness",
+      "weight": 4,
+      "minLevel": "l1",
+      "standardRefs": [
+        { "standard": "CIS Docker Benchmark", "version": "1.8.0", "id": "4.4" }
+      ],
+      "check": { "kind": "older_than_days", "days": 90 }
+    },
+    {
+      "id": "built-over-180-days-ago",
+      "title": "Image was built more than 180 days ago",
+      "rationale": "Half a year of published fixes are missing from this image by construction. Its scan result describes the day it was built, not today.",
+      "remediation": "Rebuild from a current base image and scan again.",
+      "severity": "medium",
+      "component": "freshness",
+      "weight": 5,
+      "minLevel": "l1",
+      "standardRefs": [],
+      "check": { "kind": "older_than_days", "days": 180 }
+    },
+    {
+      "id": "built-over-365-days-ago",
+      "title": "Image was built more than a year ago",
+      "rationale": "A year without a rebuild means the base distribution has moved on, and some of what is inside may no longer receive fixes at all.",
+      "remediation": "Rebuild from a supported base image, or replace the image if its base has reached end of life.",
+      "severity": "high",
+      "component": "freshness",
+      "weight": 6,
+      "minLevel": "l1",
+      "standardRefs": [],
+      "check": { "kind": "older_than_days", "days": 365 }
+    }
+  ]
+}

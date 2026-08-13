@@ -1,11 +1,7 @@
 import { isRunningInTauri } from "../env";
 import { runSandboxed } from "./shell";
-// @ts-nocheck
 import { EventHandler } from "./types";
-import { 
-  colimaApi, dockerApi, volumesApi, networksApi, sysMethods, 
-  composeApi, modelsApi, k8sApi, kindApi, limaApi
-} from "../api";
+import { composeApi } from "../api";
 
 export const composeRegistry: Record<string, EventHandler> = {
   "compose-list": {

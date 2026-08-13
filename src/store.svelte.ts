@@ -66,6 +66,20 @@ export const uiState = $state({
    */
   settingsSection: null as string | null,
   /**
+   * Resource to select on the next visit to a page, so a cross-reference lands
+   * on the thing that was clicked instead of the top of a list.
+   *
+   * Same one-shot contract as `helpArticle` and `settingsSection`: the caller
+   * sets it immediately before changing `currentPage`, and the destination page
+   * consumes and clears it. `page` is carried alongside `id` so a page never
+   * acts on a focus meant for a different one — a request the user abandoned
+   * mid-navigation would otherwise fire on whatever page they land on next.
+   *
+   * `id` is the prefixed topology node id (`volume:pgdata`) when the target is
+   * the Topology page, and the resource's own id or name for a list page.
+   */
+  focusResource: null as { page: string; id: string } | null,
+  /**
    * Terminal session to open on the next visit to the Terminal page.
    *
    * Set by anything that wants a shell — today the Kubernetes pod detail
@@ -79,6 +93,18 @@ export const uiState = $state({
 });
 
 /** Navigate to the Help page with a specific article open. */
+/**
+ * Close the AI panel.
+ *
+ * Exists so the notification centre can enforce "one side panel at a time" without
+ * the two panels importing each other. The notification panel is a fixed overlay
+ * with a backdrop, so opening it on top of the AI panel would bury a panel the user
+ * was mid-conversation in behind something they cannot click through.
+ */
+export function closeAiPanel() {
+  uiState.aiPanelOpen = false;
+}
+
 export function openHelpArticle(slug: string) {
   uiState.helpArticle = slug;
   uiState.currentPage = "help";

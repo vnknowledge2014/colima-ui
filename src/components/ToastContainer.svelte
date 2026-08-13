@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { onToast, onToastUpdate, onToastRemove, dismissToast, type ToastMessage } from "../lib/globalToast";
-  import { openErrorLog } from "../store/errorLog.svelte";
+  import { openErrorLog } from "../store/notifications.svelte";
   import { t } from "../lib/i18n.svelte";
 
   // Lifecycle (expiry, eviction, collapsing) is owned by globalToast so it

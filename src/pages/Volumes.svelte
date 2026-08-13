@@ -5,7 +5,9 @@
   import { t } from "../lib/i18n.svelte";
   import { resourceState } from "../store.svelte";
   import * as Icons from "../components/Icons.svelte";
+  import RowActions from "../components/RowActions.svelte";
   import { formatVolumeName } from "../lib/formatters";
+  import { viewInTopology } from "../lib/topology-link";
   import { blockingCapability, capabilityNotice } from "../store/capabilities.svelte";
 
   let searchTerm = $state("");
@@ -24,7 +26,7 @@
     try {
       const list = await volumesApi.listVolumes();
       resourceState.volumes = list;
-    } catch (e) {
+    } catch {
       resourceState.volumes = [];
     } finally {
       resourceState.volumesLoading = false;
@@ -79,12 +81,14 @@
   async function handleRemove(name: string) {
     confirm = {
       title: t("volumes.remove_title", { default: "Remove Volume" }), danger: true, confirmLabel: t("volumes.remove_action", { default: "Remove" }),
-      message: t("volumes.remove_confirm", { default: `Remove volume "${name}"?` }),
+      message: t("volumes.remove_confirm", { default: 'Remove volume "{name}"?', name }),
       onConfirm: async () => {
         confirm = null;
         try {
           await executeRemove(name);
-        } catch (e) {}
+        } catch {
+          // A failed single removal surfaces through the toast in executeRemove.
+        }
       },
       onCancel: () => { confirm = null; }
     };
@@ -143,14 +147,18 @@
     if (targets.length === 0) return;
     const names = targets.map(v => v.Name);
     confirm = {
-      title: t("volumes.remove_selected_title", { default: "Remove Selected Volumes" }), danger: true, confirmLabel: t("volumes.remove_count", { default: `Remove ${names.length}`, count: names.length }),
-      message: t("volumes.remove_batch_confirm", { default: `Remove ${names.length} volume(s)?\n\n${names.join(", ")}\n\nThis cannot be undone.` }),
+      title: t("volumes.remove_selected_title", { default: "Remove Selected Volumes" }), danger: true, confirmLabel: t("volumes.remove_count", { default: "Remove {count}", count: names.length }),
+      message: t("volumes.remove_batch_confirm", {
+        default: "Remove {count} volume(s)?\n\n{names}\n\nThis cannot be undone.",
+        count: names.length,
+        names: names.join(", "),
+      }),
       onConfirm: async () => {
         confirm = null;
         batchLoading = true;
         let ok_count = 0;
         for (const name of names) {
-          try { await volumesApi.removeVolume(name, true); ok_count++; } catch {}
+          try { await volumesApi.removeVolume(name, true); ok_count++; } catch { /* continue with the rest */ }
         }
         globalToast("success", `Removed ${ok_count} volume(s)`);
         selected = new Set();
@@ -163,7 +171,8 @@
 
   function toggleSelect(name: string) {
     const next = new Set(selected);
-    next.has(name) ? next.delete(name) : next.add(name);
+    if (next.has(name)) next.delete(name);
+    else next.add(name);
     selected = next;
   }
 
@@ -248,39 +257,57 @@
       {/if}
     </div>
   {:else}
-    <div style="display: flex; flex-direction: column; gap: 8px;">
+    <div class="resource-card-list">
       {#each filteredVolumes as vol (vol.Name)}
         {@const formatted = formatVolumeName(vol.Name)}
-        <div style="padding: 16px; background: {selected.has(vol.Name) ? 'rgba(88,166,255,0.06)' : 'var(--bg-secondary)'}; border-radius: 12px; border: {selected.has(vol.Name) ? '1px solid rgba(88,166,255,0.25)' : '1px solid var(--border-primary)'}; transition: all 150ms;">
-          <div style="display: flex; justify-content: space-between; align-items: center; gap: 12px;">
-            <div style="display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0;">
-              <input type="checkbox" class="checkbox" checked={selected.has(vol.Name)} onchange={() => toggleSelect(vol.Name)} />
+        <div class="resource-card {selected.has(vol.Name) ? 'selected' : ''}">
+          <!-- Only the header row toggles inspect, so the output it reveals stays
+               selectable without collapsing under the click. -->
+          <div role="button" tabindex="0" class="resource-card-body" style="cursor: pointer;" onkeydown={(e) => e.key === 'Enter' && e.currentTarget.click()} onclick={() => handleInspect(vol.Name)}>
+            <div class="resource-card-main">
+              <input type="checkbox" class="checkbox" checked={selected.has(vol.Name)} onchange={() => toggleSelect(vol.Name)} onclick={(e) => e.stopPropagation()} />
               <div style="min-width: 0;">
-                <div style="font-weight: 600; font-size: var(--text-base); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title={vol.Name}>
+                <div class="resource-card-title" title={vol.Name}>
                   {#if formatted.isHash}
                     <span style="font-family: var(--font-mono); font-size: var(--text-sm); color: var(--text-secondary);">{formatted.display}</span>
                   {:else}
                     {formatted.display}
                   {/if}
                 </div>
-                <div style="color: var(--text-muted); font-size: var(--text-sm); margin-top: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title={`Driver: ${vol.Driver}${vol.Scope ? ` · Scope: ${vol.Scope}` : ''}${vol.Mountpoint ? ` · ${vol.Mountpoint}` : ''}`}>
+                <div class="resource-card-meta" title={`Driver: ${vol.Driver}${vol.Scope ? ` · Scope: ${vol.Scope}` : ''}${vol.Mountpoint ? ` · ${vol.Mountpoint}` : ''}`}>
                   {t('volumes.driver', { default: 'Driver' })}: <span style="color: var(--accent-blue);">{vol.Driver}</span>
                   {#if vol.Scope} · {t('volumes.scope', { default: 'Scope' })}: {vol.Scope}{/if}
                   {#if vol.Mountpoint} · {vol.Mountpoint}{/if}
                 </div>
               </div>
             </div>
-            <div style="display: flex; gap: 6px; flex-shrink: 0;">
-              <button class="btn btn-ghost" onclick={() => handleInspect(vol.Name)} style="font-size: var(--text-xs); padding: 4px 10px;">
-                {inspecting === vol.Name ? "Hide" : "Inspect"}
-              </button>
-              <button class="btn btn-ghost" onclick={() => handleRemove(vol.Name)} disabled={actionLoading === vol.Name} style="font-size: var(--text-xs); padding: 4px 10px; color: var(--accent-red);">
-                {actionLoading === vol.Name ? "..." : "Remove"}
-              </button>
-            </div>
+            <RowActions
+              inline={[{
+                icon: Icons.Topology,
+                label: t('common.view_in_topology', { default: 'View in topology' }),
+                onclick: () => viewInTopology("volume", vol.Name),
+              }]}
+              menu={[
+                {
+                  label: inspecting === vol.Name
+                    ? t('common.hide_details', { default: 'Hide details' })
+                    : t('common.inspect', { default: 'Inspect' }),
+                  icon: Icons.Search,
+                  action: () => handleInspect(vol.Name),
+                },
+                { divider: true, label: '', action: () => {} },
+                {
+                  label: t('volumes.remove', { default: 'Remove' }),
+                  icon: Icons.Trash,
+                  danger: true,
+                  disabled: actionLoading === vol.Name,
+                  action: () => handleRemove(vol.Name),
+                },
+              ]}
+            />
           </div>
           {#if inspecting === vol.Name}
-            <pre style="margin-top: 12px; padding: 12px; background: var(--bg-primary); border-radius: 8px; font-size: var(--text-xs); overflow: auto; max-height: 300px; color: var(--text-secondary);">{inspectData}</pre>
+            <pre class="resource-card-inspect">{inspectData}</pre>
           {/if}
         </div>
       {/each}

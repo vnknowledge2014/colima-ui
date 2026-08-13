@@ -46,8 +46,18 @@ const ARTICLE_META: &[(&str, &str)] = &[
     ("start-colima", "all"),
     ("install-docker-cli", "all"),
     ("install-kubectl", "all"),
+    ("install-trivy", "all"),
     ("common-errors", "all"),
     ("performance-tuning", "macos"),
+    // Honeypot guides. Content only — there is no honeypot feature in the app,
+    // and these deliberately stay articles rather than becoming one.
+    ("honeypot-overview", "all"),
+    ("honeypot-cowrie", "all"),
+    ("honeypot-opencanary", "all"),
+    ("honeypot-logs", "all"),
+    // Falco install guide. Worth shipping on its own: the two traps it covers
+    // (Homebrew installs a different `falco`, and Falco can run with zero
+    // rules loaded) cost more time than the install itself.
 ];
 
 /// `(slug, locale, body)` for every shipped article.
@@ -72,6 +82,10 @@ const ARTICLE_BODIES: &[(&str, &str, &str)] = &[
     ("install-kubectl", "vi", include_str!("../../resources/kb/vi/install-kubectl.md")),
     ("install-kubectl", "ja", include_str!("../../resources/kb/ja/install-kubectl.md")),
     ("install-kubectl", "zh", include_str!("../../resources/kb/zh/install-kubectl.md")),
+    ("install-trivy", "en", include_str!("../../resources/kb/en/install-trivy.md")),
+    ("install-trivy", "vi", include_str!("../../resources/kb/vi/install-trivy.md")),
+    ("install-trivy", "ja", include_str!("../../resources/kb/ja/install-trivy.md")),
+    ("install-trivy", "zh", include_str!("../../resources/kb/zh/install-trivy.md")),
     ("common-errors", "en", include_str!("../../resources/kb/en/common-errors.md")),
     ("common-errors", "vi", include_str!("../../resources/kb/vi/common-errors.md")),
     ("common-errors", "ja", include_str!("../../resources/kb/ja/common-errors.md")),
@@ -80,6 +94,22 @@ const ARTICLE_BODIES: &[(&str, &str, &str)] = &[
     ("performance-tuning", "vi", include_str!("../../resources/kb/vi/performance-tuning.md")),
     ("performance-tuning", "ja", include_str!("../../resources/kb/ja/performance-tuning.md")),
     ("performance-tuning", "zh", include_str!("../../resources/kb/zh/performance-tuning.md")),
+    ("honeypot-overview", "en", include_str!("../../resources/kb/en/honeypot-overview.md")),
+    ("honeypot-overview", "vi", include_str!("../../resources/kb/vi/honeypot-overview.md")),
+    ("honeypot-overview", "ja", include_str!("../../resources/kb/ja/honeypot-overview.md")),
+    ("honeypot-overview", "zh", include_str!("../../resources/kb/zh/honeypot-overview.md")),
+    ("honeypot-cowrie", "en", include_str!("../../resources/kb/en/honeypot-cowrie.md")),
+    ("honeypot-cowrie", "vi", include_str!("../../resources/kb/vi/honeypot-cowrie.md")),
+    ("honeypot-cowrie", "ja", include_str!("../../resources/kb/ja/honeypot-cowrie.md")),
+    ("honeypot-cowrie", "zh", include_str!("../../resources/kb/zh/honeypot-cowrie.md")),
+    ("honeypot-opencanary", "en", include_str!("../../resources/kb/en/honeypot-opencanary.md")),
+    ("honeypot-opencanary", "vi", include_str!("../../resources/kb/vi/honeypot-opencanary.md")),
+    ("honeypot-opencanary", "ja", include_str!("../../resources/kb/ja/honeypot-opencanary.md")),
+    ("honeypot-opencanary", "zh", include_str!("../../resources/kb/zh/honeypot-opencanary.md")),
+    ("honeypot-logs", "en", include_str!("../../resources/kb/en/honeypot-logs.md")),
+    ("honeypot-logs", "vi", include_str!("../../resources/kb/vi/honeypot-logs.md")),
+    ("honeypot-logs", "ja", include_str!("../../resources/kb/ja/honeypot-logs.md")),
+    ("honeypot-logs", "zh", include_str!("../../resources/kb/zh/honeypot-logs.md")),
 ];
 
 #[derive(Debug, Clone, Serialize)]
@@ -116,8 +146,7 @@ fn platform_of(slug: &str) -> &'static str {
     ARTICLE_META
         .iter()
         .find(|(s, _)| *s == slug)
-        .map(|(_, p)| *p)
-        .unwrap_or("all")
+        .map_or("all", |(_, p)| *p)
 }
 
 /// Normalize whatever the frontend sent into a locale we actually have.
@@ -216,7 +245,7 @@ pub async fn kb_get_article(slug: String, locale: String) -> Result<Article, Col
     let requested = resolve_locale(&locale).to_string();
     let conn = db().lock().map_err(|_| ColimaError::internal("KB lock poisoned"))?;
 
-    let mut fetch = |locale: &str| -> Result<Option<Article>, ColimaError> {
+    let fetch = |locale: &str| -> Result<Option<Article>, ColimaError> {
         conn.query_row(
             "SELECT slug, locale, title, body, platform FROM articles WHERE slug = ?1 AND locale = ?2",
             params![slug, locale],
@@ -401,6 +430,7 @@ mod tests {
             "install-colima",
             "install-docker-cli",
             "install-kubectl",
+            "install-trivy",
             "common-errors",
         ] {
             assert!(

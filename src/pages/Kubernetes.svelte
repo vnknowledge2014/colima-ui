@@ -41,19 +41,32 @@
   let applying = $state(false);
   let scaleValue = $state<number | null>(null);
   let kubectlMissing = $state(false);
-  let crdTypes = $state<{ id: string; label: string; resource: string; group: string }[]>([]);
+  let crdTypes = $state<{ id: string; label: string; resource: string; group: string; canRestart?: boolean }[]>([]);
   let benchModal = $state<K8sResource | null>(null);
   let benchUrl = $state("");
   let benchConc = $state(5);
   let benchReqs = $state(50);
   let benchMethod = $state("GET");
   let benchRunning = $state(false);
-  let benchResult = $state<any>(null);
+  let benchResult = $state<{
+    requests_per_sec: number;
+    success: number;
+    total_requests: number;
+    failed: number;
+    avg_latency_ms: number;
+    min_latency_ms: number;
+    max_latency_ms: number;
+    p50_ms: number;
+    p95_ms: number;
+    p99_ms: number;
+    total_time_ms: number;
+    concurrency: number;
+  } | null>(null);
   let ctxMenu = $state<{ x: number; y: number; item: K8sResource } | null>(null);
   
   let eventSource: EventSource | null = null;
   let searchInput: HTMLInputElement | null = $state(null);
-  let timeoutId: any = null;
+  let timeoutId: ReturnType<typeof setTimeout> | null = null;
 
   const RESOURCE_GROUPS = [
     {
@@ -165,7 +178,7 @@
       const nsRaw = await k8sApi.namespaces();
       let nsList = [];
       if (Array.isArray(nsRaw)) {
-        nsList = nsRaw.map((ns: any) => ({ name: ns.name || "" })).filter(ns => ns.name);
+        nsList = nsRaw.map((ns: { name?: string }) => ({ name: ns.name || "" })).filter(ns => ns.name);
       } else {
         const parsed = parseItems(nsRaw);
         nsList = parsed.map(n => ({ name: n.name })).filter(ns => ns.name);
@@ -175,19 +188,24 @@
       try {
         const fwds = await k8sApi.portForwardList();
         activeForwards = fwds.split("\n").filter(Boolean);
-      } catch {}
+      } catch {
+        // Port forwarding is optional; a failed probe should not kill the view.
+      }
 
       try {
         const crdRaw = await k8sApi.crds();
         const parsed = typeof crdRaw === "string" ? JSON.parse(crdRaw) : crdRaw;
-        const crds = (parsed.items || []).map((crd: any) => {
+        const crds = ((parsed as { items?: unknown[] }).items || []).map((item) => {
+          const crd = item as { metadata?: { name?: string }; spec?: { names?: { kind?: string }; group?: string } };
           const name = crd.metadata?.name || "";
           const kind = crd.spec?.names?.kind || name;
           const group = crd.spec?.group || "";
           return { id: `crd:${name}`, label: kind, resource: name, group };
         }).slice(0, 30);
         crdTypes = crds;
-      } catch {}
+      } catch {
+        // CRD discovery failing should not break the Kubernetes view.
+      }
     } catch {
       k8sState.connected = false;
     }
@@ -409,7 +427,12 @@
   }
 
   function getCtxItems(item: K8sResource) {
-    const result: any[] = [];
+    const result: {
+      label: string;
+      action: () => Promise<void> | void;
+      danger?: boolean;
+      divider?: boolean;
+    }[] = [];
     if (activeResource === "pods") {
       result.push({ label: "View Logs", action: async () => { await openDetail(item); detailTab = "logs"; } });
       result.push({ label: "Exec Shell", action: async () => handleExec(item) });
@@ -425,7 +448,7 @@
     if (activeResource === "services") {
       result.push({ label: "⚡ Benchmark", action: async () => {
         benchModal = item;
-        const portStr = (item as any).port?.split("/")[0]?.split(",")[0] || (item as any).ports?.split("/")[0]?.split(",")[0] || "80";
+        const portStr = item.ports?.split("/")[0]?.split(",")[0] || "80";
         benchUrl = `http://localhost:${portStr}`;
       }});
     }
@@ -450,7 +473,7 @@
     {#if !kubectlMissing && contexts.length > 1}
       <div class="content-header-actions" style="display: flex; gap: 8px; align-items: center;">
         <select bind:value={k8sState.currentCtx} onchange={() => handleContextSwitch(k8sState.currentCtx)} class="input select" style="color: var(--accent-purple); font-family: var(--font-mono); min-width: 150px;">
-          {#each contexts as c}
+          {#each contexts as c (c)}
             <option value={c}>{c}</option>
           {/each}
         </select>
@@ -499,14 +522,14 @@
       {/if}
       {#if contexts.length > 1}
         <select bind:value={k8sState.currentCtx} onchange={() => handleContextSwitch(k8sState.currentCtx)} class="input select" style="color: var(--accent-purple); font-family: var(--font-mono); min-width: 150px;">
-          {#each contexts as c}
+          {#each contexts as c (c)}
             <option value={c}>{c}</option>
           {/each}
         </select>
       {/if}
       <select bind:value={k8sState.namespace} class="input select" style="font-family: var(--font-mono); min-width: 150px;">
         <option value="all">All Namespaces</option>
-        {#each namespaces as ns}
+        {#each namespaces as ns (ns)}
           <option value={ns.name}>{ns.name}</option>
         {/each}
       </select>
@@ -524,14 +547,14 @@
           Overview
         </button>
       </div>
-      {#each RESOURCE_GROUPS as group}
+      {#each RESOURCE_GROUPS as group (group.label)}
         {@const groupActive = group.items.some(i => i.id === activeResource)}
         <div style="margin-bottom: 16px;">
           <div class="k8s-group-label" style="color: {groupActive ? 'var(--accent-blue)' : 'var(--text-muted)'};">
             <span class="k8s-group-bar" style="background: {groupActive ? 'var(--accent-blue)' : 'transparent'}; box-shadow: {groupActive ? '0 0 6px var(--accent-blue)' : 'none'};"></span>
             {group.label}
           </div>
-          {#each group.items as item}
+          {#each group.items as item (item.id)}
             <button onclick={() => { k8sState.activeResource = item.id; k8sState.items = []; filter = ""; }} class="k8s-nav-item" style="background: {activeResource === item.id ? 'rgba(88,166,255,0.12)' : 'transparent'}; color: {activeResource === item.id ? 'var(--accent-blue)' : 'var(--text-secondary)'}; font-weight: {activeResource === item.id ? 600 : 400};">
               {item.label}
             </button>
@@ -544,7 +567,7 @@
             <span class="k8s-group-bar" style="background: {crdTypes.some(c => c.id === activeResource) ? 'var(--accent-purple)' : 'transparent'}; box-shadow: {crdTypes.some(c => c.id === activeResource) ? '0 0 6px var(--accent-purple)' : 'none'};"></span>
             Custom Resources ({crdTypes.length})
           </div>
-          {#each crdTypes as crd}
+          {#each crdTypes as crd (crd.id)}
             <button onclick={() => { k8sState.activeResource = crd.id; k8sState.items = []; filter = ""; }} title="{crd.label} ({crd.group})" class="k8s-nav-item" style="background: {activeResource === crd.id ? 'rgba(88,166,255,0.12)' : 'transparent'}; color: {activeResource === crd.id ? 'var(--accent-blue)' : 'var(--text-secondary)'}; font-weight: {activeResource === crd.id ? 600 : 400}; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
               {crd.label}
             </button>
@@ -581,7 +604,7 @@
           <div class="card" style="overflow: auto;">
             <div style="display: grid; grid-template-columns: {columns.map(col => col.key === 'name' ? 'minmax(120px, 2fr)' : col.key === 'namespace' || col.key === 'node' ? 'minmax(80px, 1fr)' : 'auto').join(' ')} auto; min-width: 100%;">
               <!-- Header row -->
-              {#each columns as col}
+              {#each columns as col (col.key)}
                 <div style="text-align: left; padding: 10px 16px; font-size: var(--text-xs); font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; background: var(--bg-content); border-bottom: 1px solid var(--border-primary); position: sticky; top: 0; z-index: 1;">
                   {col.label}
                 </div>
@@ -592,7 +615,7 @@
 
               <!-- Data rows -->
               {#each filtered as item (item.namespace + '/' + item.name)}
-                {#each columns as col}
+              {#each columns as col (col.key)}
                   {@const val = (col.key === 'age' || (col.key === 'lastSchedule' && item[col.key] !== 'Never')) ? timeAgo(item[col.key] || '') : String(item[col.key as keyof K8sResource] || '')}
                   {@const color = (col.key === 'status' || col.key === 'type' || col.key === 'restarts' || col.key === 'replicas') ? statusColor(val) : ''}
                   <div role="button" tabindex="0" onkeydown={(e) => e.key === 'Enter' && e.currentTarget.click()} onclick={() => openDetail(item)} oncontextmenu={(e) => { e.preventDefault(); ctxMenu = { x: e.clientX, y: e.clientY, item }; }} style="padding: 12px 16px; cursor: pointer; font-family: {col.mono ? 'var(--font-mono)' : 'inherit'}; font-size: var(--text-xs); color: {col.key === 'namespace' || col.key === 'age' ? 'var(--text-muted)' : 'var(--text-primary)'}; font-weight: {col.key === 'name' ? 500 : 'inherit'}; border-bottom: 1px solid var(--border-subtle); display: flex; align-items: center; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
@@ -641,7 +664,7 @@
                       <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v6m0 4v10M4.93 4.93l4.24 4.24m1.66 1.66l4.24 4.24M2 12h6m4 0h10M4.93 19.07l4.24-4.24m1.66-1.66l4.24-4.24"/></svg>
                     </button>
                   {/if}
-                  {#if (activeInfo as any)?.canRestart}
+                  {#if activeInfo?.canRestart}
                     <button class="btn btn-ghost" style="font-size: var(--text-xs); color: var(--accent-yellow); padding: 2px 6px;" onclick={() => handleRestart(item)} aria-label="Restart Resource" title="Restart Resource">
                       <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.3"/></svg>
                     </button>
@@ -722,7 +745,7 @@
                   <div style="padding: 8px 16px; border-bottom: 1px solid var(--border-primary); display: flex; gap: 12px; align-items: center; background: var(--bg-secondary);">
                     {#if containers.length > 1}
                       <select bind:value={selectedContainer} onchange={() => fetchContainerLogs(selectedContainer)} style="background: var(--bg-content); border: 1px solid var(--border-primary); border-radius: 4px; padding: 4px 8px; color: var(--text-primary); font-size: var(--text-xs); font-family: var(--font-mono);">
-                        {#each containers as c}
+                        {#each containers as c (c)}
                           <option value={c}>{c}</option>
                         {/each}
                       </select>
@@ -844,7 +867,7 @@
                       </tr>
                     </thead>
                     <tbody>
-                      {#each [{ l: "Avg", v: benchResult.avg_latency_ms }, { l: "Min", v: benchResult.min_latency_ms }, { l: "Max", v: benchResult.max_latency_ms }, { l: "P50", v: benchResult.p50_ms }, { l: "P95", v: benchResult.p95_ms, c: "var(--accent-yellow)" }, { l: "P99", v: benchResult.p99_ms, c: "var(--accent-red)" }] as r}
+                      {#each [{ l: "Avg", v: benchResult.avg_latency_ms }, { l: "Min", v: benchResult.min_latency_ms }, { l: "Max", v: benchResult.max_latency_ms }, { l: "P50", v: benchResult.p50_ms }, { l: "P95", v: benchResult.p95_ms, c: "var(--accent-yellow)" }, { l: "P99", v: benchResult.p99_ms, c: "var(--accent-red)" }] as r (r.l)}
                         <tr>
                           <td style="padding: 4px; color: var(--text-secondary);">{r.l}</td>
                           <td style="padding: 4px; text-align: right; color: {r.c || 'var(--text-primary)'};">{r.v}ms</td>

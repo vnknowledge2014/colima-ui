@@ -19,6 +19,12 @@ impl DockerComposeAdapter {
     }
 }
 
+impl Default for DockerComposeAdapter {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[async_trait]
 impl ComposeManager for DockerComposeAdapter {
     fn name(&self) -> &str {

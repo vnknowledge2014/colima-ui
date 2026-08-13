@@ -16,6 +16,12 @@ impl KubectlAdapter {
     }
 }
 
+impl Default for KubectlAdapter {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[async_trait]
 impl Orchestrator for KubectlAdapter {
     fn name(&self) -> &str {

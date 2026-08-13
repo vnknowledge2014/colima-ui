@@ -207,8 +207,7 @@ pub fn detect_host_specs() -> HostSpecs {
     // Total memory in GiB
     let memory_gib = if cfg!(target_os = "macos") {
         parse_sysctl_u64("hw.memsize")
-            .map(|bytes| (bytes / 1073741824) as u32)
-            .unwrap_or(8)
+            .map_or(8, |bytes| (bytes / 1073741824) as u32)
     } else {
         // Linux: /proc/meminfo
         std::fs::read_to_string("/proc/meminfo")
@@ -392,7 +391,7 @@ pub async fn get_app_context(app: tauri::AppHandle) -> Result<String, crate::err
                                 ));
                             }
                         }
-                        context.push_str("\n");
+                        context.push('\n');
                     }
                 }
             }

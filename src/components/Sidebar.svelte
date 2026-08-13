@@ -6,6 +6,14 @@
   import { t, getLanguage } from "../lib/i18n.svelte";
   import { dashboardState } from "../store.svelte";
   import type { SystemInfo } from "../lib/api";
+  import { Bell } from "./Icons.svelte";
+  import {
+    unreadCount,
+    openNotificationPanel,
+    closeNotificationPanel,
+    notificationState,
+  } from "../store/notifications.svelte";
+  import { closeAiPanel } from "../store.svelte";
 
   let { systemInfo, onStartTour } = $props<{
     systemInfo: SystemInfo | null;
@@ -13,6 +21,23 @@
   }>();
 
   const instances = $derived(dashboardState.colimaInstances);
+  const unread = $derived(unreadCount());
+
+  /**
+   * Only one side panel at a time.
+   *
+   * Both are fixed to the same edge, so opening the second draws it over the first
+   * and leaves two Escape handlers listening. Deciding it here keeps the two panels
+   * from having to know about each other.
+   */
+  function openNotifications() {
+    if (notificationState.panelOpen) {
+      closeNotificationPanel();
+      return;
+    }
+    closeAiPanel();
+    openNotificationPanel();
+  }
 
   let currentTime = $state(new Date());
   const formatTime = () => currentTime.toLocaleTimeString();
@@ -39,6 +64,9 @@
         { id: "volumes", label: t("sidebar.volumes", { default: "Volumes" }), icon: Icons.Volume },
         { id: "networks", label: t("sidebar.networks", { default: "Networks" }), icon: Icons.Network },
         { id: "compose", label: t("sidebar.compose", { default: "Compose" }), icon: Icons.Compose },
+        { id: "topology", label: t("sidebar.topology", { default: "Topology" }), icon: Icons.Topology },
+        { id: "activity", label: t("sidebar.activity", { default: "Activity" }), icon: Icons.Activity },
+        { id: "security", label: t("sidebar.security", { default: "Security" }), icon: Icons.Warning },
       ],
     },
     {
@@ -125,6 +153,44 @@
     display: none !important;
     width: 0 !important;
     height: 0 !important;
+  }
+
+  /* Sits in the header rather than the nav list: it opens a panel over the current
+     page instead of going anywhere, and the nav list has no room left. */
+  .notif-button {
+    position: relative;
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 4px;
+    border: none;
+    border-radius: 6px;
+    background: none;
+    color: var(--text-secondary);
+    cursor: pointer;
+  }
+  .notif-button:hover {
+    background: var(--bg-card-hover);
+    color: var(--text-primary);
+  }
+  :global(.sidebar.collapsed) .notif-button {
+    margin-left: 0;
+  }
+  .notif-badge {
+    position: absolute;
+    top: -2px;
+    right: -2px;
+    min-width: 15px;
+    padding: 0 3px;
+    border-radius: 8px;
+    background: var(--accent-red, #f85149);
+    color: #fff;
+    font-size: 10px;
+    line-height: 15px;
+    text-align: center;
+    /* The button's aria-label carries the count too: a badge is a visual cue and
+       a screen reader would otherwise read a bare number with no subject. */
   }
 
   .nav-panel-hint {
@@ -293,13 +359,28 @@
   <div class="sidebar-header" data-tauri-drag-region>
     <img src="/colima_icon.png" alt="ColimaUI" class="sidebar-logo" data-tauri-drag-region />
     <h1 class="sidebar-title" data-tauri-drag-region>ColimaUI</h1>
+    <!-- Here rather than in `navGroups`: this opens a panel over the current page
+         instead of navigating anywhere, and the nav list is already at the height
+         the viewport allows. -->
+    <button
+      class="notif-button"
+      onclick={openNotifications}
+      aria-label={unread > 0
+        ? t('notifications.unread_label', { default: '{count} unread notifications', count: unread })
+        : t('notifications.title', { default: 'Notifications' })}
+    >
+      {@html Bell}
+      {#if unread > 0}
+        <span class="notif-badge" aria-hidden="true">{unread > 99 ? '99+' : unread}</span>
+      {/if}
+    </button>
   </div>
 
   <nav class="sidebar-nav" data-tour-id="sidebar-nav">
-    {#each navGroups as group}
+    {#each navGroups as group (group.label)}
       <div class="nav-section">
         <div class="nav-section-label">{group.label}</div>
-        {#each group.items as item}
+        {#each group.items as item (item.id)}
           {@const isPanelToggle = item.id === "ai-chat"}
           <button
             class="nav-item {isPanelToggle
@@ -311,6 +392,10 @@
                 : ''}"
             onclick={() => {
               if (isPanelToggle) {
+                // Same rule as the bell: one side panel at a time. The AI panel
+                // would otherwise open underneath the notification centre's
+                // backdrop, visible but unclickable.
+                if (!uiState.aiPanelOpen) closeNotificationPanel();
                 uiState.aiPanelOpen = !uiState.aiPanelOpen;
               } else {
                 uiState.currentPage = item.id;

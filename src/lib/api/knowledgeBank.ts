@@ -1,5 +1,4 @@
 import { call } from "./client";
-import type { ColimaInstance, InstanceStatus, StartConfig, DockerContainer, DockerImage, SystemInfo, AiModel, DockerVolume, DockerNetwork } from "./types";
 
 // ===== Knowledge Bank API =====
 
@@ -7,12 +6,14 @@ export interface AgentMemoryItem {
   id: string;
   memory_type: string;
   content: string;
-  created_at: string;
+  created_at: number;
 }
 
 export const knowledgeBankApi = {
   query: (errorText: string) =>
-    call<any>("kb_query", { error_text: errorText }, "POST", "/api/kb/query", undefined, { error_text: errorText }),
+    call<{ context_text: string }>("kb_query", { error_text: errorText }, "POST", "/api/kb/query", undefined, { error_text: errorText }),
+  feedback: (solutionId: number, isLike: boolean) =>
+    call<string>("kb_feedback", { solutionId, isLike }, "POST", "/api/kb/feedback", undefined, { solutionId, isLike }),
   searchMemory: (query: string, limit = 10) =>
     call<string[]>("search_memory", { query, limit }, "POST", "/api/kb/search", undefined, { query, limit }),
   getAllMemories: () =>

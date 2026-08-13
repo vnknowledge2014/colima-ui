@@ -229,8 +229,10 @@ pub async fn api_ai_context() -> (StatusCode, Json<ApiResponse<String>>) {
     let resource_dir = exe_path
         .parent() // MacOS/
         .and_then(|p| p.parent()) // Contents/
-        .map(|p| p.join("Resources").join("resources"))
-        .unwrap_or_else(|| exe_path.parent().unwrap_or(&exe_path).to_path_buf());
+        .map_or_else(
+            || exe_path.parent().unwrap_or(&exe_path).to_path_buf(),
+            |p| p.join("Resources").join("resources"),
+        );
 
     let context_path = resource_dir.join("CONTEXT.md");
     match std::fs::read_to_string(&context_path) {

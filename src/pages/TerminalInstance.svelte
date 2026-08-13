@@ -20,7 +20,7 @@
     sessionId: string;
     kind: SessionKind;
     active: boolean;
-    termTheme: any;
+    termTheme: NonNullable<ConstructorParameters<typeof XTerm>[0]>["theme"];
   }>();
 
   let termRef = $state<HTMLDivElement | null>(null);

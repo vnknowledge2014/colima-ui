@@ -3,6 +3,10 @@
   import { composeApi, type ComposeProject } from "../lib/api";
   import { globalToast } from "../lib/globalToast";
   import { t } from "../lib/i18n.svelte";
+  import DiagnosePanel from "../components/compose/DiagnosePanel.svelte";
+  import RowActions from "../components/RowActions.svelte";
+  import * as Icons from "../components/Icons.svelte";
+  import { viewInTopology, consumeFocus } from "../lib/topology-link";
 
   let projects = $state<ComposeProject[]>([]);
   let loading = $state(true);
@@ -11,7 +15,7 @@
   let selectedProject = $state<ComposeProject | null>(null);
   let logs = $state("");
   let services = $state("");
-  let detailTab = $state<"services" | "logs">("services");
+  let detailTab = $state<"services" | "logs" | "diagnose">("services");
 
   async function fetchProjects() {
     try {
@@ -27,7 +31,13 @@
   }
 
   onMount(() => {
-    fetchProjects();
+    fetchProjects().then(() => {
+      // Arrived from the topology graph's "Open in Compose": open that
+      // project's panel. A project that has since gone is ignored.
+      const focus = consumeFocus("compose");
+      const match = focus ? projects.find((p) => p.Name === focus) : undefined;
+      if (match) openProject(match);
+    });
     const interval = setInterval(() => {
       if (document.visibilityState === "visible") fetchProjects();
     }, 15000);
@@ -60,11 +70,28 @@
         composeApi.ps(p.Name),
         composeApi.logs(p.Name, 100),
       ]);
-      services = svc;
+      services = formatServices(svc);
       logs = lg;
     } catch (e) {
       services = `Error: ${e}`;
       logs = `Error: ${e}`;
+    }
+  }
+
+  // `docker compose ps --format json` emits JSONL (one object per line).
+  // Parse and pretty-print so the Services tab shows readable, indented JSON
+  // instead of raw lines; fall back to the original text if anything is off.
+  function formatServices(raw: string): string {
+    const lines = raw
+      .split("\n")
+      .map((l) => l.trim())
+      .filter((l) => l.startsWith("{"));
+    if (lines.length === 0) return raw;
+    try {
+      const parsed = lines.map((l) => JSON.parse(l));
+      return JSON.stringify(parsed, null, 2);
+    } catch {
+      return raw;
     }
   }
 
@@ -107,41 +134,52 @@
     {/if}
 
     {#if projects.length > 0}
-      <div style="display: flex; flex-direction: column; gap: 8px;">
+      <div class="resource-card-list">
         {#each projects as p (p.Name)}
           {@const { running } = parseStatus(p.Status)}
           {@const isLoading = actionLoading?.startsWith(p.Name)}
           {@const hasRunning = running > 0}
-          <div role="button" tabindex="0" onkeydown={(e) => e.key === 'Enter' && e.currentTarget.click()} onclick={() => openProject(p)} style="padding: 16px; background: var(--bg-secondary); border-radius: 12px; border: 1px solid var(--border-primary); cursor: pointer; opacity: {isLoading ? 0.6 : 1}; transition: all 200ms;">
-            <div style="display: flex; justify-content: space-between; align-items: center;">
-              <div>
+          <div role="button" tabindex="0" class="resource-card" onkeydown={(e) => e.key === 'Enter' && e.currentTarget.click()} onclick={() => openProject(p)} style="cursor: pointer; opacity: {isLoading ? 0.6 : 1};">
+            <div class="resource-card-body">
+              <div style="min-width: 0;">
                 <div style="display: flex; align-items: center; gap: 8px;">
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={hasRunning ? "var(--accent-blue)" : "var(--text-muted)"} stroke-width="2">
-                    <path d="M22 8.35V20a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V8.35A2 2 0 0 1 3.26 6.5l8-3.2a2 2 0 0 1 1.48 0l8 3.2A2 2 0 0 1 22 8.35Z"/>
-                    <path d="M6 18h12M6 14h12M6 10h12"/>
-                  </svg>
-                  <span style="font-weight: 600; font-size: var(--text-md);">{p.Name}</span>
+                  <span class="compose-project-icon" style="color: {hasRunning ? 'var(--accent-blue)' : 'var(--text-muted)'};">{@html Icons.Container}</span>
+                  <span class="resource-card-title">{p.Name}</span>
                   <span class="badge badge-{hasRunning ? 'running' : 'stopped'}">
                     <span class="badge-dot"></span>
                     {p.Status}
                   </span>
                 </div>
                 {#if p.ConfigFiles}
-                  <div style="color: var(--text-muted); font-size: var(--text-xs); margin-top: 4px; font-family: var(--font-mono);">
+                  <div class="resource-card-meta" style="font-family: var(--font-mono);">
                     {p.ConfigFiles}
                   </div>
                 {/if}
               </div>
-              <div role="button" tabindex="0" style="display: flex; gap: 6px;" onkeydown={(e) => e.key === 'Enter' && e.currentTarget.click()} onclick={e => e.stopPropagation()}>
-                <button class="btn btn-ghost" style="font-size: var(--text-xs);" disabled={!!isLoading} onclick={() => handleAction(p.Name, "restart")}>
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.3"/></svg>
-                  {t('compose.restart', { default: 'Restart' })}
-                </button>
-                <button class="btn btn-ghost" style="font-size: var(--text-xs); color: var(--accent-red);" disabled={!!isLoading} onclick={() => handleAction(p.Name, "down")}>
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/></svg>
-                  {t('compose.down', { default: 'Down' })}
-                </button>
-              </div>
+              <!-- Restart stays inline as the routine move; Down tears the whole
+                   project off, so it sits behind the overflow menu. -->
+              <RowActions
+                inline={[
+                  {
+                    icon: Icons.Topology,
+                    label: t('common.view_in_topology', { default: 'View in topology' }),
+                    onclick: () => viewInTopology("project", p.Name),
+                  },
+                  {
+                    icon: Icons.Refresh,
+                    label: t('compose.restart', { default: 'Restart' }),
+                    disabled: !!isLoading,
+                    onclick: () => handleAction(p.Name, "restart"),
+                  },
+                ]}
+                menu={[{
+                  label: t('compose.down', { default: 'Down' }),
+                  icon: Icons.Stop,
+                  danger: true,
+                  disabled: !!isLoading,
+                  action: () => handleAction(p.Name, "down"),
+                }]}
+              />
             </div>
           </div>
         {/each}
@@ -173,17 +211,42 @@
       <div style="display: flex; gap: 2px; border-bottom: 1px solid var(--border-primary); margin-bottom: 16px;">
         <button class="btn" style="background: transparent; border: none; border-bottom: {detailTab === 'services' ? '2px solid var(--accent-blue)' : '2px solid transparent'}; color: {detailTab === 'services' ? 'var(--text-primary)' : 'var(--text-secondary)'}; border-radius: 0; padding: 8px 16px; font-weight: {detailTab === 'services' ? 600 : 400};" onclick={() => detailTab = "services"}>Services</button>
         <button class="btn" style="background: transparent; border: none; border-bottom: {detailTab === 'logs' ? '2px solid var(--accent-blue)' : '2px solid transparent'}; color: {detailTab === 'logs' ? 'var(--text-primary)' : 'var(--text-secondary)'}; border-radius: 0; padding: 8px 16px; font-weight: {detailTab === 'logs' ? 600 : 400};" onclick={() => detailTab = "logs"}>Logs</button>
+        <button class="btn" style="background: transparent; border: none; border-bottom: {detailTab === 'diagnose' ? '2px solid var(--accent-blue)' : '2px solid transparent'}; color: {detailTab === 'diagnose' ? 'var(--text-primary)' : 'var(--text-secondary)'}; border-radius: 0; padding: 8px 16px; font-weight: {detailTab === 'diagnose' ? 600 : 400};" onclick={() => detailTab = "diagnose"}>
+          <!-- No PRO badge: this tab is free. The badge sat here while the tab
+               was gated, and leaving it would tell free users a feature they can
+               use is out of reach. The Pro offer is inside the panel, on the
+               auto-fix affordance, which is the part that is actually paid. -->
+          {t('compose.diagnose.tab', { default: 'Diagnose' })}
+        </button>
       </div>
 
       {#if detailTab === "services"}
-        <pre style="padding: 12px; background: var(--bg-primary); border-radius: 8px; font-size: var(--text-xs); overflow: auto; max-height: 50vh; color: var(--text-secondary); margin: 0; font-family: var(--font-mono);">
-          {services || "No services running"}
-        </pre>
+        <pre style="padding: 12px; background: var(--bg-primary); border-radius: 8px; font-size: var(--text-xs); overflow: auto; max-height: 50vh; color: var(--text-secondary); margin: 0; font-family: var(--font-mono);">{services || "No services running"}</pre>
+      {/if}
+
+      {#if detailTab === "diagnose"}
+        <!--
+          Diagnosis is free, and is not gated.
+
+          It was, behind a sidecar capability that nothing declares — so the tab
+          was locked for every user including paying ones, while the backend it
+          calls (`/api/compose/diagnose`) shipped and worked.
+
+          Diagnosing costs nothing per use: Docker's own validation plus a local
+          Knowledge Bank lookup, no network. The AI step inside the panel runs on
+          the user's own key.
+
+          The Pro offer lives one level down, in `DiagnosePanel`: applying the
+          fix, not reading it.
+        -->
+        <div style="max-height: 50vh; overflow: auto;">
+          <DiagnosePanel configFiles={selectedProject.ConfigFiles} />
+        </div>
       {/if}
 
       {#if detailTab === "logs"}
         <div class="log-viewer" style="max-height: 50vh;">
-          {#each logs.split("\n") as line, i}
+          {#each logs.split("\n") as line, i (i)}
             {@const cls = /error|fatal|panic/i.test(line) ? "log-error" : /warn/i.test(line) ? "log-warn" : ""}
             <div class="log-line {cls}">
               <span style="color: var(--text-muted); margin-right: 8px; user-select: none;">{i + 1}</span>
@@ -199,3 +262,13 @@
     </div>
   </div>
 {/if}
+
+<style>
+  /* Project glyph takes its colour from the row state, matching how the status
+     dot is coloured on the containers table. */
+  .compose-project-icon {
+    display: inline-flex;
+    align-items: center;
+    flex-shrink: 0;
+  }
+</style>

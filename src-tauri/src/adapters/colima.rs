@@ -22,6 +22,12 @@ impl ColimaAdapter {
     }
 }
 
+impl Default for ColimaAdapter {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[async_trait]
 impl VMManager for ColimaAdapter {
     fn name(&self) -> &str {

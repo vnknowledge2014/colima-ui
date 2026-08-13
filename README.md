@@ -84,7 +84,7 @@ Grab the latest release from [**GitHub Releases**](https://github.com/vnknowledg
 
 - **[Colima](https://github.com/abiosoft/colima)** — Container runtime manager
 - **[Docker CLI](https://docs.docker.com/engine/install/)** — Container engine client
-- **[Node.js](https://nodejs.org/) ≥ 18** — Frontend build
+- **[Node.js](https://nodejs.org/) ≥ 22.22.2** — Frontend build and test suite (`.nvmrc` pins the line; jsdom and undici in the test stack need it, and an older Node fails as an unrelated-looking `markAsUncloneable` error rather than a version complaint)
 - **[Rust](https://www.rust-lang.org/tools/install)** — Backend build
 - **[kubectl](https://kubernetes.io/docs/tasks/tools/)** *(optional)* — Kubernetes features
 - **[Kind](https://kind.sigs.k8s.io/)** *(optional)* — Kind cluster management
@@ -103,6 +103,22 @@ npm run tauri dev
 # Web-only (frontend at http://localhost:1420)
 npm run dev
 ```
+
+### Lint & Quality Gates
+
+The repo enforces strict dead-code / unused-code rules on **every push** (pre-push
+hook, mirrored by CI). Agents and humans alike must run all four gates before
+committing:
+
+```bash
+pnpm lint        # ESLint: dead code, unused vars/imports, `any`, error-prone patterns
+pnpm typecheck   # TypeScript
+pnpm check       # Svelte check
+pnpm lint:rust   # cargo clippy --all-targets -- -D warnings (dead code, unused imports)
+```
+
+`git push --no-verify` / `SKIP_LINT_GATES=1` are emergency-only and need explicit
+approval. Full rules for agents: see `AGENTS.md`.
 
 ### Production Build
 

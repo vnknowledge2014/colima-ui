@@ -17,6 +17,12 @@ impl LimaAdapter {
     }
 }
 
+impl Default for LimaAdapter {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[async_trait]
 impl VMManager for LimaAdapter {
     fn name(&self) -> &str {
@@ -47,7 +53,7 @@ impl VMManager for LimaAdapter {
                         let status = v.get("status").and_then(|v| v.as_str()).unwrap_or("Stopped").to_string();
                         
                         instances.push(VMInstance {
-                            name: name,
+                            name,
                             status,
                             runtime: "lima".to_string(),
                             arch: v.get("arch").and_then(|v| v.as_str()).unwrap_or("").to_string(),

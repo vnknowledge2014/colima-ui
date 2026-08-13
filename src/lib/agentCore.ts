@@ -26,7 +26,7 @@ export async function runAgent(
   callbacks: AgentCallbacks,
   chatHistory: ChatMessage[],
   appContext: string,
-  customPresets: any,
+  customPresets: unknown,
   signal?: AbortSignal,
 ): Promise<void> {
   const { provider, model, apiKey, endpoint } = config;
@@ -55,7 +55,9 @@ export async function runAgent(
   try {
     const kbResult = await knowledgeBankApi.query(userMessage);
     if (kbResult.context_text) kbContext = kbResult.context_text;
-  } catch {}
+  } catch {
+    // Knowledge Bank is best-effort; a missing/unavailable backend must not block the agent.
+  }
 
   let memoryContext = "";
   try {
@@ -63,7 +65,9 @@ export async function runAgent(
     if (memResult && memResult.length > 0) {
       memoryContext = memResult.join("\n- ");
     }
-  } catch {}
+  } catch {
+    // Memory retrieval failure is non-fatal — the agent can still run without it.
+  }
 
   const fullHistory: ChatMessage[] = [
     ...(appContext ? [{ role: "system" as const, content: appContext }] : []),
@@ -82,7 +86,7 @@ export async function runAgent(
       callbacks.onStatus(round === 0 ? "Agent is reasoning..." : `Agent Loop ${round + 1}...`);
 
       let responseText = "";
-      let streamId = newId();
+      const streamId = newId();
       callbacks.onMessage({ id: streamId, role: "assistant", content: "" });
 
       await chatStream(provider, model, apiKey, fullHistory, endpoint, (chunk) => {
@@ -149,7 +153,9 @@ export async function runAgent(
         let parsedPayload = {};
         try {
           parsedPayload = pld ? JSON.parse(pld) : {};
-        } catch(e) {}
+        } catch {
+          // A malformed payload just means no arguments for this event.
+        }
 
         if (category === "SAFE") {
           callbacks.onStatus(`✅ Auto-executing safe event ${evt}...`);
@@ -202,7 +208,7 @@ Host: ${JSON.stringify(hostSpecs.status === "fulfilled" ? hostSpecs.value : "unk
 Instances: ${JSON.stringify(instances.status === "fulfilled" ? instances.value : [])}
 Containers (summary): ${JSON.stringify(
 (containers.status === "fulfilled" ? containers.value : [])
-  .map((c: any) => ({id: c.Id?.slice(0,12), name: c.Names, image: c.Image, status: c.Status}))
+  .map((c) => ({id: c.Id?.slice(0,12), name: c.Names, image: c.Image, status: c.Status}))
 )}
 Compose Projects: ${JSON.stringify(composeProjects.status === "fulfilled" ? composeProjects.value : [])}
 K8s Context: ${k8sContext.status === "fulfilled" ? k8sContext.value : "none"}

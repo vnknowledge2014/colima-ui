@@ -8,7 +8,6 @@ let _fetchFn: typeof globalThis.fetch | null = null;
 async function getFetch(): Promise<typeof globalThis.fetch> {
   if (_fetchFn) return _fetchFn;
   try {
-    // @ts-ignore — dynamic import may fail in browser mode
     const mod = await import("@tauri-apps/plugin-http");
     _fetchFn = mod.fetch as unknown as typeof globalThis.fetch;
   } catch {
@@ -31,9 +30,9 @@ export async function chatStream(
   const isOllama = provider === "ollama-local" || provider === "ollama-cloud";
   const isOpenAI = provider === "openai";
 
-  let url = "";
-  let headers: Record<string, string> = { "Content-Type": "application/json" };
-  let body: any = {};
+  let url: string;
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  let body: Record<string, unknown>;
 
   if (isOllama) {
     url = endpoint ? endpoint : "http://localhost:11434";
@@ -45,24 +44,24 @@ export async function chatStream(
     headers["x-api-key"] = apiKey;
     headers["anthropic-version"] = "2023-06-01";
     headers["anthropic-dangerous-direct-browser-access"] = "true";
-    let sys = messages.filter(m => m.role === "system").map(m => m.content).join("\n\n");
-    let msg = messages.filter(m => m.role !== "system");
+    const sys = messages.filter(m => m.role === "system").map(m => m.content).join("\n\n");
+    const msg = messages.filter(m => m.role !== "system");
     body = { model: model || "claude-3-haiku-20240307", system: sys, messages: msg, max_tokens: 4096, stream: true };
   } else if (isOpenAI) {
     url = endpoint ? endpoint : "https://api.openai.com/v1/chat/completions";
     headers["Authorization"] = `Bearer ${apiKey}`;
     body = { model: model || "gpt-3.5-turbo", messages, stream: true };
   } else if (isGemini) {
-    let m = model || "gemini-1.5-flash";
+    const m = model || "gemini-1.5-flash";
     // Key in a header, not the query string: a failing request surfaces its URL
     // in the error message, which the user then copies into a bug report.
     url = `https://generativelanguage.googleapis.com/v1beta/models/${m}:streamGenerateContent`;
     headers["x-goog-api-key"] = apiKey;
-    let contents = messages.filter(m => m.role !== "system").map(m => ({
+    const contents = messages.filter(m => m.role !== "system").map(m => ({
       role: m.role === "assistant" ? "model" : "user",
       parts: [{ text: m.content }]
     }));
-    let sys = messages.filter(m => m.role === "system").map(m => m.content).join("\n\n");
+    const sys = messages.filter(m => m.role === "system").map(m => m.content).join("\n\n");
     if (sys) {
       body = { system_instruction: { parts: { text: sys } }, contents };
     } else {
@@ -150,7 +149,9 @@ export async function chatStream(
           try {
             const data = JSON.parse(trimmed);
             if (data.message?.content) onChunk(data.message.content);
-          } catch (e) {}
+          } catch {
+            // A non-JSON line is not part of the Ollama stream; ignore it.
+          }
         } else if (trimmed.startsWith("data: ")) {
           const dataStr = trimmed.slice(6);
           if (dataStr === "[DONE]") continue;
@@ -164,7 +165,9 @@ export async function chatStream(
                 onChunk(data.delta.text);
               }
             }
-          } catch (e) {}
+          } catch {
+            // SSE keep-alive lines and malformed frames are skipped.
+          }
         }
       }
     }

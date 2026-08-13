@@ -1,5 +1,5 @@
 import { call } from "./client";
-import type { ColimaInstance, InstanceStatus, StartConfig, DockerContainer, DockerImage, SystemInfo, AiModel, DockerVolume, DockerNetwork } from "./types";
+import type { AiModel } from "./types";
 
 // ===== Models API =====
 

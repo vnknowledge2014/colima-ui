@@ -26,10 +26,10 @@
     </div>
     
     {#if autoPauseEnabled}
-    <div style="display: flex; align-items: center; gap: 12px; background: var(--bg-secondary); padding: 12px; border-radius: 6px;">
+    <div class="settings-inset" style="display: flex; align-items: center; gap: 12px; padding: 12px;">
       <label for="idleThreshold" style="font-size: var(--text-sm); color: var(--text-secondary);">Idle threshold (minutes)</label>
       <input id="idleThreshold" type="number" min="1" max="1440" bind:value={autoPauseMinutes} 
-             style="width: 80px; padding: 4px 8px; border: 1px solid var(--border-primary); border-radius: 4px; background: var(--bg-primary); color: var(--text-primary); font-size: var(--text-sm);" />
+             class="input" style="width: 80px; padding: 4px 8px;" />
     </div>
     {/if}
   </div>

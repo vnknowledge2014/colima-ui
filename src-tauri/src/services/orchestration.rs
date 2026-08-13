@@ -11,7 +11,7 @@ pub struct OrchestrationService {
 }
 
 impl OrchestrationService {
-    pub async fn auto_detect() -> Self {
+    pub fn auto_detect() -> Self {
         // In the future, we might auto-detect between kubectl, helm, kind, etc.
         // For now, default to kubectl.
         let runtime: Box<dyn Orchestrator> = Box::new(KubectlAdapter::new());

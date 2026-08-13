@@ -237,7 +237,7 @@ fn main() {
 }
 
 async fn handle_k8s(action: K8sAction) {
-    let svc = colima_ui_lib::services::orchestration::OrchestrationService::auto_detect().await;
+    let svc = colima_ui_lib::services::orchestration::OrchestrationService::auto_detect();
     match action {
         K8sAction::Passthrough(args) => {
             if let Err(e) = svc.passthrough(&args).await {
@@ -248,7 +248,7 @@ async fn handle_k8s(action: K8sAction) {
 }
 
 async fn handle_compose(action: ComposeAction) {
-    let svc = colima_ui_lib::services::compose::ComposeService::auto_detect().await;
+    let svc = colima_ui_lib::services::compose::ComposeService::auto_detect();
     match action {
         ComposeAction::Passthrough(args) => {
             if let Err(e) = svc.passthrough(&args).await {
@@ -280,7 +280,7 @@ async fn handle_container(action: ContainerAction, json: bool) {
                     if json {
                         println!("{}", serde_json::to_string_pretty(&containers).unwrap_or_default());
                     } else {
-                        println!("{:<15} {:<25} {:<30} {:<20} {}", "CONTAINER ID", "NAME", "IMAGE", "STATUS", "PORTS");
+                        println!("{:<15} {:<25} {:<30} {:<20} PORTS", "CONTAINER ID", "NAME", "IMAGE", "STATUS");
                         for c in &containers {
                             println!("{:<15} {:<25} {:<30} {:<20} {}",
                                 &c.id[..std::cmp::min(12, c.id.len())],
@@ -334,7 +334,7 @@ async fn handle_vm(action: VmAction, json: bool) {
                     if json {
                         println!("{}", serde_json::to_string_pretty(&instances).unwrap_or_default());
                     } else {
-                        println!("{:<20} {:<12} {:<8} {:<6} {:<10} {:<10} {:<10} {}", "PROFILE", "STATUS", "ARCH", "CPUS", "MEMORY", "DISK", "RUNTIME", "ADDRESS");
+                        println!("{:<20} {:<12} {:<8} {:<6} {:<10} {:<10} {:<10} ADDRESS", "PROFILE", "STATUS", "ARCH", "CPUS", "MEMORY", "DISK", "RUNTIME");
                         for i in &instances {
                             println!("{:<20} {:<12} {:<8} {:<6} {:<10} {:<10} {:<10} {}",
                                 i.name, i.status, i.arch, i.cpus,

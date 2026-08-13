@@ -47,7 +47,26 @@ const KEY_SHAPES: RegExp[] = [
   /hf_[A-Za-z0-9]{16,}/g, // Hugging Face
   /gh[pousr]_[A-Za-z0-9]{16,}/g, // GitHub
   /colima-[0-9a-f]{64}/g, // This app's own HTTP API bearer token
+  /AKIA[0-9A-Z]{16}/g, // AWS access key id
+  /eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/g, // JWT
 ];
+
+/**
+ * Entries under `/Users` that name a directory rather than an account.
+ */
+const NON_ACCOUNT_HOME_DIRS = new Set(["Shared", "Guest"]);
+
+/**
+ * The user's account name in a home path.
+ *
+ * Not a credential, which is why it is not in {@link KEY_SHAPES} — but a
+ * JavaScript stack trace carries absolute paths, and `crashReporter` sends those
+ * onward. The Rust side masks these; leaving the frontend out would mean the
+ * account name leaks from exactly one of the two crash paths.
+ *
+ * Applied last, so it cannot cut into a value an earlier rule already masked.
+ */
+const HOME_PATH = /\/(Users|home)\/([^/\s:,;"')\]]+)/g;
 
 /**
  * Strip credentials from a string before showing, copying, or sending it.
@@ -64,7 +83,10 @@ export function redact(input: string): string {
   for (const shape of KEY_SHAPES) {
     out = out.replace(shape, MASK);
   }
-  return out;
+
+  return out.replace(HOME_PATH, (match, root: string, name: string) =>
+    NON_ACCOUNT_HOME_DIRS.has(name) ? match : `/${root}/<user>`,
+  );
 }
 
 /** Redact an unknown thrown value on its way to a message. */

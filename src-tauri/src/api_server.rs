@@ -27,8 +27,6 @@ pub use crate::validation::*;
 pub use crate::platform::*;
 pub use crate::helpers::*;
 
-use crate::terminal_session;
-
 // ===== Route Handler Imports =====
 
 use crate::routes::system::*;
@@ -37,8 +35,12 @@ use crate::routes::containers::*;
 use crate::routes::images::*;
 use crate::routes::volumes::*;
 use crate::routes::networks::*;
+use crate::routes::topology::*;
+use crate::routes::file_transfer::*;
+use crate::routes::announcements::*;
+use crate::routes::security::*;
+use crate::routes::diagnostics::*;
 use crate::routes::compose::*;
-use crate::routes::payloads::*;
 use crate::routes::capabilities::*;
 use crate::routes::models::*;
 use crate::routes::k8s::*;
@@ -121,6 +123,44 @@ pub fn build_router() -> Router {
         .route("/api/networks/remove", post(api_remove_network))
         .route("/api/networks/inspect", get(api_inspect_network))
         .route("/api/networks/prune", post(api_prune_networks))
+        // Docker topology graph
+        .route("/api/topology", get(api_topology))
+        // Background transfers. Progress arrives on the SSE stream, not in the
+        // response: these return a job id immediately and run in the background.
+        .route("/api/images/save", post(api_image_save))
+        .route("/api/images/load", post(api_image_load))
+        .route("/api/containers/cp/to", post(api_copy_to_container))
+        .route("/api/containers/cp/from", post(api_copy_from_container))
+        .route("/api/transfers/cancel", post(api_cancel_transfer))
+        .route("/api/transfers", get(api_transfer_list))
+        .route("/api/announcements", get(api_announcements))
+        // Image scanning. Long-running like a transfer, but the result is the
+        // point, so the response carries it; progress arrives over SSE meanwhile.
+        .route("/api/security/scan", post(api_security_scan))
+        .route("/api/security/scan/cancel", post(api_security_scan_cancel))
+        .route("/api/security/sbom", post(api_security_sbom))
+        .route("/api/security/audit", post(api_security_audit))
+        .route("/api/security/rules", get(api_security_rule_pack))
+        .route("/api/security/alternatives", get(api_security_alternatives))
+        // Detonation. Start returns a session id immediately; the timeline
+        // arrives on SSE, because the interesting part is what happens while
+        // the sample runs rather than the value at the end.
+        // Runtime events. Falco does the detecting; these only read what it
+        // wrote and say whether it is in a state where it can detect at all.
+        // Live metrics: samples arrive on the SSE stream under the
+        // `metrics.sample` topic; this only tunes the sampling period.
+        .route("/api/metrics/interval", post(api_set_metrics_interval))
+        // Alert rules are the user's own configuration, so these write.
+        .route("/api/self-heal/rules", get(crate::routes::self_heal::api_self_heal_list_rules).post(crate::routes::self_heal::api_self_heal_save_rule))
+        .route("/api/self-heal/log", get(crate::routes::self_heal::api_self_heal_log))
+        .route("/api/self-heal/enabled", get(crate::routes::self_heal::api_self_heal_enabled).post(crate::routes::self_heal::api_self_heal_set_enabled))
+        .route("/api/activity", get(crate::routes::activity::api_activity_query))
+        .route("/api/activity/feed", get(crate::routes::activity::api_activity_feed))
+        .route("/api/activity/export", post(crate::routes::activity::api_activity_export))
+        // Diagnostics. Building a bundle sends nothing anywhere; the response
+        // goes back to the caller, who decides what to do with it.
+        .route("/api/diagnostics/bundle", post(api_diagnostic_bundle))
+        .route("/api/diagnostics/save", post(api_save_diagnostic_bundle))
         // System
         .route("/api/system/prune", post(api_system_prune))
         .route("/api/system/df", get(api_system_df))
@@ -136,6 +176,7 @@ pub fn build_router() -> Router {
         .route("/api/compose/restart", post(api_compose_restart))
         .route("/api/compose/logs", get(api_compose_logs))
         .route("/api/compose/ps", get(api_compose_ps))
+        .route("/api/compose/diagnose", post(api_compose_diagnose))
         // Kubernetes
         .route("/api/k8s/check", get(api_k8s_check))
         .route("/api/k8s/namespaces", get(api_k8s_namespaces))
@@ -222,6 +263,7 @@ pub fn build_router() -> Router {
         .route("/api/kb/articles/search", get(crate::routes::colima_config::api_kb_search_articles))
         // Knowledge Bank
         .route("/api/kb/query", post(api_kb_query))
+        .route("/api/kb/feedback", post(api_kb_feedback))
         .route("/api/kb/search", post(api_kb_search))
         .route("/api/kb/memories", get(api_kb_get_memories))
         .route("/api/kb/memories/update", post(api_kb_update_memory))
@@ -240,10 +282,15 @@ pub fn build_router() -> Router {
         // does not exist. See plans/260811-0919-terminal-integration.
         .layer(middleware::from_fn(auth_middleware));
 
-    // Unauthenticated routes — only token discovery (CORS still restricts to localhost)
-    let public_routes = Router::new()
-        .route("/api/auth/token", get(api_auth_token))
-        .route("/api/health", get(api_health));
+    // Unauthenticated routes. `/api/health` reports liveness and nothing else,
+    // so it is safe to leave open — the client port-scans 11420-11429 with it
+    // before it has any credential.
+    //
+    // `/api/auth/token` used to live here and no longer does. CORS restricts
+    // browsers, not local processes, so an open token endpoint handed the whole
+    // API to anything running on the machine. Clients now get the token through
+    // `auth::api_token` (IPC) or a URL fragment from the app; see `auth`.
+    let public_routes = Router::new().route("/api/health", get(api_health));
 
     // Merge: public routes have no auth, protected routes require Bearer token
     public_routes.merge(protected_routes).layer(cors)
@@ -264,6 +311,12 @@ pub fn start_api_server() {
         tokio::spawn(sse_instance_publisher());
 
         // Fix #12: Try ports 11420-11429 as fallback when primary port is taken
+        // TODO(port-shadowing): a second instance silently lands on 11421+ here.
+        // The frontend port-scans so the webview is fine, but the `cui` CLI
+        // hardcodes 11420 (bin/cui.rs) and will talk to a stale first instance;
+        // a newer instance never rebinds 11420 when the holder exits. Consider
+        // notifying the user when bound_port != 11420 and re-scanning on failure
+        // of the holder.
         let mut listener_opt = None;
         let mut bound_port = 11420u16;
         'port_scan: for port in 11420..=11429 {
@@ -293,6 +346,22 @@ pub fn start_api_server() {
             Some(listener) => {
                 println!("HTTP API server running on http://127.0.0.1:{}", bound_port);
 
+                // Browser mode needs the token out-of-band now that the public
+                // endpoint is gone. In a dev build, print the ready-made URL:
+                // the developer running `pnpm tauri dev` is the only person who
+                // can see this terminal, and the vite server they need is the
+                // one on 1420.
+                //
+                // Debug-only on purpose. A release build serves no frontend of
+                // its own (there is no ServeDir anywhere in this router), so it
+                // has no browser mode to bootstrap, and printing a live
+                // credential to stdout in production would just be a new leak.
+                #[cfg(debug_assertions)]
+                println!(
+                    "Browser mode: http://localhost:1420/#token={}",
+                    get_api_token()
+                );
+
                 // Fix #14: Clean up any orphaned port-forward processes on shutdown
                 let cleanup = async {
                     if let Err(e) = axum::serve(listener, app).await {
@@ -317,4 +386,125 @@ pub fn start_api_server() {
             }
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::body::Body;
+    use axum::http::{Request, StatusCode};
+    use tower::ServiceExt;
+
+    async fn status_of(uri: &str, auth: Option<&str>) -> StatusCode {
+        let mut req = Request::builder().uri(uri);
+        if let Some(value) = auth {
+            req = req.header("authorization", value);
+        }
+        build_router()
+            .oneshot(req.body(Body::empty()).expect("request is well-formed"))
+            .await
+            .expect("router is infallible")
+            .status()
+    }
+
+    /// The whole point of the change this guards: no route hands out the token.
+    ///
+    /// `GET /api/auth/token` sat in the public router and returned the bearer
+    /// token to any caller, protected only by CORS — which constrains browsers
+    /// and not the local processes that were the actual threat. Re-adding it,
+    /// or anything like it, must fail here rather than in a security review a
+    /// year from now.
+    ///
+    /// The status is 401 rather than 404: `Router::layer` wraps unmatched paths
+    /// too, so anything outside the public router meets the auth middleware
+    /// first. That is a small bonus — an unauthenticated caller cannot map the
+    /// route table by probing — but the assertion deliberately checks "never
+    /// 200" rather than a specific rejection code, so a future axum that
+    /// answers 404 here does not fail a test about credentials.
+    #[tokio::test]
+    async fn no_route_hands_out_the_api_token() {
+        let status = status_of("/api/auth/token", None).await;
+        assert!(
+            status.is_client_error(),
+            "unauthenticated /api/auth/token must be rejected, got {status}"
+        );
+        assert_ne!(status, StatusCode::OK, "the token endpoint is back");
+    }
+
+    /// Health has to stay open: the client port-scans 11420-11429 with it to
+    /// find the server, and it necessarily does that before it has a token.
+    #[tokio::test]
+    async fn health_stays_public() {
+        assert_eq!(status_of("/api/health", None).await, StatusCode::OK);
+    }
+
+    /// `/api/events` authenticates by `?token=` because `EventSource` cannot
+    /// send headers. Adding a second query parameter must not disturb that —
+    /// the token is found by parsing the query, not by matching the whole
+    /// string, and this pins that down now that clients pass `?topics=` too.
+    #[tokio::test]
+    async fn the_event_stream_authenticates_alongside_other_query_parameters() {
+        let token = get_api_token();
+
+        let with_topics = format!("/api/events?token={token}&topics=metrics.sample");
+        assert_eq!(status_of(&with_topics, None).await, StatusCode::OK);
+
+        // Order must not matter either.
+        let token_last = format!("/api/events?topics=metrics.sample&token={token}");
+        assert_eq!(status_of(&token_last, None).await, StatusCode::OK);
+
+        // And the topics parameter must not become a way in without a token.
+        assert_eq!(
+            status_of("/api/events?topics=metrics.sample", None).await,
+            StatusCode::UNAUTHORIZED
+        );
+    }
+
+    /// The property the subscriber registry rests on: a subscription is counted
+    /// for exactly as long as the client holds the stream, and stops being
+    /// counted when the client goes away without saying so.
+    ///
+    /// Asserted through the real router rather than by calling `subscribe_topics`
+    /// directly, because the risk is not in that function — it is in whether the
+    /// guard actually reaches the HTTP response body and dies with it. A unit
+    /// test of the registry would pass even if the handler dropped the guard the
+    /// moment it built the stream.
+    #[tokio::test]
+    async fn a_stream_is_counted_for_as_long_as_the_client_holds_it() {
+        let topic = "test.router.counted";
+        let token = get_api_token();
+        assert_eq!(subscriber_count(topic), 0, "a previous test leaked a count");
+
+        let res = build_router()
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/api/events?token={token}&topics={topic}"))
+                    .body(Body::empty())
+                    .expect("request is well-formed"),
+            )
+            .await
+            .expect("router is infallible");
+
+        assert_eq!(res.status(), StatusCode::OK);
+        assert_eq!(subscriber_count(topic), 1, "the open stream is not counted");
+
+        // Exactly what a closed tab looks like from this side: the body is
+        // dropped, and nobody told us.
+        drop(res);
+        assert_eq!(
+            subscriber_count(topic), 0,
+            "the count outlived the client — this is the leak the guard prevents"
+        );
+    }
+
+    /// The other half of the contract — everything else is behind the token.
+    /// Without this, deleting the auth layer would still pass the test above.
+    #[tokio::test]
+    async fn everything_else_requires_a_token() {
+        assert_eq!(status_of("/api/containers", None).await, StatusCode::UNAUTHORIZED);
+        assert_eq!(
+            status_of("/api/containers", Some("Bearer not-the-real-token")).await,
+            StatusCode::UNAUTHORIZED
+        );
+    }
 }

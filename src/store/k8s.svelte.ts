@@ -11,7 +11,7 @@ export interface K8sResource {
   svcType?: string;
   clusterIP?: string;
   ports?: string;
-  _ports?: any[];
+  _ports?: Record<string, unknown>[];
   roles?: string;
   version?: string;
   os?: string;
@@ -36,7 +36,7 @@ export interface K8sResource {
   source?: string;
   object?: string;
   warnings?: string[];
-  _raw: any;
+  _raw: Record<string, unknown>;
 }
 
 export const k8sState = $state({
