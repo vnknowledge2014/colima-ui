@@ -1,5 +1,6 @@
 import type { ChatMessage } from "./api";
 import { redact } from "./redact";
+import { normalizeOllamaBaseUrl, normalizeOpenAiBaseUrl } from "./aiProviderConfig";
 
 // Use Tauri's fetch (bypasses CORS) when available, fall back to native fetch in browser mode.
 // The lazy import avoids a crash when @tauri-apps/plugin-http is not available.
@@ -28,15 +29,19 @@ export async function chatStream(
   const isAnthropic = provider === "anthropic";
   const isGemini = provider === "gemini";
   const isOllama = provider === "ollama-local" || provider === "ollama-cloud";
-  const isOpenAI = provider === "openai";
+  // Any gateway that speaks the OpenAI wire format — OpenRouter, Groq, vLLM,
+  // LM Studio — differs from OpenAI only in its base URL.
+  const isOpenAI = provider === "openai" || provider === "openai-compatible";
 
   let url: string;
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   let body: Record<string, unknown>;
 
   if (isOllama) {
-    url = endpoint ? endpoint : "http://localhost:11434";
-    url = url.replace(/\/+$/, "") + "/api/chat";
+    // Normalized so a host pasted straight from Ollama's docs — which quote the
+    // full `/api/chat` URL — does not end up with the path twice.
+    const base = endpoint ? normalizeOllamaBaseUrl(endpoint) : "http://localhost:11434";
+    url = `${base}/api/chat`;
     if (apiKey) headers["Authorization"] = `Bearer ${apiKey}`;
     body = { model, messages, stream: true };
   } else if (isAnthropic) {
@@ -48,8 +53,12 @@ export async function chatStream(
     const msg = messages.filter(m => m.role !== "system");
     body = { model: model || "claude-3-haiku-20240307", system: sys, messages: msg, max_tokens: 4096, stream: true };
   } else if (isOpenAI) {
-    url = endpoint ? endpoint : "https://api.openai.com/v1/chat/completions";
-    headers["Authorization"] = `Bearer ${apiKey}`;
+    // Normalized to a base here and by the same rules on the Rust side, so one
+    // value configured in settings works for both the streaming and the
+    // non-streaming path no matter which form the user pasted.
+    const base = endpoint ? normalizeOpenAiBaseUrl(endpoint) : "https://api.openai.com/v1";
+    url = `${base}/chat/completions`;
+    if (apiKey) headers["Authorization"] = `Bearer ${apiKey}`;
     body = { model: model || "gpt-3.5-turbo", messages, stream: true };
   } else if (isGemini) {
     const m = model || "gemini-1.5-flash";
