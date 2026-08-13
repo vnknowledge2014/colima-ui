@@ -424,6 +424,11 @@
 .settings-section {
   margin-bottom: 24px;
   padding: 0;
+  /* `.card` clips to its rounded box, which severed the model picker's dropdown
+     at the card edge. A settings card holds forms, not artwork bleeding to the
+     corners, so nothing here needs the clip — and a control inside one has to be
+     able to open past it. */
+  overflow: visible;
 }
 
 .settings-section-header {

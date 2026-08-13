@@ -2,6 +2,7 @@ import { isRunningInTauri } from "../env";
 import { runSandboxed } from "./shell";
 import { EventHandler } from "./types";
 import { modelsApi } from "../api";
+import { getActiveProvider } from "../aiProviderConfig";
 
 export const configRegistry: Record<string, EventHandler> = {
   "model-list": {
@@ -61,10 +62,20 @@ export const configRegistry: Record<string, EventHandler> = {
       const { invoke } = await import("@tauri-apps/api/core");
       const updates = p;
       if (updates.provider) await invoke("set_setting", { key: "ai_provider", value: updates.provider });
-      if (updates.model) await invoke("set_setting", { key: "ai_model", value: updates.model });
-      if (updates.endpoint) await invoke("set_setting", { key: "ai_endpoint", value: updates.endpoint });
-      if (updates.api_key) await invoke("set_setting", { key: "ai_api_key", value: updates.api_key });
-      
+      // Written to the active mirror and to the provider's own slot, so the
+      // settings form does not overwrite these the next time it loads.
+      const provider = updates.provider || getActiveProvider();
+      const scoped: [string, string, string | undefined][] = [
+        ["ai_model", `ai_model.${provider}`, updates.model],
+        ["ai_endpoint", `ai_endpoint.${provider}`, updates.endpoint],
+        ["ai_api_key", `ai_api_key.${provider}`, updates.api_key],
+      ];
+      for (const [activeKey, providerKey, value] of scoped) {
+        if (!value) continue;
+        await invoke("set_setting", { key: activeKey, value });
+        await invoke("set_setting", { key: providerKey, value });
+      }
+
       // Update other arbitrary settings
       if (updates.settings) {
         const arbitrary = typeof updates.settings === "string" ? JSON.parse(updates.settings) : updates.settings;

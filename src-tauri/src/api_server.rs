@@ -81,6 +81,10 @@ pub fn build_router() -> Router {
         .route("/api/system/host-specs", get(api_host_specs))
         .route("/api/system/engine-resources", get(api_engine_resources))
         .route("/api/system/install", post(api_install_dep))
+        .route(
+            "/api/system/autostart",
+            get(api_get_autostart_status).post(api_configure_autostart),
+        )
         // Colima instances
         .route("/api/instances", get(api_list_instances))
         .route("/api/instances/start", post(api_start_instance))

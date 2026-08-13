@@ -48,8 +48,21 @@ export const limaApi = {
     call<string>("lima_shell", { name, command }, "POST", "/api/lima/shell", undefined, { name, command }),
   templates: () =>
     call<string>("lima_templates", undefined, "GET", "/api/lima/templates"),
-  create: (config: { name: string; cpus?: number; memory?: number; disk?: number; template?: string }) =>
-    call<string>("lima_create", config, "POST", "/api/lima/create", undefined, config),
+  // Every field is required over IPC — `lima_create` takes plain `u32`/`String`,
+  // and an omitted (or `undefined`) key is dropped during serialization, which
+  // Tauri then rejects as a missing argument. Fill the gaps here so callers can
+  // keep passing a partial config. An empty template means "no template", which
+  // is what the Rust side already checks for.
+  create: (config: { name: string; cpus?: number; memory?: number; disk?: number; template?: string }) => {
+    const args = {
+      name: config.name,
+      cpus: config.cpus ?? 2,
+      memory: config.memory ?? 2,
+      disk: config.disk ?? 60,
+      template: config.template ?? "",
+    };
+    return call<string>("lima_create", args, "POST", "/api/lima/create", undefined, args);
+  },
 };
 
 function formatLimaBytes(bytes: number): string {
