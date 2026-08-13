@@ -9,10 +9,9 @@ use serde::{Deserialize, Serialize};
 
 
 
-#[derive(Serialize)]
-pub struct HomebrewStatus {
-    pub installed: bool,
-    pub version: String,
+#[derive(Deserialize)]
+pub struct AutostartRequest {
+    pub enable: bool,
 }
 
 
@@ -47,11 +46,6 @@ pub struct InstallDepRequest {
 
 
 
-#[derive(Serialize)]
-pub struct InstallResult {
-    pub success: bool,
-    pub output: String,
-}
 
 
 

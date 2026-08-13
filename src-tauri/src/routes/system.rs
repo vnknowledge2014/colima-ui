@@ -5,6 +5,7 @@ use axum::{
     response::Json,
 };
 use crate::api_server::*;
+use crate::commands::autostart;
 use crate::commands::system;
 use crate::commands::containers;
 use crate::routes::payloads::*;
@@ -25,29 +26,26 @@ pub async fn api_get_version() -> (StatusCode, Json<ApiResponse<String>>) {
 }
 
 
-pub async fn api_check_homebrew() -> (StatusCode, Json<ApiResponse<HomebrewStatus>>) {
-    match run_blocking(|| {
-        let output = Command::new("brew").arg("--version").output();
-        match output {
-            Ok(o) if o.status.success() => {
-                let version = String::from_utf8_lossy(&o.stdout)
-                    .lines()
-                    .next()
-                    .unwrap_or("")
-                    .to_string();
-                Ok(HomebrewStatus {
-                    installed: true,
-                    version,
-                })
-            }
-            _ => Ok(HomebrewStatus {
-                installed: false,
-                version: String::new(),
-            }),
-        }
-    })
-    .await
-    {
+pub async fn api_check_homebrew() -> (StatusCode, Json<ApiResponse<system::HomebrewStatus>>) {
+    match run_blocking(|| Ok(system::homebrew_status_blocking())).await {
+        Ok(status) => ok(status),
+        Err(e) => err(e.to_string()),
+    }
+}
+
+
+pub async fn api_configure_autostart(
+    Json(req): Json<AutostartRequest>,
+) -> (StatusCode, Json<ApiResponse<String>>) {
+    match run_blocking(move || autostart::configure_autostart_blocking(req.enable)).await {
+        Ok(msg) => ok(msg),
+        Err(e) => err(e.to_string()),
+    }
+}
+
+
+pub async fn api_get_autostart_status() -> (StatusCode, Json<ApiResponse<autostart::AutostartStatus>>) {
+    match run_blocking(|| Ok(autostart::autostart_status_blocking())).await {
         Ok(status) => ok(status),
         Err(e) => err(e.to_string()),
     }
@@ -135,70 +133,8 @@ pub async fn api_host_specs() -> (StatusCode, Json<ApiResponse<system::HostSpecs
 
 pub async fn api_install_dep(
     Json(req): Json<InstallDepRequest>,
-) -> (StatusCode, Json<ApiResponse<InstallResult>>) {
-    let valid_names = ["colima", "docker", "lima"];
-    if !valid_names.contains(&req.name.as_str()) {
-        return err(format!("Invalid dependency name: {}", req.name));
-    }
-
-    match run_blocking(move || {
-        // Map dep name to package name per method
-        let pkg = match (req.method.as_str(), req.name.as_str()) {
-            ("brew", name) => name.to_string(),
-            ("apt", "docker") => "docker.io".to_string(),
-            ("apt", name) => name.to_string(),
-            ("nix", name) => name.to_string(),
-            ("wsl-brew", name) => name.to_string(),
-            ("manual", _) => {
-                return Ok(InstallResult {
-                    success: true,
-                    output: "Manual installation: visit https://github.com/abiosoft/colima"
-                        .to_string(),
-                });
-            }
-            _ => return Err(format!("Unknown install method: {}", req.method)),
-        };
-
-        let output = match req.method.as_str() {
-            "brew" => Command::new("brew")
-                .args(["install", &pkg])
-                .output()
-                .map_err(|e| format!("brew install failed: {}", e))?,
-            "apt" => Command::new("sudo")
-                .args(["apt-get", "install", "-y", &pkg])
-                .output()
-                .map_err(|e| format!("apt install failed: {}", e))?,
-            "nix" => {
-                let nix_pkg = format!("nixpkgs.{}", pkg);
-                Command::new("nix-env")
-                    .args(["-iA", &nix_pkg])
-                    .output()
-                    .map_err(|e| format!("nix install failed: {}", e))?
-            }
-            "wsl-brew" => Command::new("wsl")
-                .args(["-e", "brew", "install", &pkg])
-                .output()
-                .map_err(|e| format!("wsl brew install failed: {}", e))?,
-            _ => return Err(format!("Unknown method: {}", req.method)),
-        };
-
-        let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-
-        if output.status.success() {
-            Ok(InstallResult {
-                success: true,
-                output: if stdout.is_empty() { stderr } else { stdout },
-            })
-        } else {
-            Ok(InstallResult {
-                success: false,
-                output: format!("Install failed: {}", stderr),
-            })
-        }
-    })
-    .await
-    {
+) -> (StatusCode, Json<ApiResponse<system::InstallResult>>) {
+    match run_blocking(move || system::install_dependency_blocking(&req.name, &req.method)).await {
         Ok(result) => ok(result),
         Err(e) => err(e.to_string()),
     }
