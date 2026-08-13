@@ -429,7 +429,7 @@ pub async fn api_k8s_port_forward_start(
     match run_blocking(move || {
         use std::process::{Command, Stdio};
         let child = Command::new("kubectl")
-            .args(&["port-forward", "-n", &ns, &target, &ports])
+            .args(["port-forward", "-n", &ns, &target, &ports])
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .spawn()
@@ -468,7 +468,7 @@ pub async fn api_k8s_port_forward_stop(
         }
         // Fallback: kill by port
         let _ = std::process::Command::new("lsof")
-            .args(&["-ti", &format!(":{}", port)])
+            .args(["-ti", &format!(":{}", port)])
             .output()
             .and_then(|o| {
                 let pids = String::from_utf8_lossy(&o.stdout).trim().to_string();
@@ -534,7 +534,7 @@ pub async fn api_k8s_exec(Json(body): Json<K8sExecBody>) -> (StatusCode, Json<Ap
         {
             let escaped_cmd = escape_applescript(&cmd_str);
             std::process::Command::new("osascript")
-                .args(&[
+                .args([
                     "-e",
                     &format!(
                         "tell application \"Terminal\" to do script \"{}\"",

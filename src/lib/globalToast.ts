@@ -8,6 +8,7 @@
 
 import { redact } from "./redact";
 import type { AppError } from "./errors";
+import { pushNotification } from "../store/notifications.svelte";
 
 export type ToastType = "success" | "error" | "info";
 
@@ -27,6 +28,16 @@ export interface ToastMessage {
 export interface ToastOptions {
   error?: AppError;
   hint?: string;
+  /**
+   * Whether this toast also becomes a notification entry. Default true.
+   *
+   * `errorReporter` sets it false because it has already called `recordError`;
+   * without that the same failure would be listed twice. A flag rather than
+   * inferring it from `error` being present: a call site is free to pass a
+   * structured error without having recorded it, and guessing would be wrong
+   * exactly when it mattered.
+   */
+  record?: boolean;
 }
 
 type ToastListener = (toast: ToastMessage) => void;
@@ -100,6 +111,24 @@ export function globalToast(type: ToastType, text: string, options?: ToastOption
   // an unredacted string would leak both to the screen and to a third party.
   const safeText = redact(text);
   const key = toastKey(type, safeText);
+
+  // A toast lasts seconds; the notification list is where it stays readable.
+  //
+  // Recorded before the collapse branch below, which returns early: that branch
+  // means "a toast with this text is still on screen", which says nothing about
+  // whether the list already has it. The store applies its own, much longer,
+  // collapse window — tying the two together is what made a poller retrying every
+  // five seconds add an entry per retry, since its toast had already expired.
+  if (options?.record !== false) {
+    pushNotification({
+      kind: "message",
+      status: type === "error" ? "error" : "success",
+      title: safeText,
+      detail: options?.hint,
+      error: options?.error,
+      hint: options?.hint,
+    });
+  }
 
   // Collapse a repeat into the toast already on screen.
   const existing = _active.get(key);

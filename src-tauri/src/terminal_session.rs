@@ -56,7 +56,6 @@ pub struct TerminalSession {
     master: Box<dyn portable_pty::MasterPty + Send>,
     writer: Box<dyn Write + Send>,
     child: Box<dyn portable_pty::Child + Send + Sync>,
-    buffer: OutputBuffer,
     /// Cleared on close so the reader and flush threads unwind.
     running: Arc<AtomicBool>,
     /// Last time bytes moved in either direction. Shared with the flush thread
@@ -348,7 +347,6 @@ impl SessionManager {
                 master,
                 writer,
                 child,
-                buffer,
                 running,
                 last_activity,
                 closed: false,

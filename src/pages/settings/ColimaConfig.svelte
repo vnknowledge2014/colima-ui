@@ -307,7 +307,7 @@
           load(profile);
         }}
       >
-        {#each profiles as p}
+        {#each profiles as p (p)}
           <option value={p}>{p}</option>
         {/each}
       </select>
@@ -374,21 +374,21 @@
     <label class="cfg-row">
       <span class="cfg-label">{t("colima_config.runtime", { default: "Runtime" })}</span>
       <select class="input select" bind:value={form.runtime} onchange={refreshPreview}>
-        {#each RUNTIMES as value}<option {value}>{value}</option>{/each}
+        {#each RUNTIMES as value (value)}<option {value}>{value}</option>{/each}
       </select>
     </label>
 
     <label class="cfg-row">
       <span class="cfg-label">{t("colima_config.vm_type", { default: "VM type" })}</span>
       <select class="input select" bind:value={form.vmType} onchange={refreshPreview}>
-        {#each VM_TYPES as value}<option {value}>{value}</option>{/each}
+        {#each VM_TYPES as value (value)}<option {value}>{value}</option>{/each}
       </select>
     </label>
 
     <label class="cfg-row">
       <span class="cfg-label">{t("colima_config.mount_type", { default: "Mount type" })}</span>
       <select class="input select" bind:value={form.mountType} onchange={refreshPreview}>
-        {#each MOUNT_TYPES as value}<option {value}>{value}</option>{/each}
+        {#each MOUNT_TYPES as value (value)}<option {value}>{value}</option>{/each}
       </select>
     </label>
 
@@ -425,13 +425,13 @@
 
     {#if errors.length > 0 || warnings.length > 0}
       <ul class="cfg-issues">
-        {#each errors as issue}
+        {#each errors as issue (issue.field + issue.code)}
           <li class="cfg-issue cfg-issue-error">
             <code>{issue.field}</code>
             {issueText(issue)}
           </li>
         {/each}
-        {#each warnings as issue}
+        {#each warnings as issue (issue.field + issue.code)}
           <li class="cfg-issue cfg-issue-warning">
             <code>{issue.field}</code>
             {issueText(issue)}
@@ -549,7 +549,7 @@
   .cfg-issue {
     font-size: var(--text-sm);
     padding: 8px 10px;
-    border-radius: 6px;
+    border-radius: var(--radius-sm);
     border-left: 3px solid transparent;
   }
   .cfg-issue code {
@@ -558,11 +558,11 @@
     margin-right: 8px;
   }
   .cfg-issue-error {
-    background: var(--bg-primary);
+    background: var(--surface-inset);
     border-left-color: var(--accent-red);
   }
   .cfg-issue-warning {
-    background: var(--bg-primary);
+    background: var(--surface-inset);
     border-left-color: var(--accent-yellow);
   }
   .cfg-diff {

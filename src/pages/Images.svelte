@@ -6,8 +6,11 @@
   import * as Icons from "../components/Icons.svelte";
   import { t } from "../lib/i18n.svelte";
   import { formatTimestamp, formatSize, truncateId } from "../lib/formatters";
+  import { viewInTopology } from "../lib/topology-link";
   import { columnResize } from "../lib/columnResize";
   import { blockingCapability, capabilityNotice } from "../store/capabilities.svelte";
+  import TransferDialog from "../components/transfer/TransferDialog.svelte";
+  import type { TransferMode } from "../lib/api/transfer";
 
   let searchTerm = $state("");
   let showPull = $state(false);
@@ -21,6 +24,8 @@
   let batchLoading = $state(false);
   let confirm = $state<{ title: string; message: string; confirmLabel: string; danger: boolean; onConfirm: () => void; onCancel?: () => void } | null>(null);
   let runtimeName = $state("docker");
+  /** Which transfer dialog is open, if any. Export carries the current selection. */
+  let transfer = $state<{ mode: TransferMode; images: string[] } | null>(null);
 
   
 
@@ -28,7 +33,7 @@
     try {
       const list = await dockerApi.listImages();
       dockerState.images = list;
-    } catch (e) {
+    } catch {
       dockerState.images = [];
     }
   }
@@ -190,7 +195,7 @@
         batchLoading = true;
         let ok_count = 0;
         for (const img of targets) {
-          try { await dockerApi.removeImage(img.Id, true); ok_count++; } catch {}
+          try { await dockerApi.removeImage(img.Id, true); ok_count++; } catch { /* continue removing the rest */ }
         }
         globalToast("success", `Removed ${ok_count} image(s)`);
         selected = new Set();
@@ -203,13 +208,26 @@
 
   function toggleSelect(id: string) {
     const next = new Set(selected);
-    next.has(id) ? next.delete(id) : next.add(id);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
     selected = next;
   }
   
   function toggleAll() {
     if (selected.size === filteredImages.length) selected = new Set();
     else selected = new Set(filteredImages.map(i => i.Id));
+  }
+
+  /**
+   * `docker save` takes references, not ids. A dangling image has no usable tag,
+   * so fall back to its id — that is what the CLI accepts for those.
+   */
+  function exportTargets(): string[] {
+    return filteredImages
+      .filter(i => selected.has(i.Id))
+      .map(i => (i.Repository && i.Repository !== "<none>" && i.Tag && i.Tag !== "<none>")
+        ? `${i.Repository}:${i.Tag}`
+        : i.Id);
   }
 
   let filteredImages = $derived(dockerState.images.filter(img => {
@@ -257,6 +275,10 @@
   <div class="content-header-actions">
     <input class="input header-search" placeholder={t('images.search', { default: 'Search images...' })} bind:value={searchTerm} />
     <button class="btn btn-ghost" onclick={handlePrune} disabled={actionLoading === "prune"}>{actionLoading === "prune" ? t('images.pruning', { default: 'Pruning...' }) : t('images.prune', { default: 'Prune' })}</button>
+    <button class="btn btn-ghost" onclick={() => transfer = { mode: "import", images: [] }}>{t('images.import', { default: 'Import TAR' })}</button>
+    <!-- Export needs a selection: exporting "whatever is on screen" would be a
+         surprising several-gigabyte write. -->
+    <button class="btn btn-ghost" disabled={selected.size === 0} onclick={() => transfer = { mode: "export", images: exportTargets() }}>{t('images.export', { default: 'Export TAR' })}</button>
     <button class="btn btn-primary" onclick={() => showPull = !showPull}>{t('images.pull', { default: 'Pull Image' })}</button>
   </div>
 </div>
@@ -286,7 +308,7 @@
   {/if}
 
   {#if filteredImages.length > 0}
-    <div class="vtable" use:columnResize style="--cols: 44px var(--col-1, minmax(180px,1.6fr)) var(--col-2, 110px) var(--col-3, 130px) var(--col-4, minmax(120px,0.9fr)) var(--col-5, 130px) 190px;">
+    <div class="vtable" use:columnResize style="--cols: 44px var(--col-1, minmax(180px,1.6fr)) var(--col-2, 110px) var(--col-3, 130px) var(--col-4, minmax(120px,0.9fr)) var(--col-5, 130px) 260px;">
       <div class="vtable-x">
       <div class="vtable-header" style="display: grid; grid-template-columns: var(--cols);">
         <div class="vtable-header-cell" style="text-align: center;">
@@ -302,8 +324,10 @@
       
       <div class="vtable-scroll">
         {#each filteredImages as img (img.Id)}
-          <div class="vtable-row {selected.has(img.Id) ? 'selected' : ''}" style="display: grid; grid-template-columns: var(--cols);">
-            <div class="vtable-cell" style="text-align: center;">
+          <!-- Clicking the row is the quick path to the same inspect output the
+               menu opens, so reading an image costs one click. -->
+          <div role="button" tabindex="0" class="vtable-row {selected.has(img.Id) ? 'selected' : ''}" style="display: grid; grid-template-columns: var(--cols); cursor: pointer;" onkeydown={(e) => e.key === 'Enter' && e.currentTarget.click()} onclick={() => handleInspect(img.Id)}>
+            <div role="button" tabindex="0" class="vtable-cell" style="text-align: center;" onkeydown={(e) => e.key === 'Enter' && e.currentTarget.click()} onclick={(e) => e.stopPropagation()}>
               <input type="checkbox" class="checkbox" checked={selected.has(img.Id)} onchange={() => toggleSelect(img.Id)} />
             </div>
             <div class="vtable-cell" style="font-weight: 500;">{img.Repository}</div>
@@ -313,8 +337,11 @@
             <div class="vtable-cell" style="font-family: var(--font-mono); font-size: var(--text-xs); color: var(--text-muted);" title={img.Id}>{truncateId(img.Id)}</div>
             <div class="vtable-cell" style="color: var(--text-secondary); font-size: var(--text-sm);" title={img.CreatedAt}>{formatTimestamp(img.CreatedAt)}</div>
             <div class="vtable-cell" style="font-family: var(--font-mono); font-size: var(--text-sm); font-variant-numeric: tabular-nums;" title={img.Size}>{formatSize(img.Size)}</div>
-            <div class="vtable-cell">
-              <div style="display: flex; gap: 4px;">
+            <div role="button" tabindex="0" class="vtable-cell" onkeydown={(e) => e.key === 'Enter' && e.currentTarget.click()} onclick={(e) => e.stopPropagation()}>
+              <div class="vtable-actions">
+                <!-- The graph keys image nodes by the reference a container
+                     reports, which is repository:tag rather than the image id. -->
+                <button class="btn btn-ghost" style="font-size: var(--text-xs); padding: 2px 8px;" onclick={() => viewInTopology("image", `${img.Repository}:${img.Tag}`)} title={t('common.view_in_topology', { default: 'View in topology' })}>{t('common.topology', { default: 'Topology' })}</button>
                 <button class="btn btn-ghost" style="font-size: var(--text-xs); padding: 2px 8px;" onclick={() => handleInspect(img.Id)}>{inspecting === img.Id ? 'Hide' : 'Inspect'}</button>
                 <button class="btn btn-ghost" style="font-size: var(--text-xs); padding: 2px 8px;" onclick={() => { showTag = showTag === img.Id ? null : img.Id; tagTarget = ''; }}>Tag</button>
                 <button class="btn btn-ghost" style="font-size: var(--text-xs); padding: 2px 8px; color: var(--accent-red);" onclick={() => handleRemove(img.Id, `${img.Repository}:${img.Tag}`)} disabled={actionLoading === img.Id}>{actionLoading === img.Id ? '...' : 'Remove'}</button>
@@ -334,7 +361,7 @@
           {/if}
           
           {#if inspecting === img.Id}
-            <pre style="margin: 0; padding: 12px 16px; background: var(--bg-secondary); font-size: var(--text-xs); overflow: auto; max-height: 300px; color: var(--text-secondary); border-bottom: 1px solid var(--border-subtle);">{inspectData}</pre>
+            <pre style="margin: 0; padding: 12px 16px; background: var(--bg-app); font-size: var(--text-xs); overflow: auto; max-height: 300px; color: var(--text-secondary); border-bottom: 1px solid var(--border-subtle);">{inspectData}</pre>
           {/if}
         {/each}
       </div>
@@ -365,4 +392,17 @@
       </div>
     </div>
   </div>
+{/if}
+
+{#if transfer}
+  <TransferDialog
+    mode={transfer.mode}
+    images={transfer.images}
+    onClose={() => {
+      // No refresh here any more: this now fires when the transfer *starts*, and
+      // an import has added nothing yet. `transferNotifications` refreshes when a
+      // transfer actually completes.
+      transfer = null;
+    }}
+  />
 {/if}

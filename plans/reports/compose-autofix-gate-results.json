@@ -1,0 +1,182 @@
+{
+  "rows": [
+    {
+      "id": "missing-build-context",
+      "expected": "missing_file",
+      "actual": "VALID",
+      "outcome": "not-broken",
+      "detail": "file validates; bad corpus case"
+    },
+    {
+      "id": "missing-env-file",
+      "expected": "missing_file",
+      "actual": "missing_file",
+      "outcome": "no-fix",
+      "detail": "no deterministic rule"
+    },
+    {
+      "id": "schema-depends-on-scalar",
+      "expected": "schema",
+      "actual": "schema",
+      "outcome": "fixed",
+      "detail": "fix_scalar_to_list; comments 0->0"
+    },
+    {
+      "id": "schema-environment-wrong-type",
+      "expected": "schema",
+      "actual": "schema",
+      "outcome": "fixed",
+      "detail": "fix_scalar_to_list; comments 0->0"
+    },
+    {
+      "id": "schema-ports-scalar",
+      "expected": "schema",
+      "actual": "schema",
+      "outcome": "fixed",
+      "detail": "fix_scalar_to_list; comments 0->0"
+    },
+    {
+      "id": "schema-typo-key",
+      "expected": "schema",
+      "actual": "schema",
+      "outcome": "UNSAFE",
+      "detail": "lost keys: ['imge']"
+    },
+    {
+      "id": "schema-unsupported-option",
+      "expected": "schema",
+      "actual": "schema",
+      "outcome": "no-fix",
+      "detail": "no deterministic rule"
+    },
+    {
+      "id": "structure-no-services",
+      "expected": "structure",
+      "actual": "structure",
+      "outcome": "no-fix",
+      "detail": "no deterministic rule"
+    },
+    {
+      "id": "structure-services-list",
+      "expected": "structure",
+      "actual": "structure",
+      "outcome": "no-fix",
+      "detail": "no deterministic rule"
+    },
+    {
+      "id": "undef-multiple-volumes",
+      "expected": "undefined_reference",
+      "actual": "undefined_reference",
+      "outcome": "partial",
+      "detail": "fix_undefined_toplevel; still invalid: service \"cache\" refers to undefined volume cachedata: invalid compose "
+    },
+    {
+      "id": "undef-network",
+      "expected": "undefined_reference",
+      "actual": "undefined_reference",
+      "outcome": "fixed",
+      "detail": "fix_undefined_toplevel; comments 0->0"
+    },
+    {
+      "id": "undef-secret",
+      "expected": "undefined_reference",
+      "actual": "undefined_reference",
+      "outcome": "no-fix",
+      "detail": "no deterministic rule"
+    },
+    {
+      "id": "undef-variable",
+      "expected": "undefined_reference",
+      "actual": "VALID",
+      "outcome": "not-broken",
+      "detail": "file validates; bad corpus case"
+    },
+    {
+      "id": "undef-volume-with-comments",
+      "expected": "undefined_reference",
+      "actual": "undefined_reference",
+      "outcome": "fixed",
+      "detail": "fix_undefined_toplevel; comments 3->3"
+    },
+    {
+      "id": "undef-volume",
+      "expected": "undefined_reference",
+      "actual": "undefined_reference",
+      "outcome": "fixed",
+      "detail": "fix_undefined_toplevel; comments 0->0"
+    },
+    {
+      "id": "yaml-bad-nesting",
+      "expected": "yaml_syntax",
+      "actual": "yaml_syntax",
+      "outcome": "no-fix",
+      "detail": "no deterministic rule"
+    },
+    {
+      "id": "yaml-duplicate-key",
+      "expected": "yaml_syntax",
+      "actual": "yaml_syntax",
+      "outcome": "no-fix",
+      "detail": "no deterministic rule"
+    },
+    {
+      "id": "yaml-missing-colon",
+      "expected": "yaml_syntax",
+      "actual": "yaml_syntax",
+      "outcome": "no-fix",
+      "detail": "no deterministic rule"
+    },
+    {
+      "id": "yaml-tab-indent",
+      "expected": "yaml_syntax",
+      "actual": "yaml_syntax",
+      "outcome": "fixed",
+      "detail": "fix_tabs; comments 0->0"
+    },
+    {
+      "id": "yaml-unclosed-quote",
+      "expected": "yaml_syntax",
+      "actual": "yaml_syntax",
+      "outcome": "no-fix",
+      "detail": "no deterministic rule"
+    }
+  ],
+  "by_category": {
+    "VALID": {
+      "total": 2,
+      "fixed": 0,
+      "unsafe": 0
+    },
+    "missing_file": {
+      "total": 1,
+      "fixed": 0,
+      "unsafe": 0
+    },
+    "schema": {
+      "total": 5,
+      "fixed": 3,
+      "unsafe": 1
+    },
+    "structure": {
+      "total": 2,
+      "fixed": 0,
+      "unsafe": 0
+    },
+    "undefined_reference": {
+      "total": 5,
+      "fixed": 3,
+      "unsafe": 0
+    },
+    "yaml_syntax": {
+      "total": 5,
+      "fixed": 1,
+      "unsafe": 0
+    }
+  },
+  "totals": {
+    "fixed": 7,
+    "total": 20,
+    "unsafe": 1,
+    "category_mismatch": 2
+  }
+}

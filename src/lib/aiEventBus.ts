@@ -25,7 +25,7 @@ export function getCategory(eventName: string): ActionCategory | null {
   return registry[eventName]?.category || null;
 }
 
-export async function executeEvent(eventName: string, payload: any): Promise<string> {
+export async function executeEvent(eventName: string, payload: unknown): Promise<string> {
   const handlerInfo = registry[eventName];
   if (!handlerInfo) {
     throw new Error(`Unknown event: ${eventName}`);

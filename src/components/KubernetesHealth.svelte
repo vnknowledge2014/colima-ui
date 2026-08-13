@@ -2,14 +2,27 @@
   import { k8sApi } from "../lib/api";
   import { globalToast } from "../lib/globalToast";
 
+  interface HealthIssue {
+    severity: string;
+    category: string;
+    resource: string;
+    message: string;
+  }
+
+  interface HealthData {
+    score: number;
+    grade: string;
+    issues: HealthIssue[];
+  }
+
   let healthLoading = $state(false);
-  let healthData = $state<any>(null);
+  let healthData = $state<HealthData | null>(null);
 
   async function runHealthScan() {
     healthLoading = true;
     try {
       const raw = await k8sApi.clusterHealth();
-      healthData = JSON.parse(raw);
+      healthData = JSON.parse(raw) as HealthData;
     } catch (e) {
       globalToast("error", `Health scan failed: ${e}`);
     } finally {
@@ -62,8 +75,8 @@
           ">Grade: {healthData.grade}</span>
         </div>
         <div style="font-size: var(--text-sm); color: var(--text-muted);">
-          {healthData.issues?.filter((i: any) => i.severity === "error").length || 0} errors,{" "}
-          {healthData.issues?.filter((i: any) => i.severity === "warning").length || 0} warnings
+          {healthData.issues?.filter((i: HealthIssue) => i.severity === "error").length || 0} errors,
+          {healthData.issues?.filter((i: HealthIssue) => i.severity === "warning").length || 0} warnings
         </div>
       </div>
     </div>
@@ -74,7 +87,7 @@
         Issues ({healthData.issues?.length || 0})
       </div>
       <div style="max-height: 50vh; overflow: auto;">
-        {#each healthData.issues || [] as issue}
+        {#each healthData.issues || [] as issue (issue.message + issue.resource + issue.category)}
           <div style="display: flex; align-items: flex-start; gap: 12px; padding: 8px 16px; border-bottom: 1px solid var(--border-subtle);
             background: {issue.severity === 'error' ? 'rgba(248,81,73,0.03)' : issue.severity === 'warning' ? 'rgba(210,153,34,0.03)' : 'transparent'};
           ">

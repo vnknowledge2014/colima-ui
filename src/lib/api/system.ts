@@ -1,5 +1,5 @@
 import { call } from "./client";
-import type { ColimaInstance, InstanceStatus, StartConfig, DockerContainer, DockerImage, SystemInfo, AiModel, DockerVolume, DockerNetwork } from "./types";
+import type { SystemInfo } from "./types";
 
 // ===== System API =====
 
@@ -161,7 +161,7 @@ export const sysMethods = {
   savePresetSnapshot: (presetId: string, profile: string, snapshotJson: string, isAuto = false) =>
     call<string>("save_preset_snapshot", { preset_id: presetId, profile, snapshot_json: snapshotJson, is_auto: isAuto }, "POST", "/api/presets/snapshot", undefined, { preset_id: presetId, profile, snapshot_json: snapshotJson, is_auto: isAuto }),
   loadPresetSnapshot: (presetId: string, profile: string) =>
-    call<string>("load_preset_snapshot", { preset_id: presetId, profile }, "GET", "/api/presets/snapshot", { preset_id: presetId, profile }),
+    call<{ containers_json: string }>("load_preset_snapshot", { preset_id: presetId, profile }, "GET", "/api/presets/snapshot", { preset_id: presetId, profile }),
   listAllPresetSnapshots: (profile: string) =>
     call<string>("list_all_preset_snapshots", { profile }, "GET", "/api/presets/snapshots", { profile }),
 };

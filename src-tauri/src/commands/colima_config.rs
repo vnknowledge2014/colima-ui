@@ -578,6 +578,9 @@ pub async fn preview_colima_config(
     profile: String,
     changes: ConfigChanges,
 ) -> Result<ApplyResult, ColimaError> {
+    // Nothing is recorded here on purpose: previewing changes nothing about the
+    // machine, and a log full of "looked at the config" would bury the entries
+    // that describe what was actually done to it.
     let home = home_dir();
     let (old, mtime) = read_raw(&home, &profile)?;
     let mut new = old.clone();
@@ -604,6 +607,11 @@ pub async fn apply_colima_config(
     changes: ConfigChanges,
     expected_mtime: i64,
 ) -> Result<ApplyResult, ColimaError> {
+    // Wrapped whole rather than recorded at the end: this returns early in
+    // three places, and two of them — a stale-mtime refusal and an apply with
+    // nothing to apply — are exactly the cases somebody comes back asking about.
+    let logged_profile = profile.clone();
+    let result = (|| -> Result<ApplyResult, ColimaError> {
     let home = home_dir();
     let (old, mtime) = read_raw(&home, &profile)?;
     if mtime != expected_mtime {
@@ -646,6 +654,31 @@ pub async fn apply_colima_config(
         backup_path: Some(backup),
         mtime: new_mtime,
     })
+    })();
+
+    // What the record says depends on what actually reached the disk. Two of
+    // the branches above return `Ok` having written nothing — logging those as
+    // "applied" would put a change in the history that never happened.
+    let detail = match &result {
+        Ok(r) if r.backup_path.is_some() => format!("{} fields changed", r.changes.len()),
+        Ok(r) if r.issues.iter().any(|i| i.severity == IssueSeverity::Error) => {
+            "not applied: the changes did not validate".to_string()
+        }
+        Ok(_) => "no changes to apply".to_string(),
+        Err(_) => String::new(),
+    };
+    crate::commands::activity::record(
+        crate::commands::activity::ActivityEntry::new(
+            crate::commands::activity::ActivityKind::Config,
+            "apply",
+            "colima_config",
+            &logged_profile,
+        )
+        .detail(detail)
+        .outcome_of(&result),
+    );
+
+    result
 }
 
 // ===== Tests =====

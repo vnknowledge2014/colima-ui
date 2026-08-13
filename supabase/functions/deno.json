@@ -1,0 +1,21 @@
+{
+  // Config for the Edge Functions only. The app's TypeScript is a separate
+  // toolchain (Vite + svelte-check) and is unaffected by anything here.
+  "fmt": {
+    // Deno's default is 80, which reflows readable expressions into awkward
+    // fragments. 100 matches how the rest of this repo's TypeScript is written.
+    "lineWidth": 100
+  },
+  "lint": {
+    "rules": {
+      // `no-import-prefix` wants npm: dependencies declared here and imported by
+      // bare specifier. Deliberately not done: Supabase's own Edge Function
+      // documentation uses the inline `npm:@supabase/supabase-js@2` form, and it
+      // is guaranteed to resolve on their runtime. An import map adds a
+      // deployment-time failure mode — one that surfaces as auth breaking in
+      // production — to satisfy a style preference. The version is pinned inline,
+      // so the thing the rule protects against (floating versions) does not apply.
+      "exclude": ["no-import-prefix"]
+    }
+  }
+}

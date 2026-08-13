@@ -96,7 +96,12 @@ where
 
 // ===== CLI Command Runner =====
 
-pub fn run_cmd(program: &str, args: &[&str]) -> Result<String, String> {
+/// Build a `Command` with the environment every CLI path in this app needs.
+///
+/// Shared by `run_cmd` and `streaming_cmd::run_cmd_streaming` on purpose: two
+/// independently-built command paths drift, and a `docker` invocation that
+/// silently loses `DOCKER_HOST` talks to the wrong daemon.
+pub fn build_cmd(program: &str, args: &[&str]) -> Command {
     let mut cmd = Command::new(program);
     cmd.args(args);
 
@@ -107,22 +112,36 @@ pub fn run_cmd(program: &str, args: &[&str]) -> Result<String, String> {
         }
     }
 
-    let output = cmd.output().map_err(|e| {
-        if e.kind() == std::io::ErrorKind::NotFound {
-            let hint = match program {
-                "kind" => "Install with: brew install kind",
-                "kubectl" => "Install with: brew install kubectl",
-                "helm" => "Install with: brew install helm",
-                "limactl" => "Install with: brew install lima",
-                "colima" => "Install with: brew install colima",
-                "docker" => "Install with: brew install docker",
-                _ => "Please install it and try again",
-            };
-            format!("'{}' is not installed. {}", program, hint)
-        } else {
-            format!("Failed to execute {}: {}", program, e)
-        }
-    })?;
+    cmd
+}
+
+/// Turn a spawn/exec failure into the message the user sees.
+///
+/// Shared with the streaming path so "not installed" reads identically wherever
+/// the command was launched from.
+pub fn describe_exec_error(program: &str, e: &std::io::Error) -> String {
+    if e.kind() == std::io::ErrorKind::NotFound {
+        let hint = match program {
+            "kind" => "Install with: brew install kind",
+            "kubectl" => "Install with: brew install kubectl",
+            "helm" => "Install with: brew install helm",
+            "limactl" => "Install with: brew install lima",
+            "colima" => "Install with: brew install colima",
+            "docker" => "Install with: brew install docker",
+            _ => "Please install it and try again",
+        };
+        format!("'{}' is not installed. {}", program, hint)
+    } else {
+        format!("Failed to execute {}: {}", program, e)
+    }
+}
+
+pub fn run_cmd(program: &str, args: &[&str]) -> Result<String, String> {
+    let mut cmd = build_cmd(program, args);
+
+    let output = cmd
+        .output()
+        .map_err(|e| describe_exec_error(program, &e))?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
@@ -187,3 +206,48 @@ pub fn load_system_info() -> system::SystemInfo {
 /// Port forward process tracking (pid by port key)
 pub static PORT_FORWARDS: std::sync::LazyLock<Mutex<HashMap<String, u32>>> =
     std::sync::LazyLock::new(|| Mutex::new(HashMap::new()));
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `run_cmd`'s body was extracted into `build_cmd` + `describe_exec_error` so
+    /// the streaming path could share it. These pin the observable behaviour that
+    /// extraction had to preserve.
+    #[test]
+    fn run_cmd_returns_stdout() {
+        let out = run_cmd("sh", &["-c", "printf 'hello'"]).expect("should succeed");
+        assert_eq!(out, "hello");
+    }
+
+    #[test]
+    fn run_cmd_reports_a_failing_command_with_its_stderr() {
+        let err = run_cmd("sh", &["-c", "echo 'no good' >&2; exit 1"])
+            .expect_err("non-zero exit must be an error");
+        assert!(err.contains("no good"), "unexpected error: {}", err);
+    }
+
+    #[test]
+    fn run_cmd_hints_at_installation_for_a_missing_binary() {
+        let err = run_cmd("colimaui-no-such-binary", &[]).expect_err("should fail");
+        assert!(err.contains("is not installed"), "unexpected error: {}", err);
+    }
+
+    #[test]
+    fn docker_host_is_set_only_for_container_tooling() {
+        // The env decision lives in `build_cmd` now; both callers depend on it
+        // being made the same way.
+        let docker = build_cmd("docker", &["version"]);
+        let other = build_cmd("sh", &["-c", "true"]);
+        let has_docker_host = |cmd: &Command| {
+            cmd.get_envs()
+                .any(|(k, v)| k == "DOCKER_HOST" && v.is_some())
+        };
+        // Only assert the negative unconditionally: whether DOCKER_HOST gets set
+        // for docker depends on a socket existing on the machine running the test.
+        assert!(!has_docker_host(&other));
+        if crate::path_util::detect_docker_host().is_some() {
+            assert!(has_docker_host(&docker));
+        }
+    }
+}

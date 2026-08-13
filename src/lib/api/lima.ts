@@ -1,5 +1,4 @@
 import { call } from "./client";
-import type { ColimaInstance, InstanceStatus, StartConfig, DockerContainer, DockerImage, SystemInfo, AiModel, DockerVolume, DockerNetwork } from "./types";
 
 // ===== Lima API =====
 
@@ -15,32 +14,25 @@ export interface LimaInstance {
 
 export const limaApi = {
   list: async (): Promise<LimaInstance[]> => {
-    const raw = await call<any>("lima_list", undefined, "GET", "/api/lima");
+    const raw = await call<unknown>("lima_list", undefined, "GET", "/api/lima");
     if (!raw) return [];
-    // Tauri IPC may return parsed array directly
-    if (Array.isArray(raw)) return raw.map((v: any) => ({
-      name: v.name || "",
-      status: v.status || "Unknown",
-      arch: v.arch || "",
+    const toInstance = (v: Record<string, unknown>): LimaInstance => ({
+      name: String(v.name || ""),
+      status: String(v.status || "Unknown"),
+      arch: String(v.arch || ""),
       cpus: String(v.cpus || 0),
-      memory: v.memory ? (typeof v.memory === 'number' ? formatLimaBytes(v.memory) : v.memory) : "0",
-      disk: v.disk ? (typeof v.disk === 'number' ? formatLimaBytes(v.disk) : v.disk) : "0",
-      dir: v.dir || "",
-    }));
+      memory: v.memory ? (typeof v.memory === 'number' ? formatLimaBytes(v.memory) : String(v.memory)) : "0",
+      disk: v.disk ? (typeof v.disk === 'number' ? formatLimaBytes(v.disk) : String(v.disk)) : "0",
+      dir: String(v.dir || ""),
+    });
+    // Tauri IPC may return parsed array directly
+    if (Array.isArray(raw)) return raw.map((item) => toInstance(item as Record<string, unknown>));
     if (typeof raw !== 'string') return [];
     if (!raw.trim()) return [];
     try {
       return raw.split("\n").filter((l: string) => l.trim()).map((l: string) => {
-        const v = JSON.parse(l);
-        return {
-          name: v.name || "",
-          status: v.status || "Unknown",
-          arch: v.arch || "",
-          cpus: String(v.cpus || 0),
-          memory: v.memory ? formatLimaBytes(v.memory) : "0",
-          disk: v.disk ? formatLimaBytes(v.disk) : "0",
-          dir: v.dir || "",
-        };
+        const v = JSON.parse(l) as Record<string, unknown>;
+        return toInstance(v);
       });
     } catch { return []; }
   },

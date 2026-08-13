@@ -69,11 +69,11 @@ export async function refetchAllResources() {
   }
 }
 
-function handleDockerStateUpdated(data: any) {
+function handleDockerStateUpdated(data: { containers?: unknown[]; images?: unknown[] }) {
   if (isEventCooldownActive()) return;
 
-  dockerState.containers = (data.containers || []).map(normalizeContainer);
-  dockerState.images = (data.images || []).map(normalizeImage);
+  dockerState.containers = (data.containers || []).map((c) => normalizeContainer(c as Record<string, unknown>));
+  dockerState.images = (data.images || []).map((i) => normalizeImage(i as Record<string, unknown>));
   dockerState.loading = false;
   
   setTimeout(() => {
@@ -108,18 +108,20 @@ export function startDataPoller() {
 
   if (isTauri) {
     import("@tauri-apps/api/event").then((mod) => {
-      mod.listen("instances-update", (event: any) => {
-        dashboardState.colimaInstances = event.payload.instances;
+      mod.listen("instances-update", (event: { payload: { instances?: ColimaInstance[] } }) => {
+        if (event.payload.instances) dashboardState.colimaInstances = event.payload.instances;
         dashboardState.instancesLoaded = true;
         // Starting or stopping an instance flips Colima and Docker between
         // "installed but not running" and "usable".
         loadCapabilities();
       });
-      mod.listen("docker-state-updated", (event: any) => handleDockerStateUpdated(event.payload));
+      mod.listen("docker-state-updated", (event: { payload: { containers?: unknown[]; images?: unknown[] } }) =>
+        handleDockerStateUpdated(event.payload)
+      );
       mod.listen("docker-connection-lost", handleConnectionLost);
       mod.listen("docker-reconnected", refetchAllResources);
       // Tray menu navigation (container click / Help) drives the active page.
-      mod.listen("navigate", (event: any) => {
+      mod.listen("navigate", (event: { payload?: { page?: unknown } }) => {
         const page = event.payload?.page;
         if (typeof page === "string") uiState.currentPage = page;
       });
@@ -127,25 +129,35 @@ export function startDataPoller() {
   } else {
     let sseRetryDelay = 2000;
 
-    async function connectSSE(token: string) {
+    async function connectSSE() {
+      // Re-read the token on every attempt rather than capturing it once.
+      // Browser mode receives it from a URL fragment, so the very first attempt
+      // can legitimately run before one is available; a captured empty string
+      // would then be retried forever against an endpoint that always 401s.
+      const token = await getApiToken();
+
       // Must use the resolved base: the server falls back to 11421-11429 when
       // the default port is taken, and an EventSource pointed at the wrong port
       // fails silently — the UI would just stop updating.
       const base = await resolveApiBase();
       const sseUrl = token ? `${base}/api/events?token=${token}` : `${base}/api/events`;
       const es = new EventSource(sseUrl);
-      es.addEventListener("instances-update", (e: any) => {
+      es.addEventListener("instances-update", (e: MessageEvent) => {
         try {
-          const data = JSON.parse(e.data);
-          dashboardState.colimaInstances = data.instances;
+          const data = JSON.parse(e.data) as { instances?: ColimaInstance[] };
+          if (data.instances) dashboardState.colimaInstances = data.instances;
           dashboardState.instancesLoaded = true;
           loadCapabilities();
-        } catch {}
+        } catch {
+          // A malformed SSE frame is ignored; the next update will retry.
+        }
       });
-      es.addEventListener("docker-state-updated", (e: any) => {
+      es.addEventListener("docker-state-updated", (e: MessageEvent) => {
         try {
-          handleDockerStateUpdated(JSON.parse(e.data));
-        } catch {}
+          handleDockerStateUpdated(JSON.parse(e.data) as { containers?: unknown[]; images?: unknown[] });
+        } catch {
+          // A malformed SSE frame is ignored; the next update will retry.
+        }
       });
       es.addEventListener("docker-connection-lost", handleConnectionLost);
       es.addEventListener("docker-reconnected", refetchAllResources);
@@ -165,15 +177,13 @@ export function startDataPoller() {
           }, 5000);
         }
         sseRetryTimeout = setTimeout(() => {
-          connectSSE(token);
+          connectSSE();
         }, sseRetryDelay);
         sseRetryDelay = Math.min(sseRetryDelay * 2, 30000);
       };
     }
 
-    getApiToken().then((token) => {
-      connectSSE(token);
-    });
+    connectSSE();
   }
 
   return () => {

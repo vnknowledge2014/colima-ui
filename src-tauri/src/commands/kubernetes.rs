@@ -174,12 +174,11 @@ pub async fn k8s_pods(namespace: String) -> Result<Vec<K8sPod>, crate::error::Co
 
             // Calculate restarts
             let restarts: i64 = container_statuses
-                .map(|s| {
+                .map_or(0, |s| {
                     s.iter()
                         .map(|c| c["restartCount"].as_i64().unwrap_or(0))
                         .sum()
-                })
-                .unwrap_or(0);
+                });
 
             let creation = item["metadata"]["creationTimestamp"].as_str().unwrap_or("");
 

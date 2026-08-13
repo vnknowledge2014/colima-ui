@@ -166,9 +166,9 @@
 
   // Effect to re-check when needed (like useEffect dependencies)
   $effect(() => {
-    platform;
-    installMethod;
-    systemInfo;
+    void platform;
+    void installMethod;
+    void systemInfo;
 
     untrack(() => {
       checkDeps();
@@ -281,7 +281,7 @@
 <div class="wizard-overlay">
   <div class="wizard-card">
     <div class="wizard-progress">
-      {#each STEPS as _, i}
+      {#each STEPS as _, i (i)}
         <div class="wizard-progress-dot {i === step ? 'active' : i < step ? 'done' : ''}"></div>
       {/each}
     </div>
@@ -296,7 +296,7 @@
           <label for="lang-select" style="font-size: var(--text-sm);">{t('getting_started.language_select', { default: 'Select Language' })}</label>
           <select 
             id="lang-select" 
-            class="settings-select" 
+            class="input select" 
             style="width: 150px;"
             value={getLanguage()}
             onchange={(e) => setAppSetting("app.language", e.currentTarget.value)}
@@ -310,7 +310,7 @@
         
         {#if platform}
           <span style="display: inline-flex; align-items: center; gap: 6px; padding: 4px 12px; background: rgba(88,166,255,0.1); border-radius: 20px; border: 1px solid rgba(88,166,255,0.2); font-size: var(--text-xs);">
-            <span><Icon name={osInfo.icon as any} size={16} /></span>
+            <span><Icon name={osInfo.icon} size={16} /></span>
             <span>Detected: <strong>{osInfo.label}</strong> ({platform.arch})</span>
             {#if platform.wsl}<span style="color: var(--accent-yellow);">• WSL</span>{/if}
           </span>
@@ -332,7 +332,7 @@
 
       {#if availableMethods.length > 1}
         <div style="display: flex; gap: 6px; margin-bottom: 20px; flex-wrap: wrap;">
-          {#each availableMethods as m}
+          {#each availableMethods as m (m)}
             {@const info = METHOD_LABELS[m]}
             {@const isActive = installMethod === m}
             {@const pmInfo = platform?.package_managers.find(pm => pm.name === m)}
@@ -345,7 +345,7 @@
               disabled={!isAvailable && !isManual}
               title={info.desc}
             >
-              <span><Icon name={info.icon as any} size={16} /></span>
+              <span><Icon name={info.icon} size={16} /></span>
               <span>{info.label}</span>
               {#if !isAvailable && !isManual}
                 <span style="font-size: 9px; opacity: 0.6;">(not found)</span>
@@ -369,7 +369,7 @@
           <div class="dep-row">
             <div class="dep-info">
               <div class="dep-icon {dep.status === 'installed' ? 'installed' : dep.status === 'installing' ? 'installing' : 'missing'}">
-                <Icon name={dep.icon as any} size={16} />
+                <Icon name={dep.icon} size={16} />
               </div>
               <div>
                 <div class="dep-name">{dep.label}</div>

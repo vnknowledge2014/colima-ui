@@ -189,8 +189,11 @@
       </button>
     {/if}
     {#if announcementLink}
+      <!-- ↗ because this one really does open a browser. It is the same
+           convention the rest of the app follows; this button was the only
+           place that left the app without saying so. -->
       <button class="action" onclick={() => void openExternal(announcementLink)}>
-        {t("notifications.announcement_link", { default: "Learn more" })}
+        {t("notifications.announcement_link", { default: "Learn more" })} ↗
       </button>
     {/if}
     {#if entry.error}

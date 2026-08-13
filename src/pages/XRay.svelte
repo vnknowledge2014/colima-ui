@@ -8,11 +8,39 @@
   let loading = $state(true);
   let error = $state<string | null>(null);
 
+  interface ResourceMeta {
+    name: string;
+    namespace?: string;
+    labels?: Record<string, string>;
+  }
+
+  interface ResourceRule {
+    http?: { paths?: { backend?: { service?: { name: string } } }[] };
+  }
+
+  interface ResourceSpec {
+    type?: string;
+    clusterIP?: string;
+    selector?: Record<string, string>;
+    rules?: ResourceRule[];
+  }
+
+  interface ResourceStatus {
+    phase?: string;
+  }
+
+  interface XrayResource {
+    kind: string;
+    metadata: ResourceMeta;
+    spec?: ResourceSpec;
+    status?: ResourceStatus;
+  }
+
   // Grouped resources
-  let ingresses = $state<any[]>([]);
-  let services = $state<any[]>([]);
-  let deployments = $state<any[]>([]);
-  let pods = $state<any[]>([]);
+  let ingresses = $state<XrayResource[]>([]);
+  let services = $state<XrayResource[]>([]);
+  let deployments = $state<XrayResource[]>([]);
+  let pods = $state<XrayResource[]>([]);
 
   // Selection for highlighting relationships
   let hoveredId = $state<string | null>(null);
@@ -29,9 +57,9 @@
       const rawAll = await k8sApi.resources("all", namespace);
       const rawIngress = await k8sApi.resources("ingress", namespace);
 
-      let items: any[] = [];
+      let items: XrayResource[] = [];
       try {
-        const parsedAll = JSON.parse(rawAll);
+        const parsedAll = JSON.parse(rawAll) as { items?: XrayResource[] };
         if (parsedAll && parsedAll.items) {
           items = items.concat(parsedAll.items);
         }
@@ -40,7 +68,7 @@
       }
 
       try {
-        const parsedIngress = JSON.parse(rawIngress);
+        const parsedIngress = JSON.parse(rawIngress) as { items?: XrayResource[] };
         if (parsedIngress && parsedIngress.items) {
           items = items.concat(parsedIngress.items);
         }
@@ -54,15 +82,15 @@
       deployments = items.filter(i => i.kind === "Deployment" || i.kind === "StatefulSet" || i.kind === "DaemonSet");
       pods = items.filter(i => i.kind === "Pod");
 
-    } catch (e: any) {
-      error = e.message || String(e);
+    } catch (e) {
+      error = e instanceof Error ? e.message : String(e);
     } finally {
       loading = false;
     }
   }
 
   // Helper to determine if two resources are related
-  function isRelated(type: string, item: any, currentHover: string | null): boolean {
+  function isRelated(type: string, item: XrayResource, currentHover: string | null): boolean {
     if (!currentHover) return false;
     const hoverParts = currentHover.split(":");
     const hType = hoverParts[0];
@@ -74,15 +102,15 @@
 
     // Ingress -> Service
     if (type === "ingress" && hType === "service") {
-      return item.spec?.rules?.some((r: any) => 
-        r.http?.paths?.some((p: any) => p.backend?.service?.name === hName)
-      );
+      return item.spec?.rules?.some((r) => 
+        r.http?.paths?.some((p) => p.backend?.service?.name === hName)
+      ) || false;
     }
     if (type === "service" && hType === "ingress") {
       const hItem = ingresses.find(i => i.metadata.name === hName && i.metadata.namespace === hNs);
-      return hItem?.spec?.rules?.some((r: any) => 
-        r.http?.paths?.some((p: any) => p.backend?.service?.name === item.metadata.name)
-      );
+      return hItem?.spec?.rules?.some((r) => 
+        r.http?.paths?.some((p) => p.backend?.service?.name === item.metadata.name)
+      ) || false;
     }
 
     // Service -> Pod
@@ -90,20 +118,20 @@
       const hItem = pods.find(p => p.metadata.name === hName && p.metadata.namespace === hNs);
       const selector = item.spec?.selector;
       if (!selector || !hItem?.metadata?.labels) return false;
-      return Object.keys(selector).every(k => hItem.metadata.labels[k] === selector[k]);
+      return Object.keys(selector).every(k => hItem.metadata.labels?.[k] === selector[k]);
     }
     if (type === "pod" && hType === "service") {
       const hItem = services.find(s => s.metadata.name === hName && s.metadata.namespace === hNs);
       const selector = hItem?.spec?.selector;
       if (!selector || !item.metadata?.labels) return false;
-      return Object.keys(selector).every(k => item.metadata.labels[k] === selector[k]);
+      return Object.keys(selector).every(k => item.metadata.labels?.[k] === selector[k]);
     }
 
     // Deployment -> Pod
     if (type === "deployment" && hType === "pod") {
       const hItem = pods.find(p => p.metadata.name === hName && p.metadata.namespace === hNs);
       // Simplify: check if pod name starts with deployment name
-      return hItem?.metadata?.name.startsWith(item.metadata.name + "-");
+      return hItem?.metadata?.name.startsWith(item.metadata.name + "-") || false;
     }
     if (type === "pod" && hType === "deployment") {
       // Simplify: check if pod name starts with deployment name
@@ -138,7 +166,7 @@
       <!-- Ingress Column -->
       <div class="column">
         <h4>{t('xray.ingress', { default: 'Ingress' })} ({ingresses.length})</h4>
-        {#each ingresses as item}
+        {#each ingresses as item (item.metadata.name + item.metadata.namespace)}
           {@const isActive = hoveredId === `ingress:${item.metadata.name}:${item.metadata.namespace}`}
           {@const isHighlighted = isRelated("ingress", item, hoveredId)}
           <div class="node-card" 
@@ -159,7 +187,7 @@
       <!-- Services Column -->
       <div class="column">
         <h4>{t('xray.services', { default: 'Services' })} ({services.length})</h4>
-        {#each services as item}
+        {#each services as item (item.metadata.name + item.metadata.namespace)}
           {@const isActive = hoveredId === `service:${item.metadata.name}:${item.metadata.namespace}`}
           {@const isHighlighted = isRelated("service", item, hoveredId)}
           <div class="node-card" 
@@ -180,7 +208,7 @@
       <!-- Deployments Column -->
       <div class="column">
         <h4>{t('xray.workloads', { default: 'Workloads' })} ({deployments.length})</h4>
-        {#each deployments as item}
+        {#each deployments as item (item.metadata.name + item.metadata.namespace)}
           {@const isActive = hoveredId === `deployment:${item.metadata.name}:${item.metadata.namespace}`}
           {@const isHighlighted = isRelated("deployment", item, hoveredId)}
           <div class="node-card" 
@@ -201,7 +229,7 @@
       <!-- Pods Column -->
       <div class="column">
         <h4>{t('xray.pods', { default: 'Pods' })} ({pods.length})</h4>
-        {#each pods as item}
+        {#each pods as item (item.metadata.name + item.metadata.namespace)}
           {@const isActive = hoveredId === `pod:${item.metadata.name}:${item.metadata.namespace}`}
           {@const isHighlighted = isRelated("pod", item, hoveredId)}
           <div class="node-card" 

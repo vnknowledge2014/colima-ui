@@ -40,11 +40,21 @@
 
 .select {
   appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
   cursor: pointer;
   padding-right: 32px;
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%238B949E' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
   background-repeat: no-repeat;
   background-position: right 10px center;
+}
+
+/* Webviews outside macOS draw the dropdown list with their own colors unless
+   the options are painted explicitly. */
+.select option {
+  background: var(--bg-card);
+  color: var(--text-primary);
+  padding: 6px 8px;
 }
 
 .checkbox {
@@ -107,47 +117,3 @@
   color: var(--text-secondary);
 }
 
-/* ===== Settings Form Elements ===== */
-
-
-.settings-select,
-.settings-input {
-  width: 100%;
-  padding: 8px 10px;
-  background: var(--bg-input);
-  border: 1px solid var(--border-primary);
-  border-radius: var(--radius-md);
-  color: var(--text-primary);
-  font-size: var(--text-xs);
-  font-family: var(--font-primary);
-  transition: border-color 0.15s, box-shadow 0.15s;
-  outline: none;
-}
-
-.settings-select:focus,
-.settings-input:focus {
-  border-color: var(--accent-blue);
-  box-shadow: 0 0 0 2px rgba(88, 166, 255, 0.15);
-}
-
-.settings-select:hover,
-.settings-input:hover {
-  border-color: var(--border-hover, rgba(255,255,255,0.15));
-}
-
-.settings-select {
-  appearance: none;
-  -webkit-appearance: none;
-  -moz-appearance: none;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%238b949e' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
-  background-repeat: no-repeat;
-  background-position: right 8px center;
-  padding-right: 28px;
-  cursor: pointer;
-}
-
-.settings-select option {
-  background: var(--bg-card);
-  color: var(--text-primary);
-  padding: 6px 8px;
-}

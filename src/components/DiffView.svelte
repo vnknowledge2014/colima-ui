@@ -5,9 +5,11 @@
   /**
    * Field-level before/after table shown before a change is written.
    *
-   * Deliberately generic over `FieldChange` rather than tied to colima.yaml:
-   * the commercial plan's Compose auto-fix reuses this component, and a second
-   * near-identical diff table is the thing worth avoiding.
+   * Deliberately generic over `FieldChange` rather than tied to colima.yaml,
+   * so any structured before/after change can use it.
+   *
+   * Not for file patches: those are line-level and live in
+   * `UnifiedDiffView.svelte`. A field table cannot show a hunk in context.
    */
   let {
     changes,

@@ -1,5 +1,8 @@
 use serde::{Deserialize, Serialize};
 
+use crate::commands::activity;
+use crate::commands::runtime;
+
 /// Docker network info
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -21,30 +24,11 @@ pub struct DockerNetwork {
 }
 
 
-/// Run a Docker CLI command on a blocking thread pool with a 10s timeout.
-async fn docker_output(args: Vec<String>) -> Result<std::process::Output, String> {
-    let result = tokio::time::timeout(
-        std::time::Duration::from_secs(10),
-        tokio::task::spawn_blocking(move || {
-            crate::commands::runtime::get_runtime_cmd()
-                .args(args.iter().map(|s| s.as_str()).collect::<Vec<&str>>())
-                .output()
-                .map_err(|e| format!("Failed to run docker command: {}", e))
-        }),
-    )
-    .await;
-
-    match result {
-        Ok(join_result) => join_result.map_err(|e| format!("Task join error: {}", e))?,
-        Err(_) => Err("Docker command timed out (daemon may be unresponsive)".to_string()),
-    }
-}
-
 /// List all Docker networks
 #[tauri::command]
 pub async fn list_networks() -> Result<Vec<DockerNetwork>, crate::error::ColimaError> {
     async move {
-    let output = docker_output(vec!["network".into(), "ls".into(), "--format".into(), "json".into(), "--no-trunc".into()]).await?;
+    let output = runtime::run(vec!["network".into(), "ls".into(), "--format".into(), "json".into(), "--no-trunc".into()], runtime::DEFAULT_TIMEOUT).await?;
 
     if !output.status.success() {
         return Err(format!(
@@ -90,7 +74,7 @@ pub async fn create_network(     name: String,     driver: String,     subnet: S
 
     args.push(name.clone());
 
-    let output = docker_output(args).await?;
+    let output = runtime::run(args, runtime::DEFAULT_TIMEOUT).await?;
 
     if !output.status.success() {
         return Err(format!(
@@ -110,8 +94,10 @@ pub async fn remove_network(name: String) -> Result<String, crate::error::Colima
     if !crate::validation::is_valid_resource_name(&name) {
         return Err(crate::error::ColimaError::validation(format!("Invalid name: {:?}", name)));
     }
-    async move {
-    let output = docker_output(vec!["network".into(), "rm".into(), name.clone()]).await?;
+    // The block below takes ownership, so what the record needs is kept here.
+    let logged_name = name.clone();
+    let result = async move {
+    let output = runtime::run(vec!["network".into(), "rm".into(), name.clone()], runtime::DEFAULT_TIMEOUT).await?;
 
     if !output.status.success() {
         return Err(format!(
@@ -122,7 +108,14 @@ pub async fn remove_network(name: String) -> Result<String, crate::error::Colima
 
     Ok(format!("Network '{}' removed", name))
     }
-    .await.map_err(|e: String| crate::error::ColimaError::from(e))
+    .await;
+
+    crate::commands::activity::record(
+        activity::ActivityEntry::new(activity::ActivityKind::Destructive, "remove", "network", &logged_name)
+            .outcome_of(&result),
+    );
+
+    result.map_err(|e: String| crate::error::ColimaError::from(e))
 }
 
 /// Inspect a Docker network (raw JSON)
@@ -132,7 +125,7 @@ pub async fn inspect_network(name: String) -> Result<String, crate::error::Colim
         return Err(crate::error::ColimaError::validation(format!("Invalid name: {:?}", name)));
     }
     async move {
-    let output = docker_output(vec!["network".into(), "inspect".into(), name]).await?;
+    let output = runtime::run(vec!["network".into(), "inspect".into(), name], runtime::DEFAULT_TIMEOUT).await?;
 
     if !output.status.success() {
         return Err(format!(
@@ -149,8 +142,8 @@ pub async fn inspect_network(name: String) -> Result<String, crate::error::Colim
 /// Prune unused Docker networks
 #[tauri::command]
 pub async fn prune_networks() -> Result<String, crate::error::ColimaError> {
-    async move {
-    let output = docker_output(vec!["network".into(), "prune".into(), "-f".into()]).await?;
+    let result = async move {
+    let output = runtime::run(vec!["network".into(), "prune".into(), "-f".into()], runtime::DEFAULT_TIMEOUT).await?;
 
     if !output.status.success() {
         return Err(format!(
@@ -161,5 +154,13 @@ pub async fn prune_networks() -> Result<String, crate::error::ColimaError> {
 
     Ok(String::from_utf8_lossy(&output.stdout).to_string())
     }
-    .await.map_err(|e: String| crate::error::ColimaError::from(e))
+    .await;
+
+    crate::commands::activity::record(
+        activity::ActivityEntry::new(activity::ActivityKind::Destructive, "prune", "network", "")
+            .detail(result.as_deref().map(activity::prune_summary).unwrap_or_default())
+            .outcome_of(&result),
+    );
+
+    result.map_err(|e: String| crate::error::ColimaError::from(e))
 }

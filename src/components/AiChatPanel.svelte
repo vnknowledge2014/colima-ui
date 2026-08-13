@@ -1,5 +1,5 @@
 <script module lang="ts">
-  const activeSchedules = new Map<string, any>();
+  const activeSchedules = new Map<string, number>();
 </script>
 
 <script lang="ts">
@@ -18,6 +18,7 @@
   } from "../store/ai.svelte";
   import { t } from "../lib/i18n.svelte";
   import { uiState, openSettingsSection } from "../store.svelte";
+  import { closeNotificationPanel } from "../store/notifications.svelte";
   import { aiApi } from "../lib/api";
   import { onError } from "../lib/globalToast";
   import { setAppSetting, getAppSetting } from "../lib/settingsStore.svelte";
@@ -113,7 +114,7 @@
    * too early, the width arriving later re-runs it with correct numbers.
    */
   $effect(() => {
-    userInput;
+    void userInput;
     if (inputWidth > 0) autoGrowTextarea();
   });
 
@@ -176,6 +177,10 @@
   }
 
   function showPanel() {
+    // The notification centre is a fixed overlay with a backdrop; opened, it would
+    // sit on top of this panel and swallow every click meant for it. One side
+    // panel at a time, enforced from both directions.
+    closeNotificationPanel();
     uiState.aiPanelOpen = true;
   }
 
@@ -283,8 +288,10 @@
       onScheduleCancel: (id) => {
         if (activeSchedules.has(id)) {
           const timer = activeSchedules.get(id);
-          clearTimeout(timer as any);
-          clearInterval(timer as any);
+          if (timer !== undefined) {
+            clearTimeout(timer);
+            clearInterval(timer);
+          }
           activeSchedules.delete(id);
         }
       }
@@ -297,12 +304,13 @@
       endpoint: getEndpoint()
     };
 
-    let customPresets: any = [];
-    try {
-      customPresets = JSON.parse(getAppSetting("ColimaCustomProfiles", "[]"));
-    } catch {
-      customPresets = [];
-    }
+    const customPresets: unknown = (() => {
+      try {
+        return JSON.parse(getAppSetting("ColimaCustomProfiles", "[]")) as unknown;
+      } catch {
+        return [];
+      }
+    })();
 
     try {
       await runAgent(

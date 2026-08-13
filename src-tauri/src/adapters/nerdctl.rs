@@ -20,14 +20,10 @@ impl NerdctlAdapter {
         Self { docker_host: None }
     }
 
-    /// Auto-detect Docker host from running Colima instance.
-    
-
     /// Get a Command pre-configured with the correct runtime binary and PATH.
     #[allow(dead_code)]
     fn docker_cmd(&self) -> std::process::Command {
-        let runtime_cmd = crate::commands::runtime::get_runtime_cmd();
-        runtime_cmd
+        crate::commands::runtime::get_runtime_cmd()
     }
 
     /// Execute a Docker CLI command on a blocking thread pool with timeout.
@@ -58,6 +54,12 @@ impl NerdctlAdapter {
             .filter(|l| !l.trim().is_empty())
             .filter_map(|l| serde_json::from_str(l).ok())
             .collect()
+    }
+}
+
+impl Default for NerdctlAdapter {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

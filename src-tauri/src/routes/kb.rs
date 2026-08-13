@@ -28,6 +28,16 @@ pub async fn api_set_setting(
 }
 
 
+pub async fn api_kb_feedback(
+    Json(body): Json<KbFeedbackRequest>,
+) -> (StatusCode, Json<ApiResponse<String>>) {
+    match knowledge_bank::kb_feedback(body.solution_id, body.is_like).await {
+        Ok(msg) => ok(msg),
+        Err(e) => err(e.to_string()),
+    }
+}
+
+
 pub async fn api_kb_query(
     Json(body): Json<KbQueryRequest>,
 ) -> (StatusCode, Json<ApiResponse<serde_json::Value>>) {
@@ -104,7 +114,7 @@ pub async fn api_sandbox_execute_stream(
 
     tokio::spawn(async move {
         // Run classification manually since it's not public
-        let parts: Vec<&str> = command.trim().split_whitespace().collect();
+        let parts: Vec<&str> = command.split_whitespace().collect();
         if parts.is_empty() {
             let _ = tx.send(Ok(Event::default().event("error").data("Empty command"))).await;
             return;

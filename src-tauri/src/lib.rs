@@ -2,7 +2,13 @@ pub mod error;
 pub mod routes;
 mod api_server;
 pub mod commands;
+pub mod pro;
+pub mod subscription;
+pub mod account_session;
+pub mod telemetry;
+pub mod crash;
 mod docker_state;
+pub mod docker_events;
 pub mod instance_reader;
 pub mod path_util;
 mod poller;
@@ -18,11 +24,20 @@ pub mod redact;
 pub mod tray;
 pub mod platform;
 pub mod helpers;
+/// Long-running CLI commands whose output must not be buffered into RAM.
+pub mod streaming_cmd;
+pub mod transfer_registry;
 
 use commands::ai_chat;
+use commands::announcements;
 use commands::colima;
 use commands::compose;
+use commands::compose_autofix;
+use commands::compose_autofix_apply;
+use commands::compose_diagnose;
 use commands::containers;
+use commands::diagnostics;
+use commands::file_transfer;
 use commands::runtime;
 use commands::k8s_cluster;
 use commands::k8s_resources;
@@ -30,12 +45,15 @@ use commands::kind;
 use commands::knowledge_bank;
 use commands::kubernetes;
 use commands::lima;
+use commands::metrics_collector;
 use commands::models;
 use commands::networks;
 use commands::searxng;
+use commands::security_scan;
 use commands::shell_sandbox;
 use commands::system;
 use commands::terminal;
+use commands::topology;
 use commands::volumes;
 use poller::PollerState;
 
@@ -58,6 +76,9 @@ fn reap_terminal_sessions(app: &tauri::AppHandle) {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Redact secrets from panic output before anything else can panic.
+    crash::install();
+
     // Fix PATH so we can find colima, docker, limactl etc.
     // when launched from Finder/Dock (which doesn't inherit shell PATH)
     path_util::fix_path_env();
@@ -65,6 +86,16 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_http::init())
+        // Native file pickers for import/export. The picker records the user's
+        // intent in the UI; it is not an authorization boundary — written paths
+        // are confined in commands::file_transfer regardless of how they arrived.
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        // Receives colimaui://auth-callback?... after the OAuth consent screen.
+        // The URL is untrusted transport: PKCE + a `state` check on the webview
+        // side are what make the callback safe (see src/lib/account-oauth.ts).
+        .plugin(tauri_plugin_deep_link::init())
         .manage(PollerState::default())
         // One manager for the whole app: terminal tabs are Tauri commands, and
         // they all have to reach the same set of live ptys.
@@ -73,10 +104,30 @@ pub fn run() {
             // Initialize Knowledge Bank (SQLite)
             knowledge_bank::init_knowledge_bank();
 
+            // Record app startup (consent-gated; no-ops unless telemetry is on).
+            // After DB init so the consent read has a table to read from.
+            let app_version = app.package_info().version.to_string();
+            tauri::async_runtime::spawn(async move {
+                telemetry::record_app_started(app_version).await;
+            });
+
             // Start HTTP API server for browser-mode access
             api_server::start_api_server();
             // Start background instance poller
             poller::start_instance_poller(app.handle());
+
+            // The app's single metrics sampling loop. It stays idle until a
+            // client subscribes to the `metrics.sample` topic, so starting it
+            // here costs nothing when nobody has opened the Activity page.
+            metrics_collector::spawn_collector();
+
+            // Durable history, for installs entitled to it. A Free install
+            // gets no writer and therefore no metrics.db at all.
+            commands::metrics_store::start_if_entitled();
+
+            // Scheduled rescans. A no-op unless the user switched them on, and
+            // the loop re-checks entitlement before every round.
+            commands::security_watch::start();
 
             // Setup DockerState
             use std::sync::Arc;
@@ -90,6 +141,20 @@ pub fn run() {
             tauri::async_runtime::spawn(async move {
                 docker_state::start_docker_watcher(app_handle, docker_state).await;
             });
+
+            // Self-healing listens and counts unconditionally; whether anything
+            // is done about what it sees is decided per action, against the
+            // kill switch and the subscription at the moment of acting. Wiring
+            // it up on entitlement instead would leave a lapsed install with a
+            // watcher it could not stop.
+            commands::self_heal::spawn_watcher();
+            commands::self_heal::spawn_sweeper();
+
+            // A detonation instance that outlived its session is a VM holding
+            // RAM with nobody watching it. Teardown covers every path the app
+            // controls; this covers the one it does not — being killed while a
+            // sample was running.
+            commands::detonation::spawn_orphan_sweep();
             
             // Resource Saver Mode
             let resource_saver_state = Arc::new(RwLock::new(commands::system::ResourceSaverState::default()));
@@ -157,6 +222,63 @@ pub fn run() {
             networks::remove_network,
             networks::inspect_network,
             networks::prune_networks,
+            // Docker topology graph
+            topology::get_topology,
+            // Live metrics sampling period
+            metrics_collector::set_metrics_interval,
+            // Diagnostic bundle for bug reports
+            diagnostics::diagnostic_bundle,
+            diagnostics::save_diagnostic_bundle,
+            // File + image transfers (background, cancellable)
+            file_transfer::image_save,
+            file_transfer::image_load,
+            file_transfer::copy_to_container,
+            file_transfer::copy_from_container,
+            file_transfer::cancel_transfer,
+            file_transfer::transfer_list,
+            announcements::announcements_fetch,
+            // Image vulnerability scanning
+            security_scan::security_scan_image,
+            security_scan::security_scan_cancel,
+            security_scan::security_sbom_export,
+            security_scan::security_audit_image,
+            commands::security_triage::security_triage,
+            commands::security_triage::security_autofix_propose,
+            commands::security_history::security_score_history,
+            commands::security_policy::security_policy_list,
+            commands::security_policy::security_policy_save,
+            commands::security_policy::security_policy_delete,
+            commands::security_watch::security_watch_state,
+            commands::security_watch::security_watch_set_enabled,
+            commands::security_watch::security_watch_set_interval,
+            commands::detonation::detonation_start,
+            commands::detonation::detonation_cancel,
+            commands::detonation::detonation_get,
+            commands::detonation::detonation_list,
+            commands::detonation::detonation_export,
+            commands::falco_bridge::falco_state,
+            commands::falco_bridge::falco_events,
+            commands::falco_bridge::falco_set_watching,
+            commands::falco_bridge::falco_watching,
+            commands::falco_triage::falco_explain_payload,
+            commands::security_rules::security_rule_pack,
+            // Metrics history and alerts (Pro)
+            commands::alerts::alerts_list_rules,
+            commands::alerts::alerts_save_rule,
+            commands::alerts::alerts_delete_rule,
+            commands::alerts::alerts_recent_events,
+            commands::alerts::alerts_backtest,
+            // Self-healing rules (Pro; the kill switch is not gated)
+            commands::self_heal::self_heal_list_rules,
+            commands::self_heal::self_heal_save_rule,
+            commands::self_heal::self_heal_recent_log,
+            commands::self_heal::self_heal_is_enabled,
+            commands::self_heal::self_heal_set_enabled,
+            // Local action history
+            commands::activity::activity_query,
+            commands::activity_feed::activity_feed,
+            commands::activity_feed::activity_export,
+            commands::security_catalog::security_alternatives,
             // Model commands
             models::list_models,
             models::pull_model,
@@ -178,6 +300,30 @@ pub fn run() {
             compose::compose_restart,
             compose::compose_logs,
             compose::compose_ps,
+            compose_diagnose::compose_validate,
+            compose_diagnose::compose_diagnose,
+            compose_autofix::compose_autofix_propose,
+            compose_autofix_apply::compose_autofix_apply,
+            compose_autofix_apply::compose_autofix_undo,
+            compose_autofix_apply::compose_autofix_history,
+            pro::pro_status,
+            telemetry::telemetry_consent,
+            telemetry::telemetry_should_prompt,
+            telemetry::telemetry_set_consent,
+            telemetry::telemetry_preview,
+            telemetry::telemetry_feature_used,
+            telemetry::telemetry_pro_gate_reached,
+            telemetry::telemetry_checkout_opened,
+            subscription::subscription_state,
+            subscription::subscription_store,
+            subscription::subscription_clear,
+            // Account identity (Supabase session storage). Deliberately separate
+            // from `subscription::*` above: the session says who you are, the
+            // subscription cache says what you have paid for.
+            account_session::account_session_available,
+            account_session::account_session_get,
+            account_session::account_session_set,
+            account_session::account_session_delete,
             // Kubernetes commands
             kubernetes::k8s_check,
             kubernetes::k8s_namespaces,
@@ -277,6 +423,10 @@ pub fn run() {
             shell_sandbox::sandbox_execute_approved,
             // System and API Server
             api_server::get_platform,
+            // The desktop webview's only way to get the HTTP API token, now
+            // that the public endpoint that used to serve it is gone. Needed
+            // for SSE, which cannot send an Authorization header.
+            api_server::api_token,
             system::set_resource_saver,
         ])
         .build(tauri::generate_context!())
@@ -287,6 +437,10 @@ pub fn run() {
             // owned them and there is no longer any UI to close them from.
             if let tauri::RunEvent::ExitRequested { .. } = event {
                 reap_terminal_sessions(app);
+                // Same reasoning for streamed commands: a `docker save` started
+                // from a window that is going away has nothing left to report to,
+                // and would otherwise keep writing a file nobody is waiting for.
+                streaming_cmd::kill_all_streams();
             }
         });
 }

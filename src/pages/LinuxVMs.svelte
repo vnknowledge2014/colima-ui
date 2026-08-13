@@ -269,7 +269,7 @@
 
     {#if vms.length > 0}
       <div style="display: flex; flex-direction: column; gap: 8px;">
-        {#each vms as vm}
+        {#each vms as vm (vm.name)}
           {@const isLoading = actionLoading?.startsWith(vm.name)}
           {@const isRunning = vm.status === "Running"}
           <div
@@ -619,7 +619,7 @@
               class="input select"
             >
               <option value="">Default (Ubuntu)</option>
-              {#each templates as t}
+              {#each templates as t (t)}
                 <option value={t}>{t}</option>
               {/each}
             </select>

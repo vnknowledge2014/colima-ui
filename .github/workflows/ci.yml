@@ -28,8 +28,14 @@ jobs:
 
       - run: npm ci
 
+      - name: ESLint (dead code / unused / error-prone)
+        run: npm run lint
+
       - name: TypeScript type check
-        run: npx tsc --noEmit
+        run: npm run typecheck
+
+      - name: Svelte check
+        run: npm run check
 
   # ===== Rust Check (all platforms) =====
   rust-check:
@@ -75,13 +81,13 @@ jobs:
             cargo check
           fi
 
-      - name: cargo clippy
+      - name: cargo clippy (dead code / unused — errors on any warning)
         working-directory: src-tauri
         run: |
           if [ -n "${{ matrix.target }}" ]; then
-            cargo clippy --target ${{ matrix.target }} -- -W warnings
+            cargo clippy --all-targets --all-features --target ${{ matrix.target }} -- -D warnings
           else
-            cargo clippy -- -W warnings
+            cargo clippy --all-targets --all-features -- -D warnings
           fi
 
   # ===== Frontend Build =====

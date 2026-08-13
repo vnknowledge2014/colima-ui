@@ -3,6 +3,9 @@
   import { uiState, dashboardState } from "./store.svelte";
   import { appState, loadAllSettings, getAppSetting, setAppSetting } from "./lib/settingsStore.svelte";
   import { startDataPoller, refreshManual } from "./lib/dataPoller";
+  import { startTransferNotifications } from "./lib/transferNotifications";
+  import { startAnnouncements } from "./lib/announcements";
+  import { startAlertNotifications } from "./lib/alertNotifications";
   import * as Icons from "./components/Icons.svelte";
 
   import Dashboard from "./pages/Dashboard.svelte";
@@ -12,18 +15,28 @@
   import Images from "./pages/Images.svelte";
   import Volumes from "./pages/Volumes.svelte";
   import Networks from "./pages/Networks.svelte";
+  import Topology from "./pages/Topology.svelte";
+  import Activity from "./pages/Activity.svelte";
   import Compose from "./pages/Compose.svelte";
   import Kubernetes from "./pages/Kubernetes.svelte";
   import LinuxVMs from "./pages/LinuxVMs.svelte";
   import Settings from "./pages/Settings.svelte";
   import Terminal from "./pages/Terminal.svelte";
+  import Security from "./pages/Security.svelte";
   import Help from "./pages/Help.svelte";
 
   import SetupWizard from "./components/SetupWizard.svelte";
   import GettingStartedTour from "./components/GettingStartedTour.svelte";
   import ErrorBoundary from "./components/ErrorBoundary.svelte";
   import AiChatPanel from "./components/AiChatPanel.svelte";
+  import NotificationPanel from "./components/notifications/NotificationPanel.svelte";
   import ConfirmDialog from "./components/ConfirmDialog.svelte";
+  import UpgradeDialog from "./components/UpgradeDialog.svelte";
+  import ConsentDialog from "./components/ConsentDialog.svelte";
+  import { loadProStatus, loadEntitlement, refreshEntitlement } from "./lib/pro.svelte";
+  import SignInPanel from "./components/account/SignInPanel.svelte";
+  import { loadSession, checkSessionPersistence, accountState } from "./lib/account.svelte";
+  import { installCrashReporter } from "./lib/crashReporter";
   
   import Sidebar from "./components/Sidebar.svelte";
   import ToastContainer from "./components/ToastContainer.svelte";
@@ -52,6 +65,18 @@
   let showWizard = $state(false);
   let showTour = $state(false);
   let cleanupPoller: (() => void) | null = null;
+  let cleanupTransfers: (() => void) | null = null;
+  let cleanupAlerts: (() => void) | null = null;
+  /**
+   * Starts out as a "do not start" switch and becomes the real teardown once
+   * polling begins — the start happens after several awaits, so a teardown that
+   * arrives first must still have something to find. Without this the interval
+   * would be created after the app was gone, with nothing left to clear it.
+   */
+  let announcementsTornDown = false;
+  let cleanupAnnouncements: (() => void) | null = () => {
+    announcementsTornDown = true;
+  };
 
   /**
    * Latches true the first time the Terminal page is opened, and never resets.
@@ -82,20 +107,55 @@
   });
 
   onMount(() => {
+    // Redact secrets from any uncaught frontend error before it hits the console.
+    installCrashReporter();
+
     setTimeout(() => {
       if (!isTauri) {
         isTauri = isRunningInTauri();
       }
     }, 250);
 
+    // Subscribed synchronously, before any await: a teardown that arrives while
+    // settings are still loading must be able to find something to tear down.
+    // Transfers outlive the dialog that started them, so this cannot live in a
+    // component that unmounts — and in browser mode a per-dialog subscription
+    // opened a new EventSource every time one was opened.
+    cleanupTransfers = startTransferNotifications();
+    // Alerts are worth knowing about whether or not the Activity page is open,
+    // so this subscribes at app level like transfers do.
+    cleanupAlerts = startAlertNotifications();
+
     (async () => {
       await loadAllSettings();
       cleanupPoller = startDataPoller();
+      // Sidecar → what can run. Independent of who is signed in.
+      loadProStatus();
+
+      // Identity first, then entitlement: the cached subscription is keyed by
+      // user id, so the answer depends on knowing who is signed in. Signed out
+      // is a valid answer too — Pro survives sign-out until the cache expires.
+      await loadSession();
+      checkSessionPersistence();
+
+      // Cache-only, so startup never waits on the network...
+      await loadEntitlement(accountState.user?.id);
+      // ...then re-check in the background. A failed refresh changes nothing.
+      refreshEntitlement();
+
+      // Last, and inside the same chain: the first poll needs settings loaded
+      // (the off switch and the set of ids already shown live there) and reads
+      // entitlement to filter by audience. Starting it earlier would ask both
+      // questions before either had an answer.
+      if (!announcementsTornDown) cleanupAnnouncements = startAnnouncements();
     })();
   });
 
   onDestroy(() => {
     if (cleanupPoller) cleanupPoller();
+    if (cleanupTransfers) cleanupTransfers();
+    if (cleanupAlerts) cleanupAlerts();
+    if (cleanupAnnouncements) cleanupAnnouncements();
   });
 </script>
 
@@ -128,6 +188,12 @@
       <Volumes />
     {:else if uiState.currentPage === "networks"}
       <Networks />
+    {:else if uiState.currentPage === "topology"}
+      <Topology />
+    {:else if uiState.currentPage === "activity"}
+      <Activity />
+    {:else if uiState.currentPage === "security"}
+      <Security />
     {:else if uiState.currentPage === "compose"}
       <Compose />
     {:else if uiState.currentPage === "kubernetes"}
@@ -171,6 +237,7 @@
        panel claims its own column and the content shrinks instead of being
        covered. -->
   <AiChatPanel />
+  <NotificationPanel />
 
   <ToastContainer />
   <ErrorDetailPanel />
@@ -205,6 +272,9 @@
   {/if}
 
   <ConfirmDialog />
+  <UpgradeDialog />
+  <ConsentDialog />
+  <SignInPanel />
 </div>
 
 <!-- ToastContainer is rendered OUTSIDE .app-layout to avoid stacking context

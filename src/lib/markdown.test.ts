@@ -11,7 +11,6 @@ describe('markdown utilities', () => {
 
     it('should handle empty or null strings safely', () => {
       expect(escapeHtml('')).toBe('');
-      // @ts-ignore testing invalid input
       expect(escapeHtml(null)).toBe('');
     });
   });

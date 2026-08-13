@@ -176,7 +176,7 @@ fn classify(command: &str) -> ClassifyResult {
 
 /// Execute a command with safety checks, timeout, and output truncation
 fn execute_command(command: &str) -> Result<ExecResult, String> {
-    let parts: Vec<&str> = command.trim().split_whitespace().collect();
+    let parts: Vec<&str> = command.split_whitespace().collect();
     if parts.is_empty() {
         return Err("Empty command".to_string());
     }

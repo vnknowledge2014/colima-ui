@@ -1,0 +1,7 @@
+# Production database stack
+# Owner: platform team
+services:
+  db:
+    image: postgres:16  # pinned deliberately
+    volumes:
+      - dbdata:/var/lib/postgresql/data

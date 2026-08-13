@@ -1,19 +1,24 @@
 <script lang="ts">
   import {
-    errorLogState,
+    notificationState,
+    errorEntries,
     closeErrorLog,
     clearErrorLog,
     formatEntryForClipboard,
-    type ErrorLogEntry,
-  } from "../store/errorLog.svelte";
+    type NotificationEntry,
+  } from "../store/notifications.svelte";
   import { errorTitle, errorHint } from "../lib/errors";
   import { t } from "../lib/i18n.svelte";
   import { globalToast } from "../lib/globalToast";
   import { openHelpArticle } from "../store.svelte";
 
+  // The store also carries transfers now; this panel is the *error* view, so it
+  // reads the failures rather than everything that ever happened.
+  const entries = $derived(errorEntries());
+
   let copiedId = $state<number | null>(null);
 
-  async function copy(entry: ErrorLogEntry) {
+  async function copy(entry: NotificationEntry) {
     try {
       await navigator.clipboard.writeText(formatEntryForClipboard(entry));
       copiedId = entry.id;
@@ -34,27 +39,27 @@
      never focused, so a handler there would only fire after a click — which
      already closes the panel. Must sit at the top level; Svelte rejects
      `<svelte:window>` inside a block. -->
-<svelte:window onkeydown={(e) => { if (e.key === 'Escape' && errorLogState.isOpen) closeErrorLog(); }} />
+<svelte:window onkeydown={(e) => { if (e.key === 'Escape' && notificationState.isOpen) closeErrorLog(); }} />
 
-{#if errorLogState.isOpen}
+{#if notificationState.isOpen}
   <div class="error-panel-backdrop" aria-hidden="true" onclick={closeErrorLog}></div>
 
   <aside class="error-panel" aria-label={t('errors.panel_title', { default: 'Error details' })}>
     <header class="error-panel-header">
       <h2>{t('errors.panel_title', { default: 'Error details' })}</h2>
       <div class="error-panel-header-actions">
-        {#if errorLogState.entries.length > 0}
+        {#if entries.length > 0}
           <button onclick={clearErrorLog}>{t('errors.clear', { default: 'Clear' })}</button>
         {/if}
         <button aria-label={t('common.close', { default: 'Close' })} onclick={closeErrorLog}>×</button>
       </div>
     </header>
 
-    {#if errorLogState.entries.length === 0}
+    {#if entries.length === 0}
       <p class="error-panel-empty">{t('errors.none_this_session', { default: 'No errors this session.' })}</p>
     {:else}
       <ul class="error-list">
-        {#each errorLogState.entries as entry (entry.id)}
+        {#each entries as entry (entry.id)}
           <li class="error-entry">
             <div class="error-entry-head">
               <span class="error-entry-title">

@@ -1,0 +1,4 @@
+services:
+  web:
+    image: nginx
+    environment: FOO=bar

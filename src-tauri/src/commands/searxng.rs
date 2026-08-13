@@ -429,7 +429,7 @@ fn post_process_markdown(md: &str, title: &str, url: &str, mode: &str) -> String
             // Strip images only
             result = strip_images(&result);
         }
-        "full" | _ => {
+        _ => {
             // Keep everything — images and links preserved
         }
     }

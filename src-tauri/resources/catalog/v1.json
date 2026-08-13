@@ -1,0 +1,179 @@
+{
+  "catalogVersion": "1.0.0",
+  "updatedAt": "2026-08-12",
+  "note": "Hand-written. Each entry says what a swap changes, not what the user should do — the right base image depends on what the application needs, which this file cannot know.",
+  "entries": {
+    "python": {
+      "baseFamily": "debian",
+      "alternatives": [
+        { "image": "python:{version}-slim", "why": "Same interpreter on a trimmed Debian: no compilers, docs or locales, so far less to scan and to patch." },
+        { "image": "python:{version}-alpine", "why": "Smallest of the official tags, but musl instead of glibc — wheels often have to be built from source." },
+        { "image": "gcr.io/distroless/python3-debian12", "why": "No shell and no package manager: much smaller attack surface, and much harder to debug inside." }
+      ]
+    },
+    "node": {
+      "baseFamily": "debian",
+      "alternatives": [
+        { "image": "node:{version}-slim", "why": "Same runtime without the build toolchain that ships in the default tag." },
+        { "image": "node:{version}-alpine", "why": "Smallest official tag; native modules may need rebuilding against musl." },
+        { "image": "gcr.io/distroless/nodejs22-debian12", "why": "Runtime only — no shell, no npm — for an app whose dependencies are already installed at build time." }
+      ]
+    },
+    "ruby": {
+      "baseFamily": "debian",
+      "alternatives": [
+        { "image": "ruby:{version}-slim", "why": "Drops the documentation and build packages from the default tag." },
+        { "image": "ruby:{version}-alpine", "why": "Smallest official tag; native gems need musl-compatible builds." }
+      ]
+    },
+    "openjdk": {
+      "baseFamily": "debian",
+      "alternatives": [
+        { "image": "eclipse-temurin:{version}-jre", "why": "openjdk is deprecated on Docker Hub; Temurin is the maintained successor, and a JRE tag omits the compiler a running service does not need." },
+        { "image": "eclipse-temurin:{version}-jre-alpine", "why": "Same runtime on a much smaller base." }
+      ]
+    },
+    "eclipse-temurin": {
+      "baseFamily": "ubuntu",
+      "alternatives": [
+        { "image": "eclipse-temurin:{version}-jre", "why": "A running service needs the runtime, not the compiler." },
+        { "image": "gcr.io/distroless/java21-debian12", "why": "No shell and no package manager around the JVM." }
+      ]
+    },
+    "golang": {
+      "baseFamily": "debian",
+      "alternatives": [
+        { "image": "gcr.io/distroless/static-debian12", "why": "A statically linked Go binary needs no distribution at all. Build in golang, ship the binary here." },
+        { "image": "gcr.io/distroless/base-debian12", "why": "For binaries that still need libc or CA certificates." },
+        { "image": "alpine:{version}", "why": "Keeps a shell for debugging while staying small; needs CGO disabled or a musl build." }
+      ]
+    },
+    "rust": {
+      "baseFamily": "debian",
+      "alternatives": [
+        { "image": "gcr.io/distroless/cc-debian12", "why": "Ships the compiled binary and libgcc, without the 1 GB toolchain used to produce it." },
+        { "image": "debian:stable-slim", "why": "A familiar base for a binary that needs a shell nearby." }
+      ]
+    },
+    "php": {
+      "baseFamily": "debian",
+      "alternatives": [
+        { "image": "php:{version}-fpm-alpine", "why": "FPM rather than the bundled Apache, on a smaller base." },
+        { "image": "php:{version}-cli-alpine", "why": "For workers and console commands, which do not need a web server at all." }
+      ]
+    },
+    "nginx": {
+      "baseFamily": "debian",
+      "alternatives": [
+        { "image": "nginx:{version}-alpine", "why": "Roughly a fifth of the size, same configuration." },
+        { "image": "nginxinc/nginx-unprivileged:{version}-alpine", "why": "Runs as a non-root user and listens on 8080, so no privileged port and no root process." }
+      ]
+    },
+    "httpd": {
+      "baseFamily": "debian",
+      "alternatives": [
+        { "image": "httpd:{version}-alpine", "why": "Same server, much smaller base." },
+        { "image": "caddy:{version}-alpine", "why": "A different server: automatic HTTPS and a smaller configuration surface, if the Apache-specific config is not needed." }
+      ]
+    },
+    "redis": {
+      "baseFamily": "debian",
+      "alternatives": [
+        { "image": "redis:{version}-alpine", "why": "Same server, a fraction of the packages." }
+      ]
+    },
+    "memcached": {
+      "baseFamily": "debian",
+      "alternatives": [
+        { "image": "memcached:{version}-alpine", "why": "Same server on a smaller base." }
+      ]
+    },
+    "postgres": {
+      "baseFamily": "debian",
+      "alternatives": [
+        { "image": "postgres:{version}-alpine", "why": "Smaller, but note the locale and collation differences from the Debian tags — an existing data directory may not be readable across the two." }
+      ]
+    },
+    "mysql": {
+      "baseFamily": "oraclelinux",
+      "alternatives": [
+        { "image": "mysql:{version}-oraclelinux9-slim", "why": "The slim tag drops tooling the server does not need at run time." },
+        { "image": "mariadb:{version}", "why": "A drop-in-compatible server for most workloads, with a different maintenance cadence." }
+      ]
+    },
+    "mariadb": {
+      "baseFamily": "ubuntu",
+      "alternatives": [
+        { "image": "mariadb:{version}-ubi", "why": "Built on a Red Hat universal base image, which some environments prefer for support reasons." }
+      ]
+    },
+    "mongo": {
+      "baseFamily": "ubuntu",
+      "alternatives": [
+        { "image": "mongo:{version}", "why": "Pin the minor version rather than tracking the major tag: MongoDB's storage format changes between them." }
+      ]
+    },
+    "rabbitmq": {
+      "baseFamily": "debian",
+      "alternatives": [
+        { "image": "rabbitmq:{version}-alpine", "why": "Smaller base; the management plugin has its own tag suffix." }
+      ]
+    },
+    "ubuntu": {
+      "baseFamily": "ubuntu",
+      "alternatives": [
+        { "image": "debian:stable-slim", "why": "A smaller general-purpose base with the same package tooling." },
+        { "image": "alpine:{version}", "why": "Much smaller, but musl and BusyBox differ from glibc and GNU tools in ways that surface at run time." }
+      ]
+    },
+    "debian": {
+      "baseFamily": "debian",
+      "alternatives": [
+        { "image": "debian:stable-slim", "why": "Same distribution without the extras the default tag carries." },
+        { "image": "gcr.io/distroless/base-debian12", "why": "For an image that only needs to run one compiled binary." }
+      ]
+    },
+    "alpine": {
+      "baseFamily": "alpine",
+      "alternatives": [
+        { "image": "alpine:{version}", "why": "Pin the minor version. `alpine:latest` moves between major releases, which changes musl and the package set under you." }
+      ]
+    },
+    "busybox": {
+      "baseFamily": "busybox",
+      "alternatives": [
+        { "image": "gcr.io/distroless/static-debian12", "why": "If the shell is only there for the entrypoint, removing it removes the most useful thing an attacker finds inside." }
+      ]
+    },
+    "traefik": {
+      "baseFamily": "alpine",
+      "alternatives": [
+        { "image": "traefik:{version}", "why": "Pin the minor version: Traefik's configuration format has changed between majors." }
+      ]
+    },
+    "caddy": {
+      "baseFamily": "alpine",
+      "alternatives": [
+        { "image": "caddy:{version}-alpine", "why": "Already small; pin the version rather than following the rolling tag." }
+      ]
+    },
+    "haproxy": {
+      "baseFamily": "debian",
+      "alternatives": [
+        { "image": "haproxy:{version}-alpine", "why": "Same proxy on a smaller base." }
+      ]
+    },
+    "elasticsearch": {
+      "baseFamily": "ubuntu",
+      "alternatives": [
+        { "image": "docker.elastic.co/elasticsearch/elasticsearch:{version}", "why": "The vendor's own registry is the one that receives security updates first." }
+      ]
+    },
+    "wordpress": {
+      "baseFamily": "debian",
+      "alternatives": [
+        { "image": "wordpress:{version}-fpm-alpine", "why": "FPM behind your own web server, on a smaller base." }
+      ]
+    }
+  }
+}

@@ -8,13 +8,7 @@
   import { setAppSetting, getAppSetting } from "../../lib/settingsStore.svelte";
   import { normalizeError } from "../../lib/errors";
   import SettingsSection from "./SettingsSection.svelte";
-
-  export interface AgentMemoryItem {
-    id: string;
-    memory_type: string;
-    content: string;
-    created_at: number;
-  }
+  import type { AgentMemoryItem } from "../../lib/api/knowledgeBank";
 
   const AI_PROVIDERS = [
     { id: "anthropic", label: "Anthropic" },
@@ -185,8 +179,8 @@
     <div style="display: flex; gap: 8px; margin-bottom: 8px;">
       <div style="flex: 1;">
         <label for="aiProvider" style="font-size: 11px; color: var(--text-muted); display: block; margin-bottom: 4px;">Provider</label>
-        <select id="aiProvider" bind:value={aiProvider} onchange={() => aiModel = ""} class="settings-select">
-          {#each AI_PROVIDERS as p}
+        <select id="aiProvider" bind:value={aiProvider} onchange={() => aiModel = ""} class="input select">
+          {#each AI_PROVIDERS as p (p.id)}
             <option value={p.id}>{p.label}</option>
           {/each}
         </select>
@@ -195,9 +189,9 @@
         <label for="aiModel" style="font-size: 11px; color: var(--text-muted); display: block; margin-bottom: 4px;">
           Model {#if modelsFetching}<span class="spinner" style="width: 10px; height: 10px; border-width: 1.5px; display: inline-block; vertical-align: middle; margin-left: 4px;"></span>{/if}
         </label>
-        <input id="aiModel" type="text" list="settings-ai-models" bind:value={aiModel} placeholder="Type or select..." class="settings-input" />
+        <input id="aiModel" type="text" list="settings-ai-models" bind:value={aiModel} placeholder="Type or select..." class="input" />
         <datalist id="settings-ai-models">
-          {#each availableModels as m}
+          {#each availableModels as m (m)}
             <option value={m}></option>
           {/each}
         </datalist>
@@ -210,13 +204,13 @@
     {#if aiProvider !== "ollama-local"}
       <div style="margin-bottom: 8px;">
         <label for="aiApiKey" style="font-size: 11px; color: var(--text-muted); display: block; margin-bottom: 4px;">API Key</label>
-        <input id="aiApiKey" bind:this={apiKeyInput} type="password" bind:value={aiApiKey} placeholder="Enter API key..." class="settings-input" style="font-family: var(--font-mono);" />
+        <input id="aiApiKey" bind:this={apiKeyInput} type="password" bind:value={aiApiKey} placeholder="Enter API key..." class="input" style="font-family: var(--font-mono);" />
       </div>
     {/if}
     {#if aiProvider === "ollama-cloud"}
       <div>
         <label for="aiEndpoint" style="font-size: 11px; color: var(--text-muted); display: block; margin-bottom: 4px;">Endpoint URL</label>
-        <input id="aiEndpoint" type="text" bind:value={aiEndpoint} placeholder="https://your-ollama-server.com" class="settings-input" style="font-family: var(--font-mono);" />
+        <input id="aiEndpoint" type="text" bind:value={aiEndpoint} placeholder="https://your-ollama-server.com" class="input" style="font-family: var(--font-mono);" />
       </div>
     {/if}
   </div>
@@ -231,11 +225,11 @@
     <div style="font-size: var(--text-xs); color: var(--text-muted); margin-bottom: 10px; line-height: 1.6; padding: 8px 10px; background: rgba(88,166,255,0.06); border-radius: var(--radius-md); border: 1px solid rgba(88,166,255,0.1);">
       Search uses SearXNG instances first, then DuckDuckGo as fallback.
       Public SearXNG instances may rate-limit API access.
-      For reliable results, run a local instance: <code style="font-size: 10px; background: rgba(255,255,255,0.06); padding: 1px 4px; border-radius: 3px;">docker run -d -p 8888:8080 searxng/searxng</code>
+      For reliable results, run a local instance: <code style="font-size: 10px; background: var(--surface-inset); padding: 1px 4px; border-radius: var(--radius-sm);">docker run -d -p 8888:8080 searxng/searxng</code>
     </div>
     <div style="margin-bottom: 8px;">
       <label for="searxngInstances" style="font-size: 11px; color: var(--text-muted); display: block; margin-bottom: 4px;">SearXNG Instances (one per line)</label>
-      <textarea id="searxngInstances" bind:value={searxngInstances} rows="4" placeholder="http://localhost:8888/search&#10;https://search.inetol.net/search" class="settings-input" style="font-family: var(--font-mono); resize: vertical; line-height: 1.5;"></textarea>
+      <textarea id="searxngInstances" bind:value={searxngInstances} rows="4" placeholder="http://localhost:8888/search&#10;https://search.inetol.net/search" class="input" style="font-family: var(--font-mono); resize: vertical; line-height: 1.5;"></textarea>
     </div>
     <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
       <button class="btn btn-ghost" style="font-size: var(--text-xs); display: flex; align-items: center; gap: 4px;"
@@ -269,7 +263,7 @@
     <div style="display: flex; gap: 8px;">
       <div style="flex: 1;">
         <label for="contentMode" style="font-size: 11px; color: var(--text-muted); display: block; margin-bottom: 4px;">Content Mode</label>
-        <select id="contentMode" bind:value={contentMode} class="settings-select">
+        <select id="contentMode" bind:value={contentMode} class="input select">
           <option value="full">Full — Keep images + links</option>
           <option value="compact">Compact — Strip images only</option>
           <option value="minimal">Minimal — Strip images + links</option>
@@ -277,7 +271,7 @@
       </div>
       <div style="flex: 1;">
         <label for="maxPageSize" style="font-size: 11px; color: var(--text-muted); display: block; margin-bottom: 4px;">Max Page Size (chars)</label>
-        <input id="maxPageSize" type="number" bind:value={maxPageSize} min="1000" max="50000" step="1000" class="settings-input" style="font-family: var(--font-mono);" />
+        <input id="maxPageSize" type="number" bind:value={maxPageSize} min="1000" max="50000" step="1000" class="input" style="font-family: var(--font-mono);" />
       </div>
     </div>
   </div>
@@ -307,15 +301,17 @@
 >
   <div style="display: flex; flex-direction: column; gap: 12px;">
     {#if memories.length === 0}
-      <div style="font-size: var(--text-sm); color: var(--text-muted); padding: 16px; background: rgba(255,255,255,0.03); border-radius: var(--radius-md); text-align: center;">
+      <div class="settings-inset" style="font-size: var(--text-sm); color: var(--text-muted); text-align: center;">
         No memories recorded yet.
       </div>
     {:else}
-      {#each memories as memory}
-        <div style="background: rgba(255,255,255,0.04); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); padding: 16px; position: relative;">
+      {#each memories as memory (memory.id)}
+        <div class="settings-inset" style="position: relative;">
           <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 12px;">
             <div style="display: flex; align-items: center; gap: 8px;">
-              <span class="badge" style="background: {memory.memory_type === 'reasoning' ? 'rgba(88, 166, 255, 0.1)' : 'rgba(188, 140, 255, 0.1)'}; color: {memory.memory_type === 'reasoning' ? 'var(--accent-blue)' : 'var(--accent-purple)'}; text-transform: uppercase;">
+              <!-- Tint derived from the accent itself, so the badge cannot drift
+                   to a blue the palette does not contain. -->
+              <span class="badge" style="background: color-mix(in srgb, {memory.memory_type === 'reasoning' ? 'var(--accent-blue)' : 'var(--accent-purple)'} 12%, transparent); color: {memory.memory_type === 'reasoning' ? 'var(--accent-blue)' : 'var(--accent-purple)'}; text-transform: uppercase;">
                 {memory.memory_type === 'reasoning' ? '🛠️ Reasoning' : '👤 Preference'}
               </span>
               <span style="font-size: 11px; color: var(--text-muted);">
@@ -336,7 +332,7 @@
             <div>
               <textarea
                 bind:value={editMemoryContent}
-                class="settings-input"
+                class="input"
                 rows="4"
                 style="font-family: var(--font-mono); font-size: 13px; resize: vertical; width: 100%; margin-bottom: 8px;"
               ></textarea>

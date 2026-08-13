@@ -17,10 +17,9 @@ pub fn get_db() -> &'static Mutex<Connection> {
 
 /// Initialize the knowledge bank — called once from lib.rs setup()
 pub fn init_knowledge_bank() {
-    let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
-    let dir = format!("{}/.colima-ui", home);
+    let dir = crate::path_util::app_data_dir();
     let _ = std::fs::create_dir_all(&dir);
-    let db_path = format!("{}/knowledge.db", dir);
+    let db_path = dir.join("knowledge.db");
 
     let conn = Connection::open(&db_path).expect("Failed to open knowledge.db");
 
@@ -629,7 +628,7 @@ pub async fn kb_learn(error_pattern: String, solution_text: String) -> Result<i6
     )
     .await
     }
-    .await.map_err(|e: crate::error::ColimaError| crate::error::ColimaError::from(e))
+    .await
 }
 
 /// Save an anti-pattern (approach that didn't work)
@@ -884,12 +883,7 @@ pub async fn list_all_preset_snapshots(     instance_profile: String, ) -> Resul
         })
         .map_err(|e| format!("DB query_map: {}", e))?;
 
-    let mut results = Vec::new();
-    for row in rows {
-        if let Ok(snap) = row {
-            results.push(snap);
-        }
-    }
+    let results: Vec<PresetSnapshot> = rows.into_iter().flatten().collect();
     Ok(results)
     }
     .await.map_err(|e: String| crate::error::ColimaError::from(e))

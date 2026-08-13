@@ -142,6 +142,86 @@ pub struct ImageTagBody {
 
 
 
+// ===== Background transfers =====
+//
+// `destDir` and `fileName` arrive separately on purpose: containment of the
+// written path is checked against the folder the user chose, which a single
+// combined path could not express. See `commands::file_transfer`.
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImageSaveBody {
+    pub images: Vec<String>,
+    pub dest_dir: String,
+    pub file_name: String,
+    #[serde(default)]
+    pub overwrite: Option<bool>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImageLoadBody {
+    pub tar_path: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CopyToContainerBody {
+    pub container_id: String,
+    pub host_path: String,
+    pub container_path: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CopyFromContainerBody {
+    pub container_id: String,
+    pub container_path: String,
+    pub dest_dir: String,
+    pub file_name: String,
+    #[serde(default)]
+    pub overwrite: Option<bool>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CancelTransferBody {
+    pub job_id: String,
+}
+
+// ===== Diagnostics =====
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DiagnosticBundleBody {
+    /// The message the user is reporting, if they started from one. Feeds the
+    /// signature only; it is never stored as a section.
+    #[serde(default)]
+    pub error: Option<String>,
+    #[serde(default)]
+    pub container_id: Option<String>,
+    #[serde(default)]
+    pub log_lines: Option<u32>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SaveDiagnosticBundleBody {
+    pub bundle: crate::commands::diagnostics::DiagnosticBundle,
+    /// Section ids the user left checked.
+    pub include: Vec<String>,
+    pub dest_dir: String,
+    pub file_name: String,
+    #[serde(default)]
+    pub overwrite: Option<bool>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MetricsIntervalBody {
+    pub ms: u64,
+}
+
 #[derive(Deserialize)]
 pub struct PruneQuery {
     #[serde(default)]
@@ -681,6 +761,45 @@ pub struct ComposeLogsQuery {
     pub project_name: String,
     #[serde(default = "default_log_lines")]
     pub lines: u32,
+}
+
+
+
+#[derive(Deserialize)]
+pub struct KbFeedbackRequest {
+    #[serde(alias = "solutionId")]
+    pub solution_id: i64,
+    #[serde(alias = "isLike")]
+    pub is_like: bool,
+}
+
+
+
+#[derive(Deserialize)]
+pub struct ComposeDiagnoseBody {
+    #[serde(alias = "filePath")]
+    pub file_path: String,
+}
+
+
+#[derive(Deserialize)]
+pub struct ComposeAutofixApplyBody {
+    #[serde(alias = "filePath")]
+    pub file_path: String,
+    #[serde(alias = "newContent")]
+    pub new_content: String,
+    pub explanation: String,
+    /// Keys the patch removes deliberately. Absent means "none", which is the
+    /// strict reading: an omitted field must not widen what the gate allows.
+    #[serde(alias = "declaredRemovals", default)]
+    pub declared_removals: Vec<String>,
+}
+
+
+#[derive(Deserialize)]
+pub struct ComposeAutofixUndoBody {
+    #[serde(alias = "fixId")]
+    pub fix_id: String,
 }
 
 

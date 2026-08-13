@@ -1,22 +1,22 @@
 import { call } from "./client";
-import type { ColimaInstance, InstanceStatus, StartConfig, DockerContainer, DockerImage, SystemInfo, AiModel, DockerVolume, DockerNetwork } from "./types";
+import type { DockerNetwork } from "./types";
 
 // ===== Networks API =====
 
 export const networksApi = {
   listNetworks: async (): Promise<DockerNetwork[]> => {
-    const raw = await call<any>("list_networks", undefined, "GET", "/api/networks");
+    const raw = await call<unknown>("list_networks", undefined, "GET", "/api/networks");
     if (!raw) return [];
     const items = Array.isArray(raw) ? raw : [];
     // Normalize field names for Tauri IPC compatibility
-    return items.map((v: any) => ({
-      Id: v.Id || v.id || v.ID || "",
-      Name: v.Name || v.name || "",
-      Driver: v.Driver || v.driver || "",
-      Scope: v.Scope || v.scope || "",
-      Ipv6: v.Ipv6 || v.ipv6 || v.IPv6 || "",
-      Internal: v.Internal || v.internal || "",
-      Labels: v.Labels || v.labels || "",
+    return items.map((v: Record<string, unknown>) => ({
+      Id: String(v.Id || v.id || v.ID || ""),
+      Name: String(v.Name || v.name || ""),
+      Driver: String(v.Driver || v.driver || ""),
+      Scope: String(v.Scope || v.scope || ""),
+      Ipv6: String(v.Ipv6 || v.ipv6 || v.IPv6 || ""),
+      Internal: String(v.Internal || v.internal || ""),
+      Labels: String(v.Labels || v.labels || ""),
     }));
   },
 

@@ -83,8 +83,8 @@
       );
 
       podTargets = pods.flatMap((p) => {
-        const containers: string[] =
-          (p._raw as any)?.spec?.containers?.map((c: any) => c.name) ?? [];
+        const rawSpec = p._raw.spec as { containers?: { name?: string }[] } | undefined;
+        const containers: string[] = rawSpec?.containers?.map((c) => c.name ?? "") ?? [];
         const ns = p.namespace || "default";
 
         // One row per container only when there is a choice to make; a
@@ -292,7 +292,7 @@
             Colima Instances
           </div>
         {/if}
-        {#each instances as inst}
+        {#each instances as inst (inst.name)}
           <div
             class="nav-item"
             style="padding: 12px 16px; border-radius: var(--radius-md);"
@@ -312,7 +312,7 @@
             Linux VMs (Lima)
           </div>
         {/if}
-        {#each limaVMs as vm}
+        {#each limaVMs as vm (vm.name)}
           <div
             class="nav-item"
             style="padding: 12px 16px; border-radius: var(--radius-md);"

@@ -5,7 +5,8 @@
   import { reportError } from "../lib/errorReporter";
   import { t } from "../lib/i18n.svelte";
   import * as Icons from "../components/Icons.svelte";
-  
+  import { viewInTopology, consumeFocus } from "../lib/topology-link";
+
   import { dockerState } from "../store.svelte";
   import { getCurrentPresetForInstance, getContainerPresetMap, PRESET_LABELS, PRESET_COLORS } from "../lib/presetStateManager";
   import { setEventCooldown } from "../store.svelte";
@@ -14,12 +15,59 @@
   import { withErrorReport } from "../lib/errorReporter";
   import { normalizeError, errorMessage } from "../lib/errors";
   import { columnResize } from "../lib/columnResize";
+  import TransferDialog from "../components/transfer/TransferDialog.svelte";
+  import ContextMenu from "../components/ContextMenu.svelte";
+  import type { TransferMode } from "../lib/api/transfer";
   import { getAppSetting, setAppSetting } from "../lib/settingsStore.svelte";
 
   let filter = $state<"all" | "running" | "stopped">("all");
+  const containerFilters: ("all" | "running" | "stopped")[] = ["all", "running", "stopped"];
+  const detailTabs: ("overview" | "logs" | "stats" | "exec" | "inspect")[] = ["overview", "logs", "stats", "exec", "inspect"];
   let searchTerm = $state("");
+  /** Open copy dialog, carrying which container and which direction. */
+  let transfer = $state<{ mode: TransferMode; containerId: string; label: string } | null>(null);
   let actionLoading = $state<string | null>(null);
   let rowErrors = $state<Record<string, string>>({});
+  /** Overflow menu for a row: secondary and destructive actions live here so the
+      inline cluster stays down to the lifecycle controls people reach for. */
+  let rowMenu = $state<{ x: number; y: number; container: DockerContainer } | null>(null);
+
+  function rowMenuItems(c: DockerContainer) {
+    const busy = !!actionLoading?.startsWith(c.Id);
+    return [
+      {
+        label: t('containers.copy_in', { default: 'Copy file into container' }),
+        icon: Icons.CopyIn,
+        disabled: busy,
+        action: () => { transfer = { mode: 'copy-in', containerId: c.Id, label: c.Names }; },
+      },
+      {
+        label: t('containers.copy_out', { default: 'Copy file from container' }),
+        icon: Icons.CopyOut,
+        disabled: busy,
+        action: () => { transfer = { mode: 'copy-out', containerId: c.Id, label: c.Names }; },
+      },
+      {
+        label: t('common.view_in_topology', { default: 'View in topology' }),
+        icon: Icons.Topology,
+        action: () => viewInTopology('container', c.Id),
+      },
+      { divider: true, label: '', action: () => {} },
+      {
+        label: t('containers.remove', { default: 'Remove' }),
+        icon: Icons.Trash,
+        danger: true,
+        disabled: busy,
+        action: () => handleAction(c.Id, c.Names, 'remove'),
+      },
+    ];
+  }
+
+  function openRowMenu(e: MouseEvent, c: DockerContainer) {
+    e.stopPropagation();
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    rowMenu = { x: rect.right, y: rect.bottom + 4, container: c };
+  }
 
   function setRowError(id: string, e: unknown) {
     rowErrors = { ...rowErrors, [id]: errorMessage(normalizeError(e)) };
@@ -46,7 +94,7 @@
     try {
       const list = await dockerApi.listContainers(true);
       dockerState.containers = list;
-    } catch (e) {
+    } catch {
       dockerState.containers = [];
     }
   }
@@ -63,7 +111,15 @@
   });
 
   onMount(() => {
-    refreshContainers();
+    refreshContainers().then(() => {
+      // Arrived from the topology graph's "Open in Containers": open the same
+      // container's detail panel rather than dropping the user at a list they
+      // then have to search. A container that has since gone is ignored.
+      const focus = consumeFocus("containers");
+      if (!focus) return;
+      const match = dockerState.containers.find((c) => c.Id === focus || c.Id.startsWith(focus));
+      if (match) selectedContainer = match;
+    });
     sysMethods.getRuntimeInfo().then(r => runtimeName = r).catch(() => {});
 
     const aiListener = async (e: Event) => {
@@ -127,7 +183,7 @@
       else if (action === "pause") await dockerApi.pauseContainer(id);
       else if (action === "unpause") await dockerApi.unpauseContainer(id);
 
-      const past: any = { start: "started", stop: "stopped", restart: "restarted", remove: "removed", pause: "paused", unpause: "unpaused" };
+      const past: Record<string, string> = { start: "started", stop: "stopped", restart: "restarted", remove: "removed", pause: "paused", unpause: "unpaused" };
       globalToast("success", `Container '${name}' ${past[action] || action}`);
       clearRowError(id);
       await refreshContainers();
@@ -208,7 +264,8 @@
 
   function toggleGroup(id: string) {
     const next = new Set(collapsedGroups);
-    next.has(id) ? next.delete(id) : next.add(id);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
     collapsedGroups = next;
   }
 
@@ -253,7 +310,8 @@
 
   function toggleSelect(id: string) {
     const next = new Set(selected);
-    next.has(id) ? next.delete(id) : next.add(id);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
     selected = next;
   }
 
@@ -374,7 +432,7 @@
   // Polling for detail view
   $effect(() => {
     if (!selectedContainer) return;
-    let int: any;
+    let int: ReturnType<typeof setInterval> | undefined;
     if (detailTab === "logs") int = setInterval(fetchLogs, 3000);
     if (detailTab === "stats") int = setInterval(fetchStats, 5000);
     return () => clearInterval(int);
@@ -427,8 +485,8 @@
       {t('containers.group_by_project', { default: 'Group by project' })}
     </button>
     <div style="display: flex; gap: 2px; background: var(--bg-card); border-radius: var(--radius-md); padding: 2px;">
-      {#each ["all", "running", "stopped"] as f}
-        <button class="btn" style="background: {filter === f ? 'var(--bg-card-hover)' : 'transparent'}; color: {filter === f ? 'var(--text-primary)' : 'var(--text-muted)'}; border: none; font-size: var(--text-xs); padding: 4px 10px; text-transform: capitalize;" onclick={() => filter = f as any}>
+      {#each containerFilters as f (f)}
+        <button class="btn" style="background: {filter === f ? 'var(--bg-card-hover)' : 'transparent'}; color: {filter === f ? 'var(--text-primary)' : 'var(--text-muted)'}; border: none; font-size: var(--text-xs); padding: 4px 10px; text-transform: capitalize;" onclick={() => filter = f}>
           {t(`containers.filter_${f}`, { default: f })}
         </button>
       {/each}
@@ -457,7 +515,7 @@
   {/if}
 
   {#if filtered.length > 0}
-    <div class="vtable" use:columnResize style="--cols: 44px var(--col-1, minmax(180px,1.5fr)) var(--col-2, minmax(150px,1fr)) var(--col-3, minmax(170px,200px)) var(--col-4, minmax(130px,1fr)) 180px;">
+    <div class="vtable" use:columnResize style="--cols: 44px var(--col-1, minmax(180px,1.5fr)) var(--col-2, minmax(150px,1fr)) var(--col-3, minmax(170px,200px)) var(--col-4, minmax(130px,1fr)) 140px;">
       <div class="vtable-x">
       <div class="vtable-header" style="display: grid; grid-template-columns: var(--cols);">
         <div class="vtable-header-cell" style="text-align: center;">
@@ -534,15 +592,17 @@
             <div class="vtable-cell" style="font-family: var(--font-mono); font-size: var(--text-xs); color: var(--text-muted);" title={c.Ports || ""}>{c.Ports || "—"}</div>
             <div role="button" tabindex="0" class="vtable-cell" onkeydown={(e) => e.key === 'Enter' && e.currentTarget.click()} onclick={(e) => e.stopPropagation()}>
               <div class="table-actions" style="justify-content: flex-end;">
+                <!-- One lifecycle button reflecting the state the row is actually
+                     in, so the primary move is never ambiguous. -->
                 {#if isPaused}
-                  <button class="btn btn-ghost btn-icon" data-tooltip={t('containers.unpause', { default: 'Unpause' })} disabled={!!isLoading} onclick={() => handleAction(c.Id, c.Names, 'unpause')}>U</button>
+                  <button class="btn btn-ghost btn-icon btn-play" data-tooltip={t('containers.unpause', { default: 'Unpause' })} aria-label={t('containers.unpause', { default: 'Unpause' })} disabled={!!isLoading} onclick={() => handleAction(c.Id, c.Names, 'unpause')}>{@html Icons.Play}</button>
                 {:else if isRunning}
-                  <button class="btn btn-ghost btn-icon" data-tooltip={t('containers.stop', { default: 'Stop' })} disabled={!!isLoading} onclick={() => handleAction(c.Id, c.Names, 'stop')}>S</button>
+                  <button class="btn btn-ghost btn-icon btn-stop" data-tooltip={t('containers.stop', { default: 'Stop' })} aria-label={t('containers.stop', { default: 'Stop' })} disabled={!!isLoading} onclick={() => handleAction(c.Id, c.Names, 'stop')}>{@html Icons.Stop}</button>
                 {:else}
-                  <button class="btn btn-ghost btn-icon" data-tooltip={t('containers.start', { default: 'Start' })} disabled={!!isLoading} onclick={() => handleAction(c.Id, c.Names, 'start')}>P</button>
+                  <button class="btn btn-ghost btn-icon btn-play" data-tooltip={t('containers.start', { default: 'Start' })} aria-label={t('containers.start', { default: 'Start' })} disabled={!!isLoading} onclick={() => handleAction(c.Id, c.Names, 'start')}>{@html Icons.Play}</button>
                 {/if}
-                <button class="btn btn-ghost btn-icon" data-tooltip={t('containers.restart', { default: 'Restart' })} disabled={!!isLoading} onclick={() => handleAction(c.Id, c.Names, 'restart')}>R</button>
-                <button class="btn btn-ghost btn-icon" data-tooltip={t('containers.remove', { default: 'Remove' })} disabled={!!isLoading} onclick={() => handleAction(c.Id, c.Names, 'remove')} style="color: var(--accent-red);">X</button>
+                <button class="btn btn-ghost btn-icon" data-tooltip={t('containers.restart', { default: 'Restart' })} disabled={!!isLoading} onclick={() => handleAction(c.Id, c.Names, 'restart')}>{@html Icons.Refresh}</button>
+                <button class="btn btn-ghost btn-icon" data-tooltip={t('common.more_actions', { default: 'More actions' })} aria-haspopup="menu" onclick={(e) => openRowMenu(e, c)}>{@html Icons.More}</button>
               </div>
             </div>
           </div>
@@ -616,8 +676,8 @@
       </div>
 
       <div style="display: flex; gap: 2px; border-bottom: 1px solid var(--border-primary); margin-bottom: 16px;">
-        {#each ["overview", "logs", "stats", "exec", "inspect"] as t}
-          <button class="btn" style="background: transparent; border: none; border-bottom: {detailTab === t ? '2px solid var(--accent-blue)' : '2px solid transparent'}; color: {detailTab === t ? 'var(--text-primary)' : 'var(--text-secondary)'}; border-radius: 0; padding: 8px 16px; font-weight: {detailTab === t ? 600 : 400}; text-transform: capitalize;" onclick={() => detailTab = t as any}>{t}</button>
+        {#each detailTabs as t (t)}
+          <button class="btn" style="background: transparent; border: none; border-bottom: {detailTab === t ? '2px solid var(--accent-blue)' : '2px solid transparent'}; color: {detailTab === t ? 'var(--text-primary)' : 'var(--text-secondary)'}; border-radius: 0; padding: 8px 16px; font-weight: {detailTab === t ? 600 : 400}; text-transform: capitalize;" onclick={() => detailTab = t}>{t}</button>
         {/each}
       </div>
 
@@ -676,7 +736,7 @@
             {#if detailExecOutput.length === 0}
               <div style="color: var(--text-muted); font-size: var(--text-sm);">Run commands inside '{selectedContainer.Names}'. Output will appear here.</div>
             {:else}
-              {#each detailExecOutput as line}
+              {#each detailExecOutput as line, i (i)}
                 <div style="font-family: var(--font-mono); font-size: var(--text-xs); color: {line.startsWith(selectedContainer.Names + '$') ? 'var(--accent-green)' : line.startsWith('Error') ? 'var(--accent-red)' : 'var(--text-secondary)'}; white-space: pre-wrap; padding: 1px 0;">{line}</div>
               {/each}
             {/if}
@@ -715,7 +775,35 @@
   </div>
 {/if}
 
+{#if transfer}
+  <TransferDialog
+    mode={transfer.mode}
+    containerId={transfer.containerId}
+    containerLabel={transfer.label}
+    onClose={() => (transfer = null)}
+  />
+{/if}
+
+{#if rowMenu}
+  <ContextMenu
+    x={rowMenu.x}
+    y={rowMenu.y}
+    items={rowMenuItems(rowMenu.container)}
+    onClose={() => (rowMenu = null)}
+  />
+{/if}
+
 <style>
+  /* Lifecycle buttons carry the state colour used by the row status dot, so the
+     icon shape and the colour agree on what the action will do. */
+  .btn-play {
+    color: var(--status-running);
+  }
+
+  .btn-stop {
+    color: var(--accent-yellow);
+  }
+
   /* Group header sits in the same virtual table as the rows, so it inherits the
      row chrome and only overrides what makes it a header. */
   .row-error-badge {

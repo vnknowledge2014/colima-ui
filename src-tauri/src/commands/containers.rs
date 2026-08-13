@@ -1,5 +1,8 @@
 use serde::{Deserialize, Serialize};
 
+use crate::commands::activity;
+use crate::commands::runtime;
+
 /// Docker container info from `docker ps --format json`
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -41,31 +44,6 @@ pub struct DockerImage {
 }
 
 
-/// Run a Docker CLI command on a blocking thread pool with a timeout.
-/// All Docker CLI calls MUST use this instead of calling .output() directly,
-/// because .output() blocks the current thread and starves the Tokio runtime
-/// when multiple commands are issued concurrently (e.g. list_containers +
-/// list_images + list_volumes + list_networks all fired at once from the UI).
-/// Timeout: 10 seconds. If Docker daemon is frozen, we return Err instead of
-/// hanging forever (which causes permanent loading spinners in the UI).
-async fn docker_output(args: Vec<String>) -> Result<std::process::Output, String> {
-    let result = tokio::time::timeout(
-        std::time::Duration::from_secs(10),
-        tokio::task::spawn_blocking(move || {
-            crate::commands::runtime::get_runtime_cmd()
-                .args(args.iter().map(|s| s.as_str()).collect::<Vec<&str>>())
-                .output()
-                .map_err(|e| format!("Failed to run docker command: {}", e))
-        }),
-    )
-    .await;
-
-    match result {
-        Ok(join_result) => join_result.map_err(|e| format!("Task join error: {}", e))?,
-        Err(_) => Err("Docker command timed out (daemon may be unresponsive)".to_string()),
-    }
-}
-
 /// List containers via CLI only (no Bollard, no Tauri state required).
 /// Used by HTTP route handlers which don't have access to Tauri managed state.
 pub async fn list_containers_cli(all: bool) -> Result<Vec<serde_json::Value>, String> {
@@ -74,7 +52,7 @@ pub async fn list_containers_cli(all: bool) -> Result<Vec<serde_json::Value>, St
         args.push("-a".into());
     }
 
-    let output = docker_output(args).await?;
+    let output = runtime::run(args, runtime::DEFAULT_TIMEOUT).await?;
 
     if !output.status.success() {
         return Err(format!(
@@ -224,7 +202,7 @@ pub async fn list_containers(     state: tauri::State<'_, std::sync::Arc<tokio::
     }
 
     // Fallback to Docker CLI (on blocking thread pool)
-    let output = docker_output(vec!["ps".into(), "--format".into(), "json".into(), "--no-trunc".into(), "-a".into()]).await?;
+    let output = runtime::run(vec!["ps".into(), "--format".into(), "json".into(), "--no-trunc".into(), "-a".into()], runtime::DEFAULT_TIMEOUT).await?;
 
     if output.status.success() {
         let stdout = String::from_utf8_lossy(&output.stdout);
@@ -262,8 +240,10 @@ pub async fn list_containers(     state: tauri::State<'_, std::sync::Arc<tokio::
 /// Start a Docker container
 #[tauri::command]
 pub async fn start_container(container_id: String) -> Result<String, crate::error::ColimaError> {
-    async move {
-    let output = docker_output(vec!["start".into(), container_id.clone()]).await?;
+    // The block below takes ownership, so what the record needs is kept here.
+    let logged_container_id = container_id.clone();
+    let result = async move {
+    let output = runtime::run(vec!["start".into(), container_id.clone()], runtime::DEFAULT_TIMEOUT).await?;
 
     if !output.status.success() {
         return Err(format!(
@@ -274,14 +254,23 @@ pub async fn start_container(container_id: String) -> Result<String, crate::erro
 
     Ok(format!("Container {} started", container_id))
     }
-    .await.map_err(|e: String| crate::error::ColimaError::from(e))
+    .await;
+
+    crate::commands::activity::record(
+        activity::ActivityEntry::new(activity::ActivityKind::Lifecycle, "start", "container", &logged_container_id)
+            .outcome_of(&result),
+    );
+
+    result.map_err(|e: String| crate::error::ColimaError::from(e))
 }
 
 /// Stop a Docker container
 #[tauri::command]
 pub async fn stop_container(container_id: String) -> Result<String, crate::error::ColimaError> {
-    async move {
-    let output = docker_output(vec!["stop".into(), container_id.clone()]).await?;
+    // The block below takes ownership, so what the record needs is kept here.
+    let logged_container_id = container_id.clone();
+    let result = async move {
+    let output = runtime::run(vec!["stop".into(), container_id.clone()], runtime::DEFAULT_TIMEOUT).await?;
 
     if !output.status.success() {
         return Err(format!(
@@ -292,14 +281,23 @@ pub async fn stop_container(container_id: String) -> Result<String, crate::error
 
     Ok(format!("Container {} stopped", container_id))
     }
-    .await.map_err(|e: String| crate::error::ColimaError::from(e))
+    .await;
+
+    crate::commands::activity::record(
+        activity::ActivityEntry::new(activity::ActivityKind::Lifecycle, "stop", "container", &logged_container_id)
+            .outcome_of(&result),
+    );
+
+    result.map_err(|e: String| crate::error::ColimaError::from(e))
 }
 
 /// Restart a Docker container
 #[tauri::command]
 pub async fn restart_container(container_id: String) -> Result<String, crate::error::ColimaError> {
-    async move {
-    let output = docker_output(vec!["restart".into(), container_id.clone()]).await?;
+    // The block below takes ownership, so what the record needs is kept here.
+    let logged_container_id = container_id.clone();
+    let result = async move {
+    let output = runtime::run(vec!["restart".into(), container_id.clone()], runtime::DEFAULT_TIMEOUT).await?;
 
     if !output.status.success() {
         return Err(format!(
@@ -310,20 +308,29 @@ pub async fn restart_container(container_id: String) -> Result<String, crate::er
 
     Ok(format!("Container {} restarted", container_id))
     }
-    .await.map_err(|e: String| crate::error::ColimaError::from(e))
+    .await;
+
+    crate::commands::activity::record(
+        activity::ActivityEntry::new(activity::ActivityKind::Lifecycle, "restart", "container", &logged_container_id)
+            .outcome_of(&result),
+    );
+
+    result.map_err(|e: String| crate::error::ColimaError::from(e))
 }
 
 /// Remove a Docker container
 #[tauri::command]
 pub async fn remove_container(container_id: String, force: bool) -> Result<String, crate::error::ColimaError> {
-    async move {
+    // The block below takes ownership, so the id the record needs is kept here.
+    let logged_container_id = container_id.clone();
+    let result = async move {
     let mut args = vec!["rm".to_string()];
     if force {
         args.push("-f".to_string());
     }
     args.push(container_id.clone());
 
-    let output = docker_output(args).await?;
+    let output = runtime::run(args, runtime::DEFAULT_TIMEOUT).await?;
 
     if !output.status.success() {
         return Err(format!(
@@ -334,7 +341,14 @@ pub async fn remove_container(container_id: String, force: bool) -> Result<Strin
 
     Ok(format!("Container {} removed", container_id))
     }
-    .await.map_err(|e: String| crate::error::ColimaError::from(e))
+    .await;
+
+    crate::commands::activity::record(
+        activity::ActivityEntry::new(activity::ActivityKind::Destructive, "remove", "container", &logged_container_id)
+            .outcome_of(&result),
+    );
+
+    result.map_err(|e: String| crate::error::ColimaError::from(e))
 }
 
 /// Get container logs (last N lines)
@@ -342,7 +356,7 @@ pub async fn remove_container(container_id: String, force: bool) -> Result<Strin
 pub async fn container_logs(container_id: String, lines: u32) -> Result<String, crate::error::ColimaError> {
     async move {
     let tail = lines.to_string();
-    let output = docker_output(vec!["logs".into(), "--tail".into(), tail, "--timestamps".into(), container_id]).await?;
+    let output = runtime::run(vec!["logs".into(), "--tail".into(), tail, "--timestamps".into(), container_id], runtime::DEFAULT_TIMEOUT).await?;
 
     if !output.status.success() {
         return Err(format!(
@@ -401,7 +415,7 @@ pub async fn list_images(     state: tauri::State<'_, std::sync::Arc<tokio::sync
     }
 
     // Fallback to Docker CLI (on blocking thread pool)
-    let output = docker_output(vec!["images".into(), "--format".into(), "json".into(), "--no-trunc".into()]).await?;
+    let output = runtime::run(vec!["images".into(), "--format".into(), "json".into(), "--no-trunc".into()], runtime::DEFAULT_TIMEOUT).await?;
 
     if output.status.success() {
         let stdout = String::from_utf8_lossy(&output.stdout);
@@ -432,7 +446,7 @@ pub async fn list_images(     state: tauri::State<'_, std::sync::Arc<tokio::sync
 #[tauri::command]
 pub async fn inspect_container(container_id: String) -> Result<String, crate::error::ColimaError> {
     async move {
-    let output = docker_output(vec!["inspect".into(), container_id]).await?;
+    let output = runtime::run(vec!["inspect".into(), container_id], runtime::DEFAULT_TIMEOUT).await?;
 
     if !output.status.success() {
         return Err(format!(
@@ -449,14 +463,16 @@ pub async fn inspect_container(container_id: String) -> Result<String, crate::er
 /// Remove a Docker image
 #[tauri::command]
 pub async fn remove_image(image_id: String, force: bool) -> Result<String, crate::error::ColimaError> {
-    async move {
+    // The block below takes ownership, so the id the record needs is kept here.
+    let logged_image_id = image_id.clone();
+    let result = async move {
     let mut args = vec!["rmi".to_string()];
     if force {
         args.push("-f".to_string());
     }
     args.push(image_id.clone());
 
-    let output = docker_output(args).await?;
+    let output = runtime::run(args, runtime::DEFAULT_TIMEOUT).await?;
 
     if !output.status.success() {
         return Err(format!(
@@ -467,14 +483,24 @@ pub async fn remove_image(image_id: String, force: bool) -> Result<String, crate
 
     Ok(format!("Image {} removed", image_id))
     }
-    .await.map_err(|e: String| crate::error::ColimaError::from(e))
+    .await;
+
+    crate::commands::activity::record(
+        activity::ActivityEntry::new(activity::ActivityKind::Destructive, "remove", "image", &logged_image_id)
+            .outcome_of(&result),
+    );
+
+    result.map_err(|e: String| crate::error::ColimaError::from(e))
 }
 
 /// Pull a Docker image
 #[tauri::command]
 pub async fn pull_image(image_name: String) -> Result<String, crate::error::ColimaError> {
-    async move {
-    let output = docker_output(vec!["pull".into(), image_name]).await?;
+    // The block below takes ownership, so what the record needs is kept here.
+    let logged_image_name = image_name.clone();
+    let started = std::time::Instant::now();
+    let result = async move {
+    let output = runtime::run(vec!["pull".into(), image_name], runtime::DEFAULT_TIMEOUT).await?;
 
     if !output.status.success() {
         return Err(format!(
@@ -485,14 +511,22 @@ pub async fn pull_image(image_name: String) -> Result<String, crate::error::Coli
 
     Ok(String::from_utf8_lossy(&output.stdout).to_string())
     }
-    .await.map_err(|e: String| crate::error::ColimaError::from(e))
+    .await;
+
+    crate::commands::activity::record(
+        activity::ActivityEntry::new(activity::ActivityKind::Task, "pull", "image", &logged_image_name)
+            .took(started.elapsed().as_millis() as i64)
+            .outcome_of(&result),
+    );
+
+    result.map_err(|e: String| crate::error::ColimaError::from(e))
 }
 
 /// Prune unused Docker images
 #[tauri::command]
 pub async fn prune_images() -> Result<String, crate::error::ColimaError> {
-    async move {
-    let output = docker_output(vec!["image".into(), "prune".into(), "-a".into(), "-f".into()]).await?;
+    let result = async move {
+    let output = runtime::run(vec!["image".into(), "prune".into(), "-a".into(), "-f".into()], runtime::DEFAULT_TIMEOUT).await?;
 
     if !output.status.success() {
         return Err(format!(
@@ -503,14 +537,22 @@ pub async fn prune_images() -> Result<String, crate::error::ColimaError> {
 
     Ok(String::from_utf8_lossy(&output.stdout).to_string())
     }
-    .await.map_err(|e: String| crate::error::ColimaError::from(e))
+    .await;
+
+    crate::commands::activity::record(
+        activity::ActivityEntry::new(activity::ActivityKind::Destructive, "prune", "image", "")
+            .detail(result.as_deref().map(activity::prune_summary).unwrap_or_default())
+            .outcome_of(&result),
+    );
+
+    result.map_err(|e: String| crate::error::ColimaError::from(e))
 }
 
 /// Inspect a Docker image (raw JSON)
 #[tauri::command]
 pub async fn inspect_image(image_id: String) -> Result<String, crate::error::ColimaError> {
     async move {
-    let output = docker_output(vec!["image".into(), "inspect".into(), image_id]).await?;
+    let output = runtime::run(vec!["image".into(), "inspect".into(), image_id], runtime::DEFAULT_TIMEOUT).await?;
 
     if !output.status.success() {
         return Err(format!(
@@ -528,7 +570,7 @@ pub async fn inspect_image(image_id: String) -> Result<String, crate::error::Col
 #[tauri::command]
 pub async fn tag_image(source: String, target: String) -> Result<String, crate::error::ColimaError> {
     async move {
-    let output = docker_output(vec!["tag".into(), source, target.clone()]).await?;
+    let output = runtime::run(vec!["tag".into(), source, target.clone()], runtime::DEFAULT_TIMEOUT).await?;
 
     if !output.status.success() {
         return Err(format!(
@@ -545,13 +587,13 @@ pub async fn tag_image(source: String, target: String) -> Result<String, crate::
 /// Docker system prune (containers, images, networks, build cache)
 #[tauri::command]
 pub async fn system_prune(all: bool) -> Result<String, crate::error::ColimaError> {
-    async move {
+    let result = async move {
     let mut args = vec!["system".to_string(), "prune".to_string(), "-f".to_string()];
     if all {
         args.push("-a".to_string());
     }
 
-    let output = docker_output(args).await?;
+    let output = runtime::run(args, runtime::DEFAULT_TIMEOUT).await?;
 
     if !output.status.success() {
         return Err(format!(
@@ -562,14 +604,22 @@ pub async fn system_prune(all: bool) -> Result<String, crate::error::ColimaError
 
     Ok(String::from_utf8_lossy(&output.stdout).to_string())
     }
-    .await.map_err(|e: String| crate::error::ColimaError::from(e))
+    .await;
+
+    crate::commands::activity::record(
+        activity::ActivityEntry::new(activity::ActivityKind::Destructive, "prune", "system", "")
+            .detail(result.as_deref().map(activity::prune_summary).unwrap_or_default())
+            .outcome_of(&result),
+    );
+
+    result.map_err(|e: String| crate::error::ColimaError::from(e))
 }
 
 /// Docker system disk usage (plain text for frontend parsing)
 #[tauri::command]
 pub async fn system_df() -> Result<String, crate::error::ColimaError> {
     async move {
-    let output = docker_output(vec!["system".into(), "df".into()]).await?;
+    let output = runtime::run(vec!["system".into(), "df".into()], runtime::DEFAULT_TIMEOUT).await?;
 
     if !output.status.success() {
         return Err(format!(
@@ -587,7 +637,7 @@ pub async fn system_df() -> Result<String, crate::error::ColimaError> {
 #[tauri::command]
 pub async fn container_stats(container_id: String) -> Result<String, crate::error::ColimaError> {
     async move {
-    let output = docker_output(vec!["stats".into(), "--no-stream".into(), "--format".into(), "json".into(), container_id]).await?;
+    let output = runtime::run(vec!["stats".into(), "--no-stream".into(), "--format".into(), "json".into(), container_id], runtime::DEFAULT_TIMEOUT).await?;
 
     if !output.status.success() {
         return Err(format!(
@@ -605,7 +655,7 @@ pub async fn container_stats(container_id: String) -> Result<String, crate::erro
 #[tauri::command]
 pub async fn all_container_stats() -> Result<String, crate::error::ColimaError> {
     async move {
-    let output = docker_output(vec!["stats".into(), "--no-stream".into(), "--format".into(), "json".into()]).await?;
+    let output = runtime::run(vec!["stats".into(), "--no-stream".into(), "--format".into(), "json".into()], runtime::DEFAULT_TIMEOUT).await?;
 
     if !output.status.success() {
         return Err(format!(
@@ -623,7 +673,7 @@ pub async fn all_container_stats() -> Result<String, crate::error::ColimaError> 
 #[tauri::command]
 pub async fn container_top(container_id: String) -> Result<String, crate::error::ColimaError> {
     async move {
-    let output = docker_output(vec!["top".into(), container_id]).await?;
+    let output = runtime::run(vec!["top".into(), container_id], runtime::DEFAULT_TIMEOUT).await?;
 
     if !output.status.success() {
         return Err(format!(
@@ -649,7 +699,7 @@ pub async fn container_exec(container_id: String, command: String) -> Result<Str
         return Err("Command contains forbidden characters (shell injection blocked)".to_string());
     }
 
-    let output = docker_output(vec!["exec".into(), container_id, "sh".into(), "-c".into(), command]).await?;
+    let output = runtime::run(vec!["exec".into(), container_id, "sh".into(), "-c".into(), command], runtime::DEFAULT_TIMEOUT).await?;
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
@@ -674,8 +724,16 @@ pub async fn container_exec(container_id: String, command: String) -> Result<Str
 
 /// Run a new container from an image
 #[tauri::command]
+#[allow(clippy::too_many_arguments)] // All 8 params map 1:1 to the frontend IPC contract; grouping them would break the Tauri command signature
 pub async fn run_container(     image: String,     name: String,     ports: Vec<String>,     env_vars: Vec<String>,     volumes: Vec<String>,     detach: bool,     remove_on_exit: bool,     extra_args: Vec<String>, ) -> Result<String, crate::error::ColimaError> {
-    async move {
+    // The block below takes ownership, so what the record needs is kept here.
+    let logged_image = image.clone();
+    let logged_name = name.clone();
+    // The count, never the values: `env_vars` is exactly where a password
+    // would be, and a count answers "was it configured" without carrying one.
+    let env_count = env_vars.len();
+    let port_count = ports.len();
+    let result = async move {
     // Security validation (applies to both Tauri IPC and HTTP routes)
     for arg in &extra_args {
         let arg_lower = arg.to_lowercase();
@@ -730,7 +788,7 @@ pub async fn run_container(     image: String,     name: String,     ports: Vec<
     }
     args.push(image);
 
-    let output = docker_output(args).await?;
+    let output = runtime::run(args, runtime::DEFAULT_TIMEOUT).await?;
 
     if !output.status.success() {
         return Err(format!(
@@ -741,14 +799,26 @@ pub async fn run_container(     image: String,     name: String,     ports: Vec<
 
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
     }
-    .await.map_err(|e: String| crate::error::ColimaError::from(e))
+    .await;
+
+    crate::commands::activity::record(
+        activity::ActivityEntry::new(activity::ActivityKind::Lifecycle, "run", "container", &logged_image)
+            .named(&logged_name)
+            .detail(format!("from {logged_image}, {port_count} ports, {env_count} env vars"))
+            .outcome_of(&result),
+    );
+
+    result.map_err(|e: String| crate::error::ColimaError::from(e))
 }
 
 /// Rename a container
 #[tauri::command]
 pub async fn rename_container(container_id: String, new_name: String) -> Result<String, crate::error::ColimaError> {
-    async move {
-    let output = docker_output(vec!["rename".into(), container_id, new_name.clone()]).await?;
+    // The block below takes ownership, so what the record needs is kept here.
+    let logged_container_id = container_id.clone();
+    let logged_new_name = new_name.clone();
+    let result = async move {
+    let output = runtime::run(vec!["rename".into(), container_id, new_name.clone()], runtime::DEFAULT_TIMEOUT).await?;
 
     if !output.status.success() {
         return Err(format!(
@@ -759,14 +829,24 @@ pub async fn rename_container(container_id: String, new_name: String) -> Result<
 
     Ok(format!("Container renamed to {}", new_name))
     }
-    .await.map_err(|e: String| crate::error::ColimaError::from(e))
+    .await;
+
+    crate::commands::activity::record(
+        activity::ActivityEntry::new(activity::ActivityKind::Lifecycle, "rename", "container", &logged_container_id)
+            .named(&logged_new_name)
+            .outcome_of(&result),
+    );
+
+    result.map_err(|e: String| crate::error::ColimaError::from(e))
 }
 
 /// Pause a container
 #[tauri::command]
 pub async fn pause_container(container_id: String) -> Result<String, crate::error::ColimaError> {
-    async move {
-    let output = docker_output(vec!["pause".into(), container_id.clone()]).await?;
+    // The block below takes ownership, so what the record needs is kept here.
+    let logged_container_id = container_id.clone();
+    let result = async move {
+    let output = runtime::run(vec!["pause".into(), container_id.clone()], runtime::DEFAULT_TIMEOUT).await?;
 
     if !output.status.success() {
         return Err(format!(
@@ -777,14 +857,23 @@ pub async fn pause_container(container_id: String) -> Result<String, crate::erro
 
     Ok(format!("Container {} paused", container_id))
     }
-    .await.map_err(|e: String| crate::error::ColimaError::from(e))
+    .await;
+
+    crate::commands::activity::record(
+        activity::ActivityEntry::new(activity::ActivityKind::Lifecycle, "pause", "container", &logged_container_id)
+            .outcome_of(&result),
+    );
+
+    result.map_err(|e: String| crate::error::ColimaError::from(e))
 }
 
 /// Unpause a container
 #[tauri::command]
 pub async fn unpause_container(container_id: String) -> Result<String, crate::error::ColimaError> {
-    async move {
-    let output = docker_output(vec!["unpause".into(), container_id.clone()]).await?;
+    // The block below takes ownership, so what the record needs is kept here.
+    let logged_container_id = container_id.clone();
+    let result = async move {
+    let output = runtime::run(vec!["unpause".into(), container_id.clone()], runtime::DEFAULT_TIMEOUT).await?;
 
     if !output.status.success() {
         return Err(format!(
@@ -795,7 +884,14 @@ pub async fn unpause_container(container_id: String) -> Result<String, crate::er
 
     Ok(format!("Container {} unpaused", container_id))
     }
-    .await.map_err(|e: String| crate::error::ColimaError::from(e))
+    .await;
+
+    crate::commands::activity::record(
+        activity::ActivityEntry::new(activity::ActivityKind::Lifecycle, "unpause", "container", &logged_container_id)
+            .outcome_of(&result),
+    );
+
+    result.map_err(|e: String| crate::error::ColimaError::from(e))
 }
 
 /// Diagnostic command to debug Docker connectivity issues from inside the app.
@@ -811,7 +907,9 @@ pub async fn docker_diagnose(     state: tauri::State<'_, std::sync::Arc<tokio::
 
     // Check socket existence
     let socket_path = docker_host.as_ref().map(|h| h.0.trim_start_matches("unix://").to_string());
-    let socket_exists = socket_path.as_ref().map(|p| std::path::Path::new(p).exists()).unwrap_or(false);
+    let socket_exists = socket_path
+        .as_ref()
+        .is_some_and(|p| std::path::Path::new(p).exists());
 
     // Check Bollard state
     let bollard_connected = {

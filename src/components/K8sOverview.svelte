@@ -105,7 +105,7 @@
       <div style="margin-top: 20px;">
         <div style="font-size: var(--text-xs); font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); margin-bottom: 8px;">Issues ({issues.length})</div>
         <div class="card" style="overflow: auto;">
-          {#each issues.slice(0, 20) as issue}
+          {#each issues.slice(0, 20) as issue (issue.resource + issue.category + issue.message)}
             <div style="display: flex; align-items: center; gap: 10px; padding: 8px 14px; border-bottom: 1px solid var(--border-subtle); font-size: var(--text-xs);">
               <span style="padding: 2px 8px; border-radius: 10px; font-size: 10px; font-weight: 600; text-transform: uppercase; background: {issue.severity === 'error' ? 'rgba(248,81,73,0.12)' : 'rgba(210,153,34,0.12)'}; color: {issue.severity === 'error' ? 'var(--accent-red)' : 'var(--accent-yellow)'}; flex-shrink: 0;">{issue.severity}</span>
               <span style="font-family: var(--font-mono); color: var(--accent-blue); flex-shrink: 0;">{issue.category}</span>

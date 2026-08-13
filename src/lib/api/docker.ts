@@ -1,24 +1,24 @@
 import { call } from "./client";
-import type { ColimaInstance, InstanceStatus, StartConfig, DockerContainer, DockerImage, SystemInfo, AiModel, DockerVolume, DockerNetwork } from "./types";
+import type { DockerContainer, DockerImage } from "./types";
 
 // ===== Docker API =====
 
 export const dockerApi = {
   listContainers: async (all = true): Promise<DockerContainer[]> => {
-    const raw = await call<any>("list_containers", { all }, "GET", "/api/containers", { all: String(all) });
+    const raw = await call<unknown>("list_containers", { all }, "GET", "/api/containers", { all: String(all) });
     if (!raw) return [];
     const items = Array.isArray(raw) ? raw : [];
     // Normalize field names for Tauri IPC compatibility
-    return items.map((v: any) => ({
-      Id: v.Id || v.id || v.ID || "",
-      Names: v.Names || v.names || "",
-      Image: v.Image || v.image || "",
-      Status: v.Status || v.status || "",
-      State: v.State || v.state || "",
-      Ports: v.Ports || v.ports || "",
-      CreatedAt: v.CreatedAt || v.created_at || v.createdAt || "",
-      Size: v.Size || v.size || "",
-      Command: v.Command || v.command || "",
+    return items.map((v: Record<string, unknown>) => ({
+      Id: String(v.Id || v.id || v.ID || ""),
+      Names: String(v.Names || v.names || ""),
+      Image: String(v.Image || v.image || ""),
+      Status: String(v.Status || v.status || ""),
+      State: String(v.State || v.state || ""),
+      Ports: String(v.Ports || v.ports || ""),
+      CreatedAt: String(v.CreatedAt || v.created_at || v.createdAt || ""),
+      Size: String(v.Size || v.size || ""),
+      Command: String(v.Command || v.command || ""),
     }));
   },
 
@@ -38,15 +38,15 @@ export const dockerApi = {
     call<string>("container_logs", { containerId, lines }, "GET", "/api/containers/logs", { containerId, lines: String(lines) }),
 
   listImages: async (): Promise<DockerImage[]> => {
-    const raw = await call<any>("list_images", undefined, "GET", "/api/images");
+    const raw = await call<unknown>("list_images", undefined, "GET", "/api/images");
     if (!raw) return [];
     const items = Array.isArray(raw) ? raw : [];
-    return items.map((v: any) => ({
-      Id: v.Id || v.id || v.ID || "",
-      Repository: v.Repository || v.repository || "",
-      Tag: v.Tag || v.tag || "",
-      Size: v.Size || v.size || "",
-      CreatedAt: v.CreatedAt || v.created_at || v.createdAt || "",
+    return items.map((v: Record<string, unknown>) => ({
+      Id: String(v.Id || v.id || v.ID || ""),
+      Repository: String(v.Repository || v.repository || ""),
+      Tag: String(v.Tag || v.tag || ""),
+      Size: String(v.Size || v.size || ""),
+      CreatedAt: String(v.CreatedAt || v.created_at || v.createdAt || ""),
     }));
   },
 

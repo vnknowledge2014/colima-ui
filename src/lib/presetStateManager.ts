@@ -60,7 +60,7 @@ export async function handleInstanceStarted(profile: string, newPresetId: string
     
     // Load the target snapshot for the new preset
     const newSnapshot = await sysMethods.loadPresetSnapshot(newPresetId, profile);
-    const newSnapshotContainers = newSnapshot ? JSON.parse(newSnapshot.containers_json) : [];
+    const newSnapshotContainers = newSnapshot ? (JSON.parse(newSnapshot.containers_json) as { Names: string; State: string }[]) : [];
 
     const oldTier = TIER_ORDER[oldPresetId] || 0;
     const newTier = TIER_ORDER[newPresetId] || 0;
@@ -70,7 +70,7 @@ export async function handleInstanceStarted(profile: string, newPresetId: string
       console.log("[PresetState] Scaling UP: Restoring higher-tier containers...");
       for (const c of newSnapshotContainers) {
         if (c.State === 'running') {
-           const current = currentContainers.find((x: any) => x.Names === c.Names);
+           const current = currentContainers.find((x) => x.Names === c.Names);
            if (current && current.State !== 'running') {
               console.log(`[PresetState] Starting ${c.Names}...`);
               await dockerApi.startContainer(current.Id).catch(console.error);
@@ -82,7 +82,7 @@ export async function handleInstanceStarted(profile: string, newPresetId: string
       console.log("[PresetState] Scaling DOWN: Stopping higher-tier containers...");
       for (const current of currentContainers) {
         if (current.State === 'running') {
-          const inNew = newSnapshotContainers.find((x: any) => x.Names === current.Names && x.State === 'running');
+          const inNew = newSnapshotContainers.find((x) => x.Names === current.Names && x.State === 'running');
           if (!inNew) {
              console.log(`[PresetState] Stopping ${current.Names}...`);
              await dockerApi.stopContainer(current.Id).catch(console.error);
@@ -91,9 +91,9 @@ export async function handleInstanceStarted(profile: string, newPresetId: string
       }
       
       // Also ensure any container from the lower tier snapshot is running
-      for (const c of newSnapshotContainers) {
-         if (c.State === 'running') {
-            const current = currentContainers.find((x: any) => x.Names === c.Names);
+       for (const c of newSnapshotContainers) {
+          if (c.State === 'running') {
+             const current = currentContainers.find((x) => x.Names === c.Names);
             if (current && current.State !== 'running') {
                console.log(`[PresetState] Starting ${c.Names}...`);
                await dockerApi.startContainer(current.Id).catch(console.error);

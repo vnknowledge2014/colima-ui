@@ -1,0 +1,165 @@
+{
+  "origin_note": "All cases synthetic; no real bug-report corpus exists yet.",
+  "cases": [
+    {
+      "id": "yaml-tab-indent",
+      "file": "yaml-tab-indent.yml",
+      "expected_category": "yaml_syntax",
+      "what": "Tab character used for indentation; YAML forbids tabs.",
+      "fix_theory": "Replace leading tabs with spaces. Purely lexical, no AST needed.",
+      "origin": "synthetic"
+    },
+    {
+      "id": "yaml-missing-colon",
+      "file": "yaml-missing-colon.yml",
+      "expected_category": "yaml_syntax",
+      "what": "Key/value separator missing after `image`.",
+      "fix_theory": "Ambiguous: cannot tell intended key boundary without guessing.",
+      "origin": "synthetic"
+    },
+    {
+      "id": "yaml-unclosed-quote",
+      "file": "yaml-unclosed-quote.yml",
+      "expected_category": "yaml_syntax",
+      "what": "Unterminated double quote in a port mapping.",
+      "fix_theory": "Could append the closing quote, but the intended end position is a guess.",
+      "origin": "synthetic"
+    },
+    {
+      "id": "yaml-bad-nesting",
+      "file": "yaml-bad-nesting.yml",
+      "expected_category": "yaml_syntax",
+      "what": "Service block under-indented, breaking the mapping.",
+      "fix_theory": "Structural. Requires understanding intended hierarchy; comments lost on rewrite.",
+      "origin": "synthetic"
+    },
+    {
+      "id": "yaml-duplicate-key",
+      "file": "yaml-duplicate-key.yml",
+      "expected_category": "yaml_syntax",
+      "what": "`image` specified twice for one service.",
+      "fix_theory": "Deleting one is a semantic choice \u2014 which one did the user mean?",
+      "origin": "synthetic"
+    },
+    {
+      "id": "schema-typo-key",
+      "file": "schema-typo-key.yml",
+      "expected_category": "schema",
+      "what": "`imge` instead of `image` \u2014 a one-character typo.",
+      "fix_theory": "Edit distance against the known key set gives an unambiguous candidate.",
+      "origin": "synthetic"
+    },
+    {
+      "id": "schema-ports-scalar",
+      "file": "schema-ports-scalar.yml",
+      "expected_category": "schema",
+      "what": "`ports` given as a bare number instead of a sequence.",
+      "fix_theory": "Coerce scalar to a single-element quoted sequence. Type-directed, deterministic.",
+      "origin": "synthetic"
+    },
+    {
+      "id": "schema-unsupported-option",
+      "file": "schema-unsupported-option.yml",
+      "expected_category": "schema",
+      "what": "`restart_policy` at service level (it belongs under `deploy`).",
+      "fix_theory": "Relocating it is a real semantic move; safe only with confirmation.",
+      "origin": "synthetic"
+    },
+    {
+      "id": "schema-environment-wrong-type",
+      "file": "schema-environment-wrong-type.yml",
+      "expected_category": "schema",
+      "what": "`environment` given as a string instead of map/list.",
+      "fix_theory": "Splitting `KEY=value` into a one-entry list is mechanical.",
+      "origin": "synthetic"
+    },
+    {
+      "id": "schema-depends-on-scalar",
+      "file": "schema-depends-on-scalar.yml",
+      "expected_category": "schema",
+      "what": "`depends_on` as a scalar rather than a list.",
+      "fix_theory": "Wrap in a list. Mechanical.",
+      "origin": "synthetic"
+    },
+    {
+      "id": "undef-volume",
+      "file": "undef-volume.yml",
+      "expected_category": "undefined_reference",
+      "what": "Service mounts `dbdata`, which is never declared top-level.",
+      "fix_theory": "Append `volumes: {dbdata: }`. The name is known; nothing is guessed.",
+      "origin": "synthetic"
+    },
+    {
+      "id": "undef-network",
+      "file": "undef-network.yml",
+      "expected_category": "undefined_reference",
+      "what": "Service joins `backend`, which is never declared.",
+      "fix_theory": "Append the network declaration. Same shape as the volume case.",
+      "origin": "synthetic"
+    },
+    {
+      "id": "undef-secret",
+      "file": "undef-secret.yml",
+      "expected_category": "undefined_reference",
+      "what": "Service uses secret `db_password`, never declared.",
+      "fix_theory": "A secret needs a source (file/external) \u2014 the app cannot invent one.",
+      "origin": "synthetic"
+    },
+    {
+      "id": "undef-variable",
+      "file": "undef-variable.yml",
+      "expected_category": "undefined_reference",
+      "what": "`${DB_PASSWORD}` interpolated but not set anywhere.",
+      "fix_theory": "The value is unknowable. A default would silently change behaviour.",
+      "origin": "synthetic"
+    },
+    {
+      "id": "undef-multiple-volumes",
+      "file": "undef-multiple-volumes.yml",
+      "expected_category": "undefined_reference",
+      "what": "Two undeclared volumes across two services.",
+      "fix_theory": "Same as single case but must fix all, not just the first reported.",
+      "origin": "synthetic"
+    },
+    {
+      "id": "missing-env-file",
+      "file": "missing-env-file.yml",
+      "expected_category": "missing_file",
+      "what": "`env_file` points at a file that does not exist.",
+      "fix_theory": "Creating it changes runtime behaviour; removing it drops config. Neither is safe alone.",
+      "origin": "synthetic"
+    },
+    {
+      "id": "missing-build-context",
+      "file": "missing-build-context.yml",
+      "expected_category": "missing_file",
+      "what": "Build context directory does not exist.",
+      "fix_theory": "Cannot create someone's Dockerfile. Not fixable by the app.",
+      "origin": "synthetic"
+    },
+    {
+      "id": "structure-services-list",
+      "file": "structure-services-list.yml",
+      "expected_category": "structure",
+      "what": "`services` written as a list instead of a mapping.",
+      "fix_theory": "Convertible in principle, but a full re-serialisation \u2014 comments are lost.",
+      "origin": "synthetic"
+    },
+    {
+      "id": "structure-no-services",
+      "file": "structure-no-services.yml",
+      "expected_category": "structure",
+      "what": "File has only a version key; no services at all.",
+      "fix_theory": "Nothing to infer. The user must say what they want to run.",
+      "origin": "synthetic"
+    },
+    {
+      "id": "undef-volume-with-comments",
+      "file": "undef-volume-with-comments.yml",
+      "expected_category": "undefined_reference",
+      "what": "Undeclared volume, in a file carrying comments that must survive the fix.",
+      "fix_theory": "Line-append should preserve comments; a YAML round-trip would destroy them.",
+      "origin": "synthetic"
+    }
+  ]
+}

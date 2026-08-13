@@ -12,8 +12,7 @@ use crate::routes::payloads::*;
 pub async fn api_check_system() -> (StatusCode, Json<ApiResponse<system::SystemInfo>>) {
     let info = SYSTEM_INFO_CACHE
         .lock()
-        .map(|mut cache| cache.get_or_init(load_system_info))
-        .unwrap_or_else(|_| load_system_info());
+        .map_or_else(|_| load_system_info(), |mut cache| cache.get_or_init(load_system_info));
     ok(info)
 }
 
@@ -21,8 +20,7 @@ pub async fn api_check_system() -> (StatusCode, Json<ApiResponse<system::SystemI
 pub async fn api_get_version() -> (StatusCode, Json<ApiResponse<String>>) {
     let info = SYSTEM_INFO_CACHE
         .lock()
-        .map(|mut cache| cache.get_or_init(load_system_info))
-        .unwrap_or_else(|_| load_system_info());
+        .map_or_else(|_| load_system_info(), |mut cache| cache.get_or_init(load_system_info));
     ok(info.colima_version)
 }
 
@@ -258,14 +256,26 @@ pub async fn api_docker_prune(
 }
 
 
-/// Returns the API auth token for browser mode clients.
-/// Protected by CORS (localhost-only origins), not by Bearer auth.
-pub async fn api_auth_token() -> (StatusCode, Json<ApiResponse<String>>) {
-    ok(get_api_token())
-}
+// `api_auth_token` used to be here, serving `GET /api/auth/token` from the
+// public router. It claimed CORS as its protection, which was never true of
+// anything but a browser: `curl` from any local process got the token and with
+// it the entire API. Clients now obtain the token through `auth::api_token`
+// (IPC) or a URL fragment handed over by the app.
 
 
 /// Simple health check endpoint (unauthenticated).
 pub async fn api_health() -> (StatusCode, Json<ApiResponse<String>>) {
     ok("ok".to_string())
+}
+
+/// Set the live-metrics sampling period.
+///
+/// Browser-mode twin of the `set_metrics_interval` command. The collector clamps
+/// the value and returns what it actually used, so the UI can show the truth
+/// rather than what it asked for.
+pub async fn api_set_metrics_interval(
+    Json(body): Json<crate::routes::payloads::MetricsIntervalBody>,
+) -> (StatusCode, Json<ApiResponse<u64>>) {
+    crate::commands::metrics_collector::set_interval_ms(body.ms);
+    ok(crate::commands::metrics_collector::interval_ms())
 }

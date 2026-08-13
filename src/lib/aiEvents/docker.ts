@@ -1,11 +1,7 @@
 import { isRunningInTauri } from "../env";
 import { runSandboxed } from "./shell";
-// @ts-nocheck
 import { EventHandler } from "./types";
-import { 
-  colimaApi, dockerApi, volumesApi, networksApi, sysMethods, 
-  composeApi, modelsApi, k8sApi, kindApi, limaApi
-} from "../api";
+import { dockerApi } from "../api";
 
 export const dockerRegistry: Record<string, EventHandler> = {
   "list-containers": {

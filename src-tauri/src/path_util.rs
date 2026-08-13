@@ -46,7 +46,32 @@ const USER_PATHS: &[&str] = &[
 /// The computed PATH, stored for use by `apply_path_to_cmd()` in late-spawned contexts.
 static COMPUTED_PATH: std::sync::OnceLock<String> = std::sync::OnceLock::new();
 
+/// `~/.colima-ui` — where this app keeps everything it writes.
+///
+/// Extracted when a third caller appeared (crash reports). Two ad-hoc copies of
+/// a path is a coincidence; three is a convention that should live in one place,
+/// so a future move does not leave one directory behind.
+///
+/// An empty `HOME` counts as missing, not as a valid prefix. `env::var` returns
+/// `Ok("")` for a variable that is set but blank, and
+/// `PathBuf::from("").join(".colima-ui")` is the *relative* path `.colima-ui` —
+/// which would put the knowledge bank and the crash reports in whatever
+/// directory the app happened to be launched from, silently, a different one
+/// each time.
+///
+/// The `/tmp` fallback matches what the two original callers did. A process with
+/// no `HOME` is not a normal desktop session, and losing the knowledge bank
+/// there is better than refusing to start.
+pub fn app_data_dir() -> PathBuf {
+    let home = env::var("HOME")
+        .ok()
+        .filter(|h| !h.is_empty())
+        .unwrap_or_else(|| "/tmp".to_string());
+    PathBuf::from(home).join(".colima-ui")
+}
+
 /// Ensure common binary paths are in the PATH environment variable.
+///
 /// Call this once at app startup **before any threads are spawned** to fix
 /// the PATH for all subsequent Command calls.
 ///
@@ -60,10 +85,8 @@ pub fn fix_path_env() {
 
     for extra in EXTRA_PATHS {
         let extra_str = extra.to_string();
-        if !paths.contains(&extra_str) {
-            if PathBuf::from(extra).exists() {
-                paths.push(extra_str);
-            }
+        if !paths.contains(&extra_str) && PathBuf::from(extra).exists() {
+            paths.push(extra_str);
         }
     }
 
@@ -162,6 +185,15 @@ pub fn resolve_binary(name: &str) -> String {
     name.to_string()
 }
 
+/// Marks Colima profiles created to detonate an untrusted image.
+///
+/// Defined here rather than in `commands::detonation` because this module is
+/// what decides which instance the app's docker calls reach, and it must be
+/// able to exclude them without depending on a command module. `detonation`
+/// re-uses this constant so the name the sweep deletes and the name daemon
+/// detection skips can never drift apart.
+pub const DETONATION_PROFILE_PREFIX: &str = "colimaui-detonate-";
+
 /// Detect the Docker socket from a running Colima instance.
 /// Returns something like "unix:///Users/mike/.colima/default/docker.sock".
 ///
@@ -191,6 +223,14 @@ pub fn detect_docker_host() -> Option<(String, String)> {
             if name.starts_with('_') || name.starts_with('.') || !entry.path().is_dir() {
                 continue;
             }
+            // A detonation instance is running an untrusted image and is deleted
+            // minutes later. `read_dir` order is arbitrary, so without this the
+            // app could bind its whole docker surface — container list, metrics,
+            // bollard — to the VM holding the sample, and then to nothing when
+            // that VM is destroyed.
+            if name.starts_with(DETONATION_PROFILE_PREFIX) {
+                continue;
+            }
 
             // Map profile to lima instance name
             let lima_name = if name == "default" {
@@ -210,10 +250,25 @@ pub fn detect_docker_host() -> Option<(String, String)> {
         }
     }
 
-    // Fallback: check the colima-level docker.sock symlink
+    // Fallback: check the colima-level docker.sock symlink.
+    //
+    // Colima repoints this symlink at whichever profile started last, so during
+    // a detonation it can lead to the VM running the untrusted image. Reachable
+    // when the user's own instance is stopped: the scan above finds nothing
+    // running, and this would otherwise hand back the sample's daemon. Resolve
+    // it and check where it actually goes.
     let fallback = colima_path.join("docker.sock");
     if fallback.exists() {
-        return Some((format!("unix://{}", fallback.display()), "default".to_string()));
+        let points_at_detonation = std::fs::canonicalize(&fallback)
+            .ok()
+            .is_some_and(|target| {
+                target
+                    .components()
+                    .any(|c| c.as_os_str().to_string_lossy().starts_with(DETONATION_PROFILE_PREFIX))
+            });
+        if !points_at_detonation {
+            return Some((format!("unix://{}", fallback.display()), "default".to_string()));
+        }
     }
 
     None

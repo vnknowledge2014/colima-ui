@@ -57,7 +57,7 @@
   {:else}
     <div style="flex: 1; background: var(--bg-secondary); border: 1px solid var(--border-primary); border-radius: 12px; padding: 32px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 40px; overflow: auto;">
       <div style="display: flex; flex-wrap: wrap; gap: 24px; justify-content: center;">
-        {#each masters as m}
+        {#each masters as m (m.name)}
           <div style="background: var(--bg-primary); border: 2px solid var(--accent-purple); border-radius: 12px; padding: 20px; width: 240px; box-shadow: 0 10px 30px rgba(167,139,250,0.1); position: relative;">
             <div style="position: absolute; top: -12px; left: 50%; transform: translateX(-50%); background: var(--accent-purple); color: #fff; font-size: 10px; font-weight: 700; padding: 2px 10px; border-radius: 12px;">MASTER NODE</div>
             <div style="text-align: center; margin-bottom: 12px;">
@@ -84,7 +84,7 @@
       {#if workers.length > 0}
         <div style="width: 2px; height: 40px; background: var(--border-primary); margin: -20px 0;"></div>
         <div style="display: flex; flex-wrap: wrap; gap: 24px; justify-content: center;">
-          {#each workers as w}
+          {#each workers as w (w.name)}
             <div style="background: var(--bg-primary); border: 2px solid var(--accent-blue); border-radius: 12px; padding: 20px; width: 220px; box-shadow: 0 4px 20px rgba(0,0,0,0.2); position: relative;">
               <div style="position: absolute; top: -12px; left: 50%; transform: translateX(-50%); background: var(--accent-blue); color: #fff; font-size: 10px; font-weight: 700; padding: 2px 10px; border-radius: 12px;">WORKER NODE</div>
               <div style="text-align: center; margin-bottom: 12px;">

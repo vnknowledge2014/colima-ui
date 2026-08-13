@@ -1,6 +1,35 @@
 //! Authentication infrastructure for the HTTP API server.
 //!
 //! Generates a CSPRNG-based auth token and provides middleware for Axum.
+//!
+//! # How the token reaches a client
+//!
+//! There is deliberately **no unauthenticated HTTP endpoint** that hands the
+//! token out. There used to be (`GET /api/auth/token`, in the public router),
+//! guarded only by CORS — which restricts browsers and nothing else. Any local
+//! process could read the token and then use the whole API: writing arbitrary
+//! files to the host, applying compose patches, driving container lifecycle.
+//!
+//! Clients get it without that endpoint:
+//!
+//! - **Desktop (Tauri):** [`api_token`] over IPC. The webview is the app; it is
+//!   already inside the trust boundary. Unrelated local processes are not.
+//! - **Browser:** out-of-band, in a URL fragment (`#token=…`). Fragments are
+//!   never sent to a server, so the token stays out of request logs and out of
+//!   `Referer`. The frontend reads it once and strips it from the address bar.
+//!
+//! On the browser side, "out-of-band" today means exactly one thing: a debug
+//! build prints the ready-made URL to stdout when the server binds. There is no
+//! in-app "open in browser" affordance, because there is no browser mode to
+//! open one for — this router serves no frontend (no `ServeDir` anywhere), so
+//! the only page that can reach it is the vite dev server on 1420. Browser mode
+//! is a development surface, and the handoff matches that.
+//!
+//! If a packaged build ever serves its own frontend, this is the seam that has
+//! to grow a real handoff; until then, promising one would be fiction.
+//!
+//! Either way a tab opened by hand has no credential and no way to obtain one.
+//! That is the point, and it is the fix `docs/architecture.md` already named.
 
 use axum::{
     http::{header, StatusCode},
@@ -32,6 +61,19 @@ pub fn get_api_token() -> String {
             format!("colima-{}", hex)
         })
         .clone()
+}
+
+/// Hand the API token to the app's own webview, over IPC.
+///
+/// IPC is only reachable from the webview this app owns, so unlike the HTTP
+/// endpoint this replaces, another local process cannot call it.
+///
+/// The desktop app routes almost everything through Tauri commands and needs no
+/// token at all; the exception is SSE, because the browser `EventSource` API
+/// cannot set an `Authorization` header and must pass `?token=` instead.
+#[tauri::command]
+pub fn api_token() -> String {
+    get_api_token()
 }
 
 /// Compare two secrets without an early return on the first differing byte.

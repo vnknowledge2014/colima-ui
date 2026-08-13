@@ -53,7 +53,7 @@ impl I18n {
             ("vi", "err_parse") => "Thành công, nhưng không thể phân tích kết quả:",
             ("vi", "err_api") => "Lỗi API",
             ("vi", "err_conn") => "Lỗi kết nối",
-            ("vi", "err_port") => "Backend server của Colima UI có đang chạy ở port 11420 không?",
+            ("vi", "err_port") => "Không tìm thấy backend của Colima UI trên cổng 11420-11429. App có đang chạy không?",
 
             ("zh", "usage") => "用法: cui <提示词...>",
             ("zh", "example") => "示例: cui 请列出正在运行的容器",
@@ -63,7 +63,7 @@ impl I18n {
             ("zh", "err_parse") => "成功，但无法解析结果:",
             ("zh", "err_api") => "API 错误",
             ("zh", "err_conn") => "连接错误",
-            ("zh", "err_port") => "Colima UI 后端服务器是否在端口 11420 运行?",
+            ("zh", "err_port") => "在端口 11420-11429 上找不到 Colima UI 后端。应用正在运行吗?",
 
             // Default fallback (English)
             (_, "usage") => "Usage: cui <prompt...>",
@@ -74,11 +74,45 @@ impl I18n {
             (_, "err_parse") => "Success, but could not parse result:",
             (_, "err_api") => "API Error",
             (_, "err_conn") => "Connection Error",
-            (_, "err_port") => "Is the Colima UI backend server running on port 11420?",
+            (_, "err_port") => "No Colima UI backend answered on ports 11420-11429. Is the app running?",
             
             (_, _) => key,
         }
     }
+}
+
+/// The range the app binds in, and the order it tries.
+///
+/// `start_api_server` takes the first free port here, so a second instance —
+/// or a stale one holding 11420 — pushes the live server up the range. This
+/// binary used to assume 11420 and simply fail when the app was anywhere else,
+/// reporting "is the backend running?" while it plainly was.
+const PORT_RANGE: std::ops::RangeInclusive<u16> = 11420..=11429;
+
+/// Find the port the app is actually serving on.
+///
+/// `/api/health` is unauthenticated precisely so a client can do this before it
+/// has a credential — the webview already scans the same way. Returns the first
+/// port that answers.
+///
+/// What this does **not** solve: with two instances running, the lowest port
+/// wins, and that may be the older one. Choosing between live instances needs
+/// the app to publish which one is current; see the TODO in `api_server.rs`.
+async fn discover_port(client: &Client) -> Option<u16> {
+    for port in PORT_RANGE {
+        let url = format!("http://127.0.0.1:{}/api/health", port);
+        // Short timeout: a closed local port fails immediately, but a filtered
+        // one would otherwise hang the CLI for the OS default.
+        let probe = client
+            .get(&url)
+            .timeout(std::time::Duration::from_millis(300))
+            .send()
+            .await;
+        if probe.is_ok_and(|r| r.status().is_success()) {
+            return Some(port);
+        }
+    }
+    None
 }
 
 fn get_api_token() -> String {
@@ -111,9 +145,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     
     print!("{}", i18n.t("thinking"));
     io::stdout().flush()?;
-    
+
     let client = Client::new();
-    let url = "http://127.0.0.1:11420/api/cli/chat";
+    let Some(port) = discover_port(&client).await else {
+        // Clear the "Thinking… " line before saying nothing was found.
+        print!("\r\x1b[2K");
+        io::stdout().flush()?;
+        eprintln!("{}", i18n.t("err_port"));
+        std::process::exit(1);
+    };
+    let url = format!("http://127.0.0.1:{}/api/cli/chat", port);
     let body = json!({
         "prompt": prompt
     });

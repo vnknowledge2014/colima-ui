@@ -135,7 +135,7 @@
         style="width: 160px;"
         bind:value={selectedProfile}
       >
-        {#each instances as inst}
+        {#each instances as inst (inst.name)}
           {@const p = inst.name === "colima" ? "default" : inst.name.replace("colima-", "")}
           <option value={p}>{inst.name}</option>
         {/each}
@@ -192,7 +192,7 @@
     <div class="loading-screen"><div class="spinner"></div><span>{t('models.loading', { default: 'Loading models...' })}</span></div>
   {:else if models.length > 0}
     <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 12px;">
-      {#each models as model}
+      {#each models as model (model.name)}
         {@const isLoading = actionLoading?.startsWith(model.name)}
         <div class="card" style="opacity: {isLoading ? 0.6 : 1};">
           <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 12px;">
@@ -246,7 +246,7 @@
       <div style="width: 100%; max-width: 500px; margin-top: 16px;">
         <div style="font-size: var(--text-xs); color: var(--text-muted); margin-bottom: 8px; text-align: left;">{t('models.popular', { default: 'Popular Models' })}</div>
         <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
-          {#each popularModels as m}
+          {#each popularModels as m (m.name)}
             <div
               class="card"
               style="cursor: pointer; padding: 12px; transition: border-color 200ms;"

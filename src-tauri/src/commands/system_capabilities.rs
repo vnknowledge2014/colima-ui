@@ -110,6 +110,8 @@ fn install_hint(id: &str) -> Option<String> {
         ("lima", false) => "See the Lima install guide for your distribution",
         ("kubectl", true) => "brew install kubectl",
         ("kubectl", false) => "Install kubectl from your package manager",
+        ("trivy", true) => "brew install trivy",
+        ("trivy", false) => "See the Trivy install guide for your distribution",
         _ => return None,
     };
     Some(hint.to_string())
@@ -121,6 +123,8 @@ fn doc_id(id: &str) -> Option<String> {
         "docker" | "docker-compose" => "install-docker-cli",
         "kubectl" => "install-kubectl",
         "lima" => "install-colima",
+        "trivy" => "install-trivy",
+        "falco" => "install-falco",
         _ => return None,
     };
     Some(slug.to_string())
@@ -173,6 +177,9 @@ fn detect_all_blocking() -> Vec<Capability> {
     let compose_version = get_version("docker", &["compose", "version"]);
     let lima_version = get_version("limactl", &["--version"]);
     let kubectl_version = get_version("kubectl", &["version", "--client"]);
+    // The vulnerability scanner. Absent on most machines and deliberately not
+    // bundled: its database alone is 1.2 GB.
+    let trivy_version = get_version("trivy", &["--version"]);
 
     let plain = |v: &Option<String>| {
         if v.is_some() {
@@ -193,6 +200,7 @@ fn detect_all_blocking() -> Vec<Capability> {
         ),
         capability("lima", "Lima", plain(&lima_version), lima_version),
         capability("kubectl", "kubectl", plain(&kubectl_version), kubectl_version),
+        capability("trivy", "Trivy", plain(&trivy_version), trivy_version),
     ]
 }
 

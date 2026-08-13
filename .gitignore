@@ -22,3 +22,19 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Tauri updater signing keys — private key never committed
+.tauri-updater-dev.key
+.tauri-updater-dev.key.pub
+src-tauri/.tauri-updater-dev.key
+src-tauri/.tauri-updater-dev.key.pub
+
+# Supabase function secrets and local runtime state — never committed.
+supabase/.env
+supabase/.branches
+supabase/.temp
+
+# Node Compile
+node-compile-cache/*
+tsx-501/*
+.sisyphus/*
