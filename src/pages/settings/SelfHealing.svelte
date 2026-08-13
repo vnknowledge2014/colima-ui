@@ -25,6 +25,19 @@
    * free setting — so the badge is drawn beside the heading instead of being
    * left to the gate.
    *
+   * ## The rules fold away, inside the gate rather than above it
+   *
+   * Five rules with four controls each is the longest thing on the Settings
+   * page, and most visits are not about editing them. The summary carries the
+   * part that matters at a glance — how many rules can act on their own — so
+   * collapsing hides detail rather than hiding state.
+   *
+   * It sits inside `ProGate`, not beside it. A locked gate renders its upsell
+   * instead of its children, and a summary placed above it would announce "5
+   * rules, 2 act on their own" to somebody who cannot see or change either.
+   * The master switch is the one thing that belongs outside, because it stops
+   * what is already running.
+   *
    * ## Turning a rule to Auto is a decision, so it is asked as one
    *
    * Switching a rule from Suggest to Auto is confirmed against a sentence that
@@ -68,6 +81,14 @@
    * install has neither, so it gets the honest upsell and no switch.
    */
   const canAct = $derived(isPaid() || rules.some((r) => r.mode === "auto"));
+
+  /** Rules start folded: the summary answers the usual question on its own. */
+  let showRules = $state(false);
+
+  /** Rules that are switched on *and* allowed to act without being asked. */
+  const actingCount = $derived(
+    rules.filter((r) => r.enabled && r.mode === "auto").length,
+  );
 
   /** The section card, so the Activity banner's link can scroll to it. */
   let sectionEl = $state<HTMLDivElement | null>(null);
@@ -245,6 +266,33 @@
     {#if !loaded}
       <p class="hint-text">{t("self_heal.loading", { default: "Loading…" })}</p>
     {:else}
+      <button
+        type="button"
+        class="rules-toggle"
+        aria-expanded={showRules}
+        onclick={() => (showRules = !showRules)}
+      >
+        <span class="caret" class:open={showRules}>▾</span>
+        <span class="rules-summary">
+          {t("self_heal.rules_count", {
+            count: rules.length,
+            default: `${rules.length} rules`,
+          })}
+          <!-- The number that decides whether this section needs attention: a
+               rule that only suggests cannot surprise anybody. -->
+          <small>
+            {actingCount === 0
+              ? t("self_heal.none_acting", { default: "none act on their own" })
+              : t("self_heal.some_acting", {
+                  count: actingCount,
+                  default: `${actingCount} act on their own`,
+                })}
+          </small>
+        </span>
+      </button>
+    {/if}
+
+    {#if loaded && showRules}
       <ul class="rules">
         {#each rules as rule (rule.id)}
           <li class="rule" class:off={!rule.enabled}>
@@ -349,6 +397,39 @@
 <style>
   .pro-mark {
     margin-bottom: 10px;
+  }
+  .rules-toggle {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    padding: 8px 4px;
+    background: none;
+    border: none;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+  }
+  .caret {
+    color: var(--text-muted);
+    /* Rotated rather than swapped for a second glyph: one character means the
+       arrow cannot end up pointing two ways in two themes. */
+    transition: transform 120ms ease;
+    transform: rotate(-90deg);
+  }
+  .caret.open {
+    transform: rotate(0deg);
+  }
+  .rules-summary {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    font-size: var(--text-sm);
+  }
+  .rules-summary small {
+    color: var(--text-muted);
+    font-size: var(--text-xs);
   }
   .master {
     display: flex;
