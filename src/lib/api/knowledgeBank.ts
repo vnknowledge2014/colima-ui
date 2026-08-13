@@ -11,7 +11,7 @@ export interface AgentMemoryItem {
 
 export const knowledgeBankApi = {
   query: (errorText: string) =>
-    call<{ context_text: string }>("kb_query", { error_text: errorText }, "POST", "/api/kb/query", undefined, { error_text: errorText }),
+    call<{ context_text: string }>("kb_query", { errorText }, "POST", "/api/kb/query", undefined, { error_text: errorText }),
   feedback: (solutionId: number, isLike: boolean) =>
     call<string>("kb_feedback", { solutionId, isLike }, "POST", "/api/kb/feedback", undefined, { solutionId, isLike }),
   searchMemory: (query: string, limit = 10) =>
