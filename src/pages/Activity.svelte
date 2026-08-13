@@ -283,7 +283,10 @@
     display: inline-flex;
     gap: 2px;
   }
-  .tabs .active,
+  .tabs .active {
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+  }
   .panel {
     display: flex;
     flex-direction: column;
