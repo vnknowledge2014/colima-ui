@@ -23,6 +23,7 @@
   import { onError } from "../lib/globalToast";
   import { setAppSetting, getAppSetting } from "../lib/settingsStore.svelte";
   import { renderMarkdown } from "../lib/markdown";
+  import { parseAiTools } from "../lib/aiToolParser";
   import { newId } from "../lib/ids";
   import { runAgent, type AgentCallbacks } from "../lib/agentCore";
 
@@ -33,6 +34,14 @@
   function renderMarkdownHTML(text: string): string {
     return renderMarkdown(text);
   }
+
+  /** Chips belong to the newest reply only — see the render block. */
+  const lastAssistantId = $derived(
+    aiState.messages.reduce<string | null>(
+      (found: string | null, m: AiMessage) => (m.role === "assistant" ? m.id : found),
+      null,
+    ),
+  );
 
   let panelWidth = $state(parseInt(getAppSetting("ai_panel_width", "400"), 10));
   let isDragging = false;
@@ -503,10 +512,30 @@
               {@html renderMarkdownHTML(msg.content)}
             </div>
           {:else}
+            {@const parsed = parseAiTools(msg.content)}
             <div class="ai-msg-label">{t("ai.role_assistant", { default: "Colima AI" })}</div>
-            <div class="ai-msg-assistant">
-              {@html renderMarkdownHTML(msg.content)}
-            </div>
+            <!-- A reply that is only suggestions has no prose to show; an empty
+                 bubble above the chips would read as a failed response. -->
+            {#if parsed.cleanText}
+              <div class="ai-msg-assistant">
+                {@html renderMarkdownHTML(parsed.cleanText)}
+              </div>
+            {/if}
+            <!-- Only the newest reply offers chips: a suggestion from three
+                 turns ago sends a prompt that no longer fits the conversation. -->
+            {#if msg.id === lastAssistantId && parsed.suggests.length > 0}
+              <div class="ai-suggestions">
+                <!-- Keyed by position, not label: a model that repeats a label
+                     would otherwise crash the keyed each with a duplicate key. -->
+                {#each parsed.suggests as [, label, prompt], i (i)}
+                  <button
+                    class="ai-suggestion-chip"
+                    disabled={aiState.isProcessing}
+                    onclick={() => handleSend((prompt ?? label).trim())}
+                  >{label.trim()}</button>
+                {/each}
+              </div>
+            {/if}
           {/if}
         </div>
       {/each}
@@ -913,6 +942,38 @@
     padding: 12px;
     border-top: 1px solid var(--border-primary);
     background: var(--bg-sidebar);
+  }
+
+  /* Follow-ups offered under the newest reply. Outlined rather than filled:
+     they are optional next steps, not the primary action of the panel. */
+  .ai-suggestions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 10px;
+  }
+
+  .ai-suggestion-chip {
+    padding: 8px 14px;
+    font-size: var(--text-sm);
+    font-family: inherit;
+    color: var(--accent-green);
+    background: transparent;
+    border: 1px solid color-mix(in srgb, var(--accent-green) 45%, transparent);
+    border-radius: var(--radius-lg);
+    cursor: pointer;
+    text-align: left;
+    transition: background var(--transition-fast), border-color var(--transition-fast);
+  }
+
+  .ai-suggestion-chip:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--accent-green) 12%, transparent);
+    border-color: var(--accent-green);
+  }
+
+  .ai-suggestion-chip:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
   }
 
   .ai-queued-chip {

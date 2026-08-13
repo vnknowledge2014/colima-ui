@@ -49,9 +49,58 @@ describe('aiToolParser', () => {
   it('should parse simple parameterless commands like [DIAGNOSE]', () => {
     const input = 'Let me check: [DIAGNOSE]';
     const parsed = parseAiTools(input);
-    
+
     expect(parsed.hasTools).toBe(true);
     expect(parsed.hasDiagnose).toBe(true);
     expect(parsed.cleanText).toBe('Let me check:');
+  });
+});
+
+describe('[SUGGEST:] follow-up chips', () => {
+  it('parses a label with and without its prompt', () => {
+    const input = 'That failed. [SUGGEST: Show the logs | Show me the last 100 lines][SUGGEST: Restart it]';
+    const parsed = parseAiTools(input);
+
+    expect(parsed.suggests.length).toBe(2);
+    expect(parsed.suggests[0][1]).toBe('Show the logs');
+    expect(parsed.suggests[0][2]).toBe('Show me the last 100 lines');
+    expect(parsed.suggests[1][1]).toBe('Restart it');
+    // No prompt given — the panel falls back to the label.
+    expect(parsed.suggests[1][2]).toBeUndefined();
+    expect(parsed.cleanText).toBe('That failed.');
+  });
+
+  it('does not count as a tool, so a suggest-only reply is final', () => {
+    // agentCore treats "no tools" as the end of the agent loop. A suggestion is
+    // a finished answer, so counting it would spend another round.
+    const parsed = parseAiTools('I could not identify it. [SUGGEST: Try again]');
+
+    expect(parsed.hasTools).toBe(false);
+    expect(parsed.suggests.length).toBe(1);
+  });
+
+  it('still reports tools when a reply mixes suggestions with a real one', () => {
+    const parsed = parseAiTools('[QUERY: list-containers][SUGGEST: Restart it]');
+
+    expect(parsed.hasTools).toBe(true);
+    expect(parsed.suggests.length).toBe(1);
+  });
+
+  it('caps a chatty model at three chips', () => {
+    const parsed = parseAiTools(
+      '[SUGGEST: One][SUGGEST: Two][SUGGEST: Three][SUGGEST: Four][SUGGEST: Five]',
+    );
+
+    expect(parsed.suggests.length).toBe(3);
+    // Dropped chips are still stripped from the visible text.
+    expect(parsed.cleanText).toBe('');
+  });
+
+  it('leaves the other tags untouched', () => {
+    const parsed = parseAiTools('[NAVIGATE: compose][SUGGEST: Go back | Take me to the dashboard]');
+
+    expect(parsed.navigates.length).toBe(1);
+    expect(parsed.navigates[0][1]).toBe('compose');
+    expect(parsed.suggests[0][2]).toBe('Take me to the dashboard');
   });
 });
