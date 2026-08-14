@@ -40,12 +40,22 @@
   }
 
   let currentTime = $state(new Date());
-  const formatTime = () => currentTime.toLocaleTimeString();
+  // Hours and minutes only. The seconds were the sole reason this had to tick
+  // once a second, and nobody reads a sidebar clock to the second.
+  const formatTime = () =>
+    currentTime.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 
   onMount(() => {
     uiState.sidebarCollapsed = getAppSetting("colimaui_sidebar_collapsed") === "true";
-    const clockInterval = setInterval(() => { currentTime = new Date(); }, 1000);
-    return () => clearInterval(clockInterval);
+    // Aligned to the top of the minute rather than ticking every 60s from
+    // mount: a fixed interval started at :47 would flip the displayed minute
+    // 13 seconds late, every minute.
+    let clockInterval: ReturnType<typeof setInterval> | undefined;
+    const align = setTimeout(() => {
+      currentTime = new Date();
+      clockInterval = setInterval(() => { currentTime = new Date(); }, 60000);
+    }, 60000 - (Date.now() % 60000));
+    return () => { clearTimeout(align); if (clockInterval) clearInterval(clockInterval); };
   });
 
   const navGroups = $derived([
@@ -66,7 +76,7 @@
         { id: "compose", label: t("sidebar.compose", { default: "Compose" }), icon: Icons.Compose },
         { id: "topology", label: t("sidebar.topology", { default: "Topology" }), icon: Icons.Topology },
         { id: "activity", label: t("sidebar.activity", { default: "Activity" }), icon: Icons.Activity },
-        { id: "security", label: t("sidebar.security", { default: "Security" }), icon: Icons.Warning },
+        { id: "security", label: t("sidebar.security", { default: "Security" }), icon: Icons.Shield },
       ],
     },
     {
@@ -382,6 +392,9 @@
         <div class="nav-section-label">{group.label}</div>
         {#each group.items as item (item.id)}
           {@const isPanelToggle = item.id === "ai-chat"}
+          <!-- The panel toggle carries two cues: the ◧/◫ glyph below is the
+               visual one, its `title` the text one. The glyph alone is too
+               small to explain why this item behaves unlike every other. -->
           <button
             class="nav-item {isPanelToggle
               ? uiState.aiPanelOpen
@@ -402,7 +415,11 @@
               }
             }}
             data-tour-id={`nav-${item.id}`}
-            title={uiState.sidebarCollapsed ? item.label : undefined}
+            title={isPanelToggle
+              ? (uiState.aiPanelOpen
+                  ? t("sidebar.ai_panel_close", { default: "Close the AI panel (⌘K)" })
+                  : t("sidebar.ai_panel_open", { default: "Open the AI panel beside the page (⌘K)" }))
+              : (uiState.sidebarCollapsed ? item.label : undefined)}
             aria-pressed={isPanelToggle ? uiState.aiPanelOpen : undefined}
           >
             {@html item.icon}

@@ -4,6 +4,7 @@
   import { globalToast } from "../lib/globalToast";
   import { confirm } from "../store/confirm.svelte";
   import { t } from "../lib/i18n.svelte";
+  import { setVisibleInterval } from "../lib/visibleInterval";
 
   let vms = $state<LimaInstance[]>([]);
   let loading = $state(true);
@@ -19,7 +20,7 @@
   let newVM = $state({ name: "", cpus: 2, memory: 2, disk: 60, template: "" });
 
   let timeoutId: ReturnType<typeof setTimeout> | null = null;
-  let intervalId: ReturnType<typeof setInterval> | null = null;
+  let stopPoll: (() => void) | null = null;
 
   async function fetchVMs() {
     try {
@@ -35,12 +36,10 @@
 
   onMount(() => {
     fetchVMs();
-    intervalId = setInterval(() => {
-      if (document.visibilityState === "visible") fetchVMs();
-    }, 15000);
+    stopPoll = setVisibleInterval(fetchVMs, 15000);
 
     return () => {
-      if (intervalId) clearInterval(intervalId);
+      if (stopPoll) stopPoll();
       if (timeoutId) clearTimeout(timeoutId);
     };
   });

@@ -152,10 +152,18 @@
 
 <div class="content-body" style="padding: 24px;">
   {#if loading}
-    <div style="display: flex; justify-content: center; align-items: center; height: 200px;">
-      <div class="spinner"></div>
-      <span style="margin-left: 10px; color: var(--text-muted);">{t('dashboard.loading', { default: 'Loading...' })}</span>
-    </div>
+    <!-- Same grid and tile height as the real content below, so nothing shifts
+         position when the numbers land. A centred spinner in a fixed 200px box
+         made the whole page jump once the sections replaced it. -->
+    {#each [0, 1] as section (section)}
+      <div class="dash-section" aria-busy="true" aria-label={t('dashboard.loading', { default: 'Loading...' })}>
+        <div class="dash-grid-3">
+          {#each [0, 1, 2] as tile (tile)}
+            <div class="skeleton skeleton-tile"></div>
+          {/each}
+        </div>
+      </div>
+    {/each}
   {:else}
     <!-- SECTION 1: VM Instances -->
     <div class="dash-section">
@@ -570,6 +578,32 @@
     display: grid;
     grid-template-columns: repeat(3, 1fr);
     gap: 14px;
+  }
+
+  /* Placeholder sized to the tile it becomes, so the grid does not reflow. */
+  .skeleton {
+    background: linear-gradient(
+      90deg,
+      var(--bg-card) 25%,
+      var(--bg-card-hover) 50%,
+      var(--bg-card) 75%
+    );
+    background-size: 200% 100%;
+    animation: skeleton-shimmer 1.5s linear infinite;
+    border-radius: var(--radius-md);
+  }
+  .skeleton-tile {
+    height: 96px;
+  }
+
+  @keyframes skeleton-shimmer {
+    0% { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
+  }
+
+  /* A looping shimmer is exactly the motion "reduce motion" exists to stop. */
+  @media (prefers-reduced-motion: reduce) {
+    .skeleton { animation: none; }
   }
 
   .dash-grid-5 {

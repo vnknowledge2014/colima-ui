@@ -7,6 +7,7 @@
   import RowActions from "../components/RowActions.svelte";
   import * as Icons from "../components/Icons.svelte";
   import { viewInTopology, consumeFocus } from "../lib/topology-link";
+  import { setVisibleInterval } from "../lib/visibleInterval";
 
   let projects = $state<ComposeProject[]>([]);
   let loading = $state(true);
@@ -38,10 +39,7 @@
       const match = focus ? projects.find((p) => p.Name === focus) : undefined;
       if (match) openProject(match);
     });
-    const interval = setInterval(() => {
-      if (document.visibilityState === "visible") fetchProjects();
-    }, 15000);
-    return () => clearInterval(interval);
+    return setVisibleInterval(fetchProjects, 15000);
   });
 
   async function handleAction(name: string, action: "down" | "restart") {

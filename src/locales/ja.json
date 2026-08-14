@@ -33,7 +33,9 @@
     "colima_running": "{count} 台稼働中",
     "colima_stopped": "停止中",
     "colima_instances": "インスタンス",
-    "security": "セキュリティ"
+    "security": "セキュリティ",
+    "ai_panel_close": "AI パネルを閉じる (⌘K)",
+    "ai_panel_open": "ページの横に AI パネルを開く (⌘K)"
   },
   "dashboard": {
     "title": "ダッシュボード",
@@ -141,7 +143,11 @@
     "standalone": "単独",
     "running_lower": "実行中",
     "copy_in": "コンテナへファイルをコピー",
-    "copy_out": "コンテナからファイルをコピー"
+    "copy_out": "コンテナからファイルをコピー",
+    "start_selected": "選択項目を起動",
+    "restart_selected": "選択項目を再起動",
+    "select_running": "実行中すべて",
+    "select_stopped": "停止中すべて"
   },
   "diff": {
     "no_changes": "変更なし",
@@ -156,7 +162,12 @@
     "subtitle": "トラブルシューティング ガイド。オフラインで利用できます。",
     "search": "記事を検索…",
     "no_results": "該当する記事がありません。",
-    "pick": "記事を選択してください。"
+    "pick": "記事を選択してください。",
+    "shortcuts": "キーボードショートカット",
+    "shortcut_ai": "AI パネルの表示切り替え",
+    "shortcut_refresh": "データを更新",
+    "shortcut_pages": "ダッシュボードからアクティビティへ移動",
+    "shortcut_escape": "入力欄を離れ、次にパネルを閉じる"
   },
   "colima_config": {
     "title": "Colima の設定",
@@ -477,7 +488,30 @@
     "severity_low": "低",
     "severity_unknown": "未評価",
     "component_aria": "{label}: {max} 中 {earned}",
-    "scanner_unknown": "Trivy を確認しています…"
+    "scanner_unknown": "Trivy を確認しています…",
+    "posture": "セキュリティ状況",
+    "posture_coverage": "スキャン済みイメージの平均",
+    "posture_lowest": "最低",
+    "posture_empty": "まだスキャンしていません",
+    "posture_empty_text": "スキャンは手動で実行します。イメージを選んでスキャンすると、そのスコアがここに表示されます。",
+    "posture_mixed": "これらのスコアは異なるスキャナーまたはルールパックのバージョンによるもので、比較できません。もう一度スキャンして揃えてください。",
+    "and_more_images": "他 {count} 件のスコア済みイメージ",
+    "images_heading": "イメージ",
+    "sections": "セキュリティのセクション",
+    "tab_overview": "概要",
+    "tab_images": "イメージ",
+    "tab_history": "履歴",
+    "history_title": "スコア履歴はまだ利用できません",
+    "history_text": "スコアは実行間で保存されないため、傾向を描画できません。本日のスコアは概要タブにあります。",
+    "next_actions": "次のアクション",
+    "next_actions_empty": "この厳格度で修正すべき項目はありません",
+    "next_actions_more": "他にもありますが表示していません",
+    "status_scanning": "スキャン中…",
+    "status_failed": "スキャン失敗",
+    "status_unscanned": "未スキャン",
+    "gain_unknown": "未計測",
+    "db": "データベース",
+    "pack": "パック"
   },
   "self_heal": {
     "title": "自己修復",

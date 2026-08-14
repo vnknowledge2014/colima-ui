@@ -4,13 +4,21 @@ import { loadCapabilities } from "../store/capabilities.svelte";
 import { normalizeContainer, normalizeImage } from "./normalizers";
 import { dockerState, resourceState, dashboardState, isEventCooldownActive, uiState } from "../store.svelte";
 import { getAppSetting } from "./settingsStore.svelte";
+import { setVisibleInterval } from "./visibleInterval";
 
 import { isRunningInTauri } from "./env";
 const isTauri = isRunningInTauri();
 let _refetchRetryCount = 0;
 const MAX_REFETCH_RETRIES = 10;
-let pollInterval: ReturnType<typeof setInterval> | null = null;
-let sysInterval: ReturnType<typeof setInterval> | null = null;
+let stopPolling: (() => void) | null = null;
+let refetchRetryTimeout: ReturnType<typeof setTimeout> | null = null;
+// Module-level, not inside the browser-mode branch: the teardown returned by
+// startDataPoller() lives outside that branch and has to be able to close it.
+let currentEventSource: EventSource | null = null;
+// A refetch already in flight when teardown runs would otherwise schedule its
+// retry after the timeout was cleared, and keep polling a dead context.
+let disposed = false;
+let stopSysPoll: (() => void) | null = null;
 let sseRetryTimeout: ReturnType<typeof setTimeout> | null = null;
 
 export async function refreshManual() {
@@ -30,6 +38,7 @@ export async function refreshManual() {
 }
 
 export async function refetchAllResources() {
+  if (disposed) return;
   let fetchFailed = false;
   try {
     const [c, i] = await Promise.all([
@@ -58,9 +67,12 @@ export async function refetchAllResources() {
   }
 
   if (fetchFailed) {
+    // Checked before the give-up branch below: a teardown mid-flight must not
+    // log "gave up after 10 attempts" when it never got to retry at all.
+    if (disposed) return;
     _refetchRetryCount++;
     if (_refetchRetryCount < MAX_REFETCH_RETRIES) {
-      setTimeout(refetchAllResources, 5000);
+      refetchRetryTimeout = setTimeout(refetchAllResources, 5000);
     } else {
       console.warn(`[ColimaUI] refetchAllResources gave up after ${MAX_REFETCH_RETRIES} attempts`);
     }
@@ -93,6 +105,10 @@ function handleConnectionLost() {
 }
 
 export function startDataPoller() {
+  // A second start after a teardown (HMR, or a re-mounted root) must not
+  // inherit the previous run's disposed flag or its retry count.
+  disposed = false;
+  _refetchRetryCount = 0;
   refreshManual();
   refetchAllResources();
   // Load once at startup so pages can explain an empty list ("Colima isn't
@@ -104,7 +120,7 @@ export function startDataPoller() {
   const rsMins = parseInt(getAppSetting("colimaui_auto_pause_mins") || "15", 10);
   sysMethods.setResourceSaver(rsEnabled, rsMins).catch(() => {});
 
-  sysInterval = setInterval(() => { sysMethods.checkSystem().then(s => dashboardState.systemInfo = s).catch(()=>{}); }, 30000);
+  stopSysPoll = setVisibleInterval(() => { sysMethods.checkSystem().then(s => dashboardState.systemInfo = s).catch(()=>{}); }, 30000);
 
   if (isTauri) {
     import("@tauri-apps/api/event").then((mod) => {
@@ -130,6 +146,15 @@ export function startDataPoller() {
     let sseRetryDelay = 2000;
 
     async function connectSSE() {
+      // A reconnect must not leave the previous socket open: Chrome caps a
+      // single origin at 6 concurrent connections, after which every request
+      // to 127.0.0.1:11420 blocks — including the plain HTTP polling fallback.
+      if (currentEventSource) {
+        currentEventSource.close();
+        currentEventSource = null;
+      }
+      if (disposed) return;
+
       // Re-read the token on every attempt rather than capturing it once.
       // Browser mode receives it from a URL fragment, so the very first attempt
       // can legitimately run before one is available; a captured empty string
@@ -141,7 +166,11 @@ export function startDataPoller() {
       // fails silently — the UI would just stop updating.
       const base = await resolveApiBase();
       const sseUrl = token ? `${base}/api/events?token=${token}` : `${base}/api/events`;
+      // Re-checked after the awaits above: a teardown during token/base
+      // resolution would otherwise open a socket nobody is left to close.
+      if (disposed) return;
       const es = new EventSource(sseUrl);
+      currentEventSource = es;
       es.addEventListener("instances-update", (e: MessageEvent) => {
         try {
           const data = JSON.parse(e.data) as { instances?: ColimaInstance[] };
@@ -163,15 +192,15 @@ export function startDataPoller() {
       es.addEventListener("docker-reconnected", refetchAllResources);
       es.onopen = () => {
         sseRetryDelay = 2000;
-        if (pollInterval) {
-          clearInterval(pollInterval);
-          pollInterval = null;
+        if (stopPolling) {
+          stopPolling();
+          stopPolling = null;
         }
       };
       es.onerror = () => {
         es.close();
-        if (!pollInterval) {
-          pollInterval = setInterval(() => {
+        if (!stopPolling) {
+          stopPolling = setVisibleInterval(() => {
             refreshManual();
             refetchAllResources();
           }, 5000);
@@ -187,8 +216,15 @@ export function startDataPoller() {
   }
 
   return () => {
-    if (sysInterval) clearInterval(sysInterval);
-    if (pollInterval) clearInterval(pollInterval);
+    disposed = true;
+    if (stopSysPoll) { stopSysPoll(); stopSysPoll = null; }
+    if (stopPolling) { stopPolling(); stopPolling = null; }
+    if (refetchRetryTimeout) clearTimeout(refetchRetryTimeout);
     if (sseRetryTimeout) clearTimeout(sseRetryTimeout);
+    // close() does not fire onerror, so no reconnect is woken by the teardown.
+    if (currentEventSource) {
+      currentEventSource.close();
+      currentEventSource = null;
+    }
   };
 }

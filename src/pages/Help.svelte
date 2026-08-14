@@ -127,6 +127,16 @@
         /* keep showing the previous locale rather than emptying the page */
       });
   });
+
+  // The handler accepts either modifier, so the table shows whichever one the
+  // user's keyboard actually has rather than teaching them the wrong key.
+  const mod = navigator.userAgent.includes("Mac") ? "⌘" : "Ctrl+";
+  const SHORTCUTS = $derived([
+    { keys: `${mod}K`, label: t("help.shortcut_ai", { default: "Toggle the AI panel" }) },
+    { keys: `${mod}⇧R`, label: t("help.shortcut_refresh", { default: "Refresh data" }) },
+    { keys: `${mod}1…${mod}9`, label: t("help.shortcut_pages", { default: "Jump to Dashboard through Activity" }) },
+    { keys: "Esc", label: t("help.shortcut_escape", { default: "Leave the input, then close the panel" }) },
+  ]);
 </script>
 
 <div class="content-header">
@@ -183,6 +193,23 @@
             {/each}
           </ul>
         {/if}
+
+        <!-- Static, and below the article index on purpose: the articles come
+             from the backend and can be searched away, but a shortcut nobody
+             can find is a shortcut that does not exist. -->
+        <section class="help-shortcuts">
+          <h2 class="help-shortcuts-title">
+            {t("help.shortcuts", { default: "Keyboard shortcuts" })}
+          </h2>
+          <dl class="help-shortcut-list">
+            {#each SHORTCUTS as s (s.keys)}
+              <div class="help-shortcut">
+                <dt><kbd>{s.keys}</kbd></dt>
+                <dd>{s.label}</dd>
+              </div>
+            {/each}
+          </dl>
+        </section>
       </aside>
 
       <article class="help-article card" use:delegateArticleLinks>
@@ -273,5 +300,45 @@
   .help-error {
     font-size: var(--text-sm);
     color: var(--accent-red);
+  }
+  .help-shortcuts {
+    margin-top: 20px;
+    padding-top: 16px;
+    border-top: 1px solid var(--border-color);
+  }
+  .help-shortcuts-title {
+    font-size: var(--text-xs);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-muted);
+    margin: 0 0 10px;
+  }
+  .help-shortcut-list {
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .help-shortcut {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+  }
+  .help-shortcut dt {
+    flex-shrink: 0;
+  }
+  .help-shortcut dd {
+    margin: 0;
+    font-size: var(--text-xs);
+    color: var(--text-secondary);
+  }
+  .help-shortcut kbd {
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    background: var(--bg-card-hover);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    padding: 2px 6px;
+    white-space: nowrap;
   }
 </style>

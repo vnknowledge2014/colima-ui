@@ -33,7 +33,9 @@
     "colima_running": "{count} đang chạy",
     "colima_stopped": "Đang tắt",
     "colima_instances": "Máy ảo",
-    "security": "Bảo mật"
+    "security": "Bảo mật",
+    "ai_panel_close": "Đóng panel AI (⌘K)",
+    "ai_panel_open": "Mở panel AI bên cạnh trang (⌘K)"
   },
   "dashboard": {
     "title": "Bảng Điều Khiển",
@@ -141,7 +143,11 @@
     "standalone": "Đứng riêng",
     "running_lower": "đang chạy",
     "copy_in": "Copy file vào container",
-    "copy_out": "Copy file ra khỏi container"
+    "copy_out": "Copy file ra khỏi container",
+    "start_selected": "Khởi động mục đã chọn",
+    "restart_selected": "Khởi động lại mục đã chọn",
+    "select_running": "Tất cả đang chạy",
+    "select_stopped": "Tất cả đã dừng"
   },
   "diff": {
     "no_changes": "Không có thay đổi",
@@ -156,7 +162,12 @@
     "subtitle": "Hướng dẫn xử lý sự cố. Dùng được khi không có mạng.",
     "search": "Tìm bài viết…",
     "no_results": "Không tìm thấy bài viết phù hợp.",
-    "pick": "Chọn một bài viết."
+    "pick": "Chọn một bài viết.",
+    "shortcuts": "Phím tắt",
+    "shortcut_ai": "Bật/tắt panel AI",
+    "shortcut_refresh": "Làm mới dữ liệu",
+    "shortcut_pages": "Chuyển nhanh từ Dashboard tới Activity",
+    "shortcut_escape": "Rời ô nhập, rồi đóng panel"
   },
   "colima_config": {
     "title": "Cấu hình Colima",
@@ -477,7 +488,30 @@
     "severity_low": "thấp",
     "severity_unknown": "chưa xếp hạng",
     "component_aria": "{label}: {earned} trên {max}",
-    "scanner_unknown": "Đang kiểm tra Trivy…"
+    "scanner_unknown": "Đang kiểm tra Trivy…",
+    "posture": "Tình trạng bảo mật",
+    "posture_coverage": "trung bình trên các image đã quét",
+    "posture_lowest": "Thấp nhất",
+    "posture_empty": "Chưa quét gì",
+    "posture_empty_text": "Quét là việc bạn chủ động yêu cầu — chọn một image và quét, điểm sẽ hiện ở đây.",
+    "posture_mixed": "Các điểm này đến từ phiên bản scanner hoặc rule-pack khác nhau nên không so sánh được. Quét lại để đồng bộ.",
+    "and_more_images": "còn {count} image đã chấm điểm",
+    "images_heading": "Image",
+    "sections": "Các mục bảo mật",
+    "tab_overview": "Tổng quan",
+    "tab_images": "Image",
+    "tab_history": "Lịch sử",
+    "history_title": "Chưa có lịch sử điểm",
+    "history_text": "Điểm chưa được lưu giữa các lần chạy nên chưa vẽ được xu hướng. Điểm hôm nay nằm ở tab Tổng quan.",
+    "next_actions": "Việc cần làm tiếp",
+    "next_actions_empty": "Không còn gì phải sửa ở mức nghiêm ngặt này",
+    "next_actions_more": "và một số mục khác, không hiển thị",
+    "status_scanning": "đang quét…",
+    "status_failed": "quét thất bại",
+    "status_unscanned": "chưa quét",
+    "gain_unknown": "chưa đo",
+    "db": "cơ sở dữ liệu",
+    "pack": "gói"
   },
   "self_heal": {
     "title": "Tự phục hồi",

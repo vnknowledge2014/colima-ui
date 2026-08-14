@@ -2,7 +2,10 @@
   "compilerOptions": {
     "target": "ES2020",
     "useDefineForClassFields": true,
-    "lib": ["ES2020", "DOM", "DOM.Iterable"],
+    // ES2022.Error on top of ES2020: `new Error(msg, { cause })` is required by
+    // the preserve-caught-error lint rule, and every runtime this ships to
+    // (Tauri's WebView, modern browsers, Node 20+) supports it.
+    "lib": ["ES2020", "ES2022.Error", "DOM", "DOM.Iterable"],
     "module": "ESNext",
     "skipLibCheck": true,
 

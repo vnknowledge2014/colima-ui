@@ -33,7 +33,9 @@
     "colima_running": "{count} 个运行中",
     "colima_stopped": "已停止",
     "colima_instances": "实例",
-    "security": "安全"
+    "security": "安全",
+    "ai_panel_close": "关闭 AI 面板 (⌘K)",
+    "ai_panel_open": "在页面旁打开 AI 面板 (⌘K)"
   },
   "dashboard": {
     "title": "仪表盘",
@@ -141,7 +143,11 @@
     "standalone": "独立",
     "running_lower": "运行中",
     "copy_in": "复制文件到容器",
-    "copy_out": "从容器复制文件"
+    "copy_out": "从容器复制文件",
+    "start_selected": "启动所选",
+    "restart_selected": "重启所选",
+    "select_running": "全部运行中",
+    "select_stopped": "全部已停止"
   },
   "diff": {
     "no_changes": "没有变更",
@@ -156,7 +162,12 @@
     "subtitle": "故障排查指南，离线可用。",
     "search": "搜索文章…",
     "no_results": "没有匹配的文章。",
-    "pick": "请选择一篇文章。"
+    "pick": "请选择一篇文章。",
+    "shortcuts": "键盘快捷键",
+    "shortcut_ai": "切换 AI 面板",
+    "shortcut_refresh": "刷新数据",
+    "shortcut_pages": "跳转到概览至活动页",
+    "shortcut_escape": "先离开输入框，再关闭面板"
   },
   "colima_config": {
     "title": "Colima 配置",
@@ -477,7 +488,30 @@
     "severity_low": "低",
     "severity_unknown": "未评级",
     "component_aria": "{label}：{max} 分中的 {earned} 分",
-    "scanner_unknown": "正在检查 Trivy……"
+    "scanner_unknown": "正在检查 Trivy……",
+    "posture": "安全态势",
+    "posture_coverage": "已扫描镜像的平均值",
+    "posture_lowest": "最低",
+    "posture_empty": "尚未扫描",
+    "posture_empty_text": "扫描需要手动发起 — 选择一个镜像并扫描，其评分会显示在这里。",
+    "posture_mixed": "这些评分来自不同版本的扫描器或规则包，无法相互比较。请重新扫描以保持一致。",
+    "and_more_images": "另有 {count} 个已评分镜像",
+    "images_heading": "镜像",
+    "sections": "安全板块",
+    "tab_overview": "概览",
+    "tab_images": "镜像",
+    "tab_history": "历史",
+    "history_title": "暂无评分历史",
+    "history_text": "评分尚未在多次运行间保存，因此无法绘制趋势。今天的评分在概览页。",
+    "next_actions": "后续操作",
+    "next_actions_empty": "在当前严格度下没有需要修复的项",
+    "next_actions_more": "还有更多，未显示",
+    "status_scanning": "扫描中…",
+    "status_failed": "扫描失败",
+    "status_unscanned": "未扫描",
+    "gain_unknown": "未测量",
+    "db": "数据库",
+    "pack": "规则包"
   },
   "self_heal": {
     "title": "自我修复",

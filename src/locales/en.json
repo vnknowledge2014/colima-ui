@@ -33,7 +33,9 @@
     "colima_running": "{count} running",
     "colima_stopped": "Stopped",
     "colima_instances": "Instances",
-    "security": "Security"
+    "security": "Security",
+    "ai_panel_close": "Close the AI panel (⌘K)",
+    "ai_panel_open": "Open the AI panel beside the page (⌘K)"
   },
   "dashboard": {
     "title": "Dashboard",
@@ -141,7 +143,11 @@
     "standalone": "Standalone",
     "running_lower": "running",
     "copy_in": "Copy file into container",
-    "copy_out": "Copy file from container"
+    "copy_out": "Copy file from container",
+    "start_selected": "Start Selected",
+    "restart_selected": "Restart Selected",
+    "select_running": "All running",
+    "select_stopped": "All stopped"
   },
   "diff": {
     "no_changes": "No changes",
@@ -156,7 +162,12 @@
     "subtitle": "Troubleshooting guides. Available offline.",
     "search": "Search articles…",
     "no_results": "No matching articles.",
-    "pick": "Choose an article."
+    "pick": "Choose an article.",
+    "shortcuts": "Keyboard shortcuts",
+    "shortcut_ai": "Toggle the AI panel",
+    "shortcut_refresh": "Refresh data",
+    "shortcut_pages": "Jump to Dashboard through Activity",
+    "shortcut_escape": "Leave the input, then close the panel"
   },
   "colima_config": {
     "title": "Colima Configuration",
@@ -477,7 +488,30 @@
     "severity_low": "low",
     "severity_unknown": "unrated",
     "component_aria": "{label}: {earned} of {max}",
-    "scanner_unknown": "Checking for Trivy…"
+    "scanner_unknown": "Checking for Trivy…",
+    "posture": "Security posture",
+    "posture_coverage": "average over scanned images",
+    "posture_lowest": "Lowest",
+    "posture_empty": "Nothing scanned yet",
+    "posture_empty_text": "Scanning is something you ask for — pick an image and scan it, and its score lands here.",
+    "posture_mixed": "These scores came from different scanner or rule-pack versions, so they are not comparable. Scan again to line them up.",
+    "and_more_images": "{count} more scored images",
+    "images_heading": "Images",
+    "sections": "Security sections",
+    "tab_overview": "Overview",
+    "tab_images": "Images",
+    "tab_history": "History",
+    "history_title": "Score history is not available yet",
+    "history_text": "Scores are not stored between runs yet, so there is no trend to draw. Today's score is on the Overview.",
+    "next_actions": "Next actions",
+    "next_actions_empty": "Nothing left to fix at this strictness",
+    "next_actions_more": "and more, not shown",
+    "status_scanning": "scanning…",
+    "status_failed": "scan failed",
+    "status_unscanned": "not scanned",
+    "gain_unknown": "not measured",
+    "db": "database",
+    "pack": "pack"
   },
   "self_heal": {
     "title": "Self-healing",

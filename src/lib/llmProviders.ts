@@ -81,25 +81,42 @@ export async function chatStream(
   }
 
   const fetchFn = await getFetch();
-  const response = await fetchFn(url, {
-    method: "POST",
-    headers,
-    body: JSON.stringify(body),
-    signal,
-  });
+
+  // A wrong Endpoint URL surfaces from fetch as a bare `TypeError: Failed to
+  // fetch`, which names neither the provider nor the setting that produced it.
+  let response: Response;
+  try {
+    response = await fetchFn(url, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(body),
+      signal,
+    });
+  } catch (networkErr) {
+    // An abort is the user pressing Stop, not a misconfiguration. Rethrow it
+    // untouched so the caller's abort handling still recognises it.
+    if (signal?.aborted) throw networkErr;
+    // The query string is dropped and the result redacted: a user-pasted
+    // endpoint can carry a key, and this message ends up in bug reports.
+    const safeUrl = url.replace(/\?.*$/, "");
+    throw new Error(
+      redact(
+        `Could not reach ${provider} at ${safeUrl}. ` +
+        `Check the Endpoint URL in Settings. ` +
+        `(${networkErr instanceof Error ? networkErr.message : String(networkErr)})`
+      ),
+      { cause: networkErr }
+    );
+  }
 
   if (!response.ok) {
     // The body is redacted because a provider can echo the credential back.
     throw new Error(redact(`HTTP Error ${response.status}: ${await response.text()}`));
   }
 
-  if (!response!.ok) {
-    throw new Error(`HTTP Error ${response!.status}: ${await response!.text()}`);
-  }
+  if (!response.body) throw new Error("No response body");
 
-  if (!response!.body) throw new Error("No response body");
-
-  const reader = response!.body!.getReader();
+  const reader = response.body.getReader();
   const decoder = new TextDecoder("utf-8");
 
   if (isGemini) {

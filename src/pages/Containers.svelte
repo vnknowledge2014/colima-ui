@@ -19,6 +19,7 @@
   import ContextMenu from "../components/ContextMenu.svelte";
   import type { TransferMode } from "../lib/api/transfer";
   import { getAppSetting, setAppSetting } from "../lib/settingsStore.svelte";
+  import { setVisibleInterval } from "../lib/visibleInterval";
 
   let filter = $state<"all" | "running" | "stopped">("all");
   const containerFilters: ("all" | "running" | "stopped")[] = ["all", "running", "stopped"];
@@ -195,19 +196,56 @@
     }
   }
 
-  async function handleBatchStop() {
-    const running = filtered.filter(c => selected.has(c.Id) && c.State === "running");
-    if (running.length === 0) return;
+  type BatchAction = "start" | "stop" | "restart" | "remove";
+
+  const BATCH_SPEC: Record<BatchAction, {
+    run: (id: string) => Promise<unknown>;
+    eligible: (c: DockerContainer) => boolean;
+    danger: boolean;
+    past: string;
+  }> = {
+    start:   { run: (id) => dockerApi.startContainer(id),        eligible: (c) => c.State !== "running", danger: false, past: "Started" },
+    stop:    { run: (id) => dockerApi.stopContainer(id),         eligible: (c) => c.State === "running", danger: false, past: "Stopped" },
+    restart: { run: (id) => dockerApi.restartContainer(id),      eligible: (c) => c.State === "running", danger: false, past: "Restarted" },
+    remove:  { run: (id) => dockerApi.removeContainer(id, true), eligible: () => true,                   danger: true,  past: "Removed" },
+  };
+
+  const titleCase = (s: string) => s[0].toUpperCase() + s.slice(1);
+
+  // Docker handles concurrency well, but firing every request at once can
+  // saturate the socket on a large selection, so the work goes out in batches.
+  const BATCH_CHUNK = 10;
+
+  async function handleBatch(action: BatchAction) {
+    const spec = BATCH_SPEC[action];
+    const targets = filtered.filter((c) => selected.has(c.Id) && spec.eligible(c));
+    if (targets.length === 0) return;
     confirm = {
-      title: "Stop Selected", danger: false, confirmLabel: "Stop All",
-      message: `Stop ${running.length} container(s)?\n\n${running.map(c => c.Names).join(", ")}`,
+      title: `${titleCase(action)} Selected`,
+      danger: spec.danger,
+      confirmLabel: spec.danger ? `Remove ${targets.length}` : `${titleCase(action)} All`,
+      message:
+        `${titleCase(action)} ${targets.length} container(s)?\n\n` +
+        targets.map((c) => c.Names).join(", ") +
+        (spec.danger ? "\n\nThis cannot be undone." : ""),
       onConfirm: async () => {
         confirm = null; batchLoading = true; setEventCooldown();
-        let ok = 0;
-        for (const c of running) {
-          try { await dockerApi.stopContainer(c.Id); ok++; } catch (e) { setRowError(c.Id, e); }
+        // Concurrent, not sequential: 20 containers at ~1s each was 20 seconds
+        // of frozen UI, and one failure used to block the other 19.
+        const results: PromiseSettledResult<unknown>[] = [];
+        for (let i = 0; i < targets.length; i += BATCH_CHUNK) {
+          results.push(...await Promise.allSettled(
+            targets.slice(i, i + BATCH_CHUNK).map((c) => spec.run(c.Id))
+          ));
         }
-        globalToast("success", `Stopped ${ok} container(s)`);
+        let ok = 0;
+        results.forEach((r, i) => {
+          if (r.status === "fulfilled") ok++;
+          else setRowError(targets[i].Id, r.reason);
+        });
+        const failed = targets.length - ok;
+        if (ok > 0) globalToast("success", `${spec.past} ${ok} container(s)`);
+        if (failed > 0) globalToast("error", `${failed} container(s) failed — see the row for details`);
         selected = new Set();
         batchLoading = false;
         refreshContainers();
@@ -216,25 +254,11 @@
     };
   }
 
-  async function handleBatchRemove() {
-    const targets = filtered.filter(c => selected.has(c.Id));
-    if (targets.length === 0) return;
-    confirm = {
-      title: "Remove Selected", danger: true, confirmLabel: `Remove ${targets.length}`,
-      message: `Remove ${targets.length} container(s)?\n\n${targets.map(c => c.Names).join(", ")}\n\nThis cannot be undone.`,
-      onConfirm: async () => {
-        confirm = null; batchLoading = true; setEventCooldown();
-        let ok = 0;
-        for (const c of targets) {
-          try { await dockerApi.removeContainer(c.Id, true); ok++; } catch (e) { setRowError(c.Id, e); }
-        }
-        globalToast("success", `Removed ${ok} container(s)`);
-        selected = new Set();
-        batchLoading = false;
-        refreshContainers();
-      },
-      onCancel: () => { confirm = null; }
-    };
+  /** Quick-select by state, so a big list does not need 30 clicks. */
+  function selectByState(state: "running" | "stopped" | "all") {
+    if (state === "all") { selected = new Set(filtered.map((c) => c.Id)); return; }
+    const want = state === "running";
+    selected = new Set(filtered.filter((c) => (c.State === "running") === want).map((c) => c.Id));
   }
 
   let filtered = $derived(dockerState.containers.filter(c => {
@@ -432,10 +456,10 @@
   // Polling for detail view
   $effect(() => {
     if (!selectedContainer) return;
-    let int: ReturnType<typeof setInterval> | undefined;
-    if (detailTab === "logs") int = setInterval(fetchLogs, 3000);
-    if (detailTab === "stats") int = setInterval(fetchStats, 5000);
-    return () => clearInterval(int);
+    let stop: (() => void) | undefined;
+    if (detailTab === "logs") stop = setVisibleInterval(fetchLogs, 3000);
+    if (detailTab === "stats") stop = setVisibleInterval(fetchStats, 5000);
+    return () => stop?.();
   });
 
   async function handleExec() {
@@ -507,9 +531,13 @@
   {#if selected.size > 0}
     <div style="display: flex; align-items: center; gap: 12px; padding: 10px 16px; margin-bottom: 12px; background: rgba(88,166,255,0.08); border: 1px solid rgba(88,166,255,0.25); border-radius: var(--radius-md);">
       <span style="font-size: var(--text-sm); color: var(--accent-blue); font-weight: 600;">{selected.size} {t('containers.selected', { default: 'selected' })}</span>
+      <button class="btn btn-ghost" style="font-size: var(--text-xs);" onclick={() => selectByState('running')}>{t('containers.select_running', { default: 'All running' })}</button>
+      <button class="btn btn-ghost" style="font-size: var(--text-xs);" onclick={() => selectByState('stopped')}>{t('containers.select_stopped', { default: 'All stopped' })}</button>
       <div style="flex: 1;"></div>
-      <button class="btn btn-ghost" style="font-size: var(--text-xs); color: var(--accent-yellow);" onclick={handleBatchStop} disabled={batchLoading}>{t('containers.stop_selected', { default: 'Stop Selected' })}</button>
-      <button class="btn btn-ghost" style="font-size: var(--text-xs); color: var(--accent-red);" onclick={handleBatchRemove} disabled={batchLoading}>{batchLoading ? t('containers.removing', { default: 'Removing...' }) : t('containers.remove_selected', { default: 'Remove Selected' })}</button>
+      <button class="btn btn-ghost" style="font-size: var(--text-xs); color: var(--accent-green);" onclick={() => handleBatch('start')} disabled={batchLoading}>{t('containers.start_selected', { default: 'Start Selected' })}</button>
+      <button class="btn btn-ghost" style="font-size: var(--text-xs); color: var(--accent-yellow);" onclick={() => handleBatch('stop')} disabled={batchLoading}>{t('containers.stop_selected', { default: 'Stop Selected' })}</button>
+      <button class="btn btn-ghost" style="font-size: var(--text-xs);" onclick={() => handleBatch('restart')} disabled={batchLoading}>{t('containers.restart_selected', { default: 'Restart Selected' })}</button>
+      <button class="btn btn-ghost" style="font-size: var(--text-xs); color: var(--accent-red);" onclick={() => handleBatch('remove')} disabled={batchLoading}>{batchLoading ? t('containers.removing', { default: 'Removing...' }) : t('containers.remove_selected', { default: 'Remove Selected' })}</button>
       <button class="btn btn-ghost" style="font-size: var(--text-xs);" onclick={() => selected = new Set()}>{t('containers.clear', { default: 'Clear' })}</button>
     </div>
   {/if}
