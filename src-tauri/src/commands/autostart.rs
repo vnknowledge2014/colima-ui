@@ -194,7 +194,7 @@ pub fn configure_autostart_blocking(enable: bool) -> Result<String, String> {
 /// be on while the agent is not registered.
 pub fn autostart_status_blocking() -> AutostartStatus {
     AutostartStatus {
-        enabled: unit_path().map(|p| p.exists()).unwrap_or(false),
+        enabled: unit_path().is_ok_and(|p| p.exists()),
     }
 }
 

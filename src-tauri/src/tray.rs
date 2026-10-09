@@ -281,8 +281,7 @@ fn build_menu(
     // they do not have.
     let can_act = crate::commands::self_heal::is_enabled()
         && crate::commands::self_heal::list_rules()
-            .map(|rules| rules.iter().any(|r| r.enabled && r.mode == crate::commands::self_heal::HealMode::Auto))
-            .unwrap_or(false);
+            .is_ok_and(|rules| rules.iter().any(|r| r.enabled && r.mode == crate::commands::self_heal::HealMode::Auto));
     if can_act {
         items.push(Box::new(MenuItem::with_id(
             app,

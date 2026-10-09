@@ -507,8 +507,7 @@ fn strip_images(md: &str) -> String {
 fn strip_links(md: &str) -> String {
     let mut result = md.to_string();
     // Replace [text](url) → text
-    loop {
-        let Some(bracket_start) = result.find('[') else { break };
+    while let Some(bracket_start) = result.find('[') {
         // Make sure it's not an image ![
         if bracket_start > 0 && result.as_bytes()[bracket_start - 1] == b'!' {
             break;

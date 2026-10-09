@@ -185,7 +185,7 @@ pub fn feed(filter: &ActivityFilter) -> Feed {
         items.retain(|i| i.ts <= to);
     }
 
-    items.sort_by(|a, b| b.ts.cmp(&a.ts));
+    items.sort_by_key(|a| std::cmp::Reverse(a.ts));
     let mut items = dedupe(items);
     items.truncate(limit as usize);
 

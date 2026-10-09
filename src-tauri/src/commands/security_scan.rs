@@ -361,8 +361,7 @@ fn emit(event: &str, payload: serde_json::Value) {
 fn now_ms() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis() as u64)
-        .unwrap_or(0)
+        .map_or(0, |d| d.as_millis() as u64)
 }
 
 /// The image's content id, via the container runtime.
@@ -442,8 +441,7 @@ fn update_db(scan_id: &str) -> bool {
         OutputSink::ByLine(tx),
         |_| {},
     )
-    .map(|outcome| outcome.cancelled)
-    .unwrap_or(false);
+    .is_ok_and(|outcome| outcome.cancelled);
 
     // A newer database can turn a clean image into a vulnerable one without the
     // image changing at all, so every cached result is now answering a question

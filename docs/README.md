@@ -12,3 +12,4 @@ Detailed technical documentation for the ColimaUI project.
 | [API Reference](api.md) | HTTP REST API endpoints (port 11420) |
 | [AI System](ai.md) | AI diagnostic agent, knowledge bank, command sandbox |
 | [Topology design philosophy](topology-design-philosophy.md) | Design rules for the topology graph page — read before adding node kinds or node actions |
+| [Telemetry](telemetry.md) | What leaves the machine, when, and what it discloses |

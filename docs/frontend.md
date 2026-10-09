@@ -12,12 +12,12 @@ src/
 ├── vite-env.d.ts               # Vite type declarations
 ├── setupTests.ts               # Test setup (jsdom)
 ├── store.svelte.ts             # Global reactive state
-├── pages/                      # 18 page components
-├── components/                 # 8 shared components
+├── pages/                      # 19 page components
+├── components/                 # 43 components (incl. activity/, security/, topology/, notifications/, settings/, transfer/, diagnostics/)
 ├── store/                      # Domain-specific state modules
 ├── lib/                        # Utilities, API layer, AI bus
 ├── styles/                     # CSS design system
-└── locales/                    # i18n translations (en, vi, zh)
+└── locales/                    # i18n translations (en, ja, vi, zh)
 ```
 
 ## Pages
@@ -83,7 +83,8 @@ let images = $state<DockerImage[]>([]);
 The dual-mode API layer automatically routes calls based on runtime:
 
 ```typescript
-const IS_TAURI = '__TAURI_IPC__' in window;
+import { isRunningInTauri } from './env';   // never inline the check
+const IS_TAURI = isRunningInTauri();
 
 // Desktop: invoke Tauri command
 // Browser: HTTP fetch to localhost:11420
