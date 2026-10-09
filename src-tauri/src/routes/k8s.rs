@@ -550,7 +550,7 @@ pub async fn api_k8s_exec(Json(body): Json<K8sExecBody>) -> (StatusCode, Json<Ap
             let mut launched = false;
             for term in &terminals {
                 if std::process::Command::new(term)
-                    .args(&["--", "sh", "-c", &cmd_str])
+                    .args(["--", "sh", "-c", &cmd_str])
                     .spawn()
                     .is_ok()
                 {
