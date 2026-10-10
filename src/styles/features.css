@@ -1,0 +1,610 @@
+/* ===== Row Micro-animations ===== */
+
+.vtable-row {
+  animation: rowFadeIn 200ms ease-out;
+}
+
+@keyframes rowFadeIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* ===== Log Viewer ===== */
+
+.log-viewer {
+  background: var(--bg-app);
+  border: 1px solid var(--border-primary);
+  border-radius: var(--radius-md);
+  padding: 12px;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  line-height: 1.7;
+  overflow-y: auto;
+  max-height: 500px;
+  white-space: pre-wrap;
+  word-break: break-all;
+  color: var(--text-secondary);
+}
+
+.log-line {
+  padding: 1px 4px;
+  border-radius: 2px;
+}
+
+.log-line:hover {
+  background: var(--bg-card-hover);
+}
+
+.log-error {
+  color: var(--accent-red);
+}
+
+.log-warn {
+  color: var(--accent-yellow);
+}
+
+/* ===== Empty State ===== */
+
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 60px 20px;
+  text-align: center;
+  gap: 16px;
+}
+
+.empty-state-icon {
+  width: 64px;
+  height: 64px;
+  border-radius: var(--radius-lg);
+  background: var(--bg-card);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0.5;
+}
+
+.empty-state-title {
+  font-size: var(--text-lg);
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.empty-state-text {
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+  max-width: 400px;
+}
+
+/* ===== Setup Wizard ===== */
+
+.wizard-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background: var(--bg-app);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation: fadeIn 400ms ease;
+}
+
+.wizard-card {
+  width: min(560px, 92vw);
+  background: var(--bg-card);
+  border: 1px solid var(--border-primary);
+  border-radius: 16px;
+  padding: 40px;
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.6);
+  animation: slideUp 400ms ease;
+  max-height: 85vh;
+  overflow-y: auto;
+}
+
+.wizard-logo {
+  width: 72px;
+  height: 72px;
+  border-radius: 18px;
+  background: linear-gradient(135deg, var(--accent-blue), var(--accent-purple));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 32px;
+  font-weight: 800;
+  color: white;
+  margin: 0 auto 24px;
+  animation: pulse-glow 2s ease-in-out infinite;
+}
+
+@keyframes pulse-glow {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(88, 166, 255, 0.4); }
+  50% { box-shadow: 0 0 24px 8px rgba(88, 166, 255, 0.15); }
+}
+
+.wizard-title {
+  text-align: center;
+  font-size: var(--text-2xl);
+  font-weight: 700;
+  margin-bottom: 8px;
+  background: linear-gradient(135deg, var(--accent-blue), var(--accent-purple));
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.wizard-subtitle {
+  text-align: center;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  margin-bottom: 32px;
+  line-height: 1.6;
+}
+
+.wizard-progress {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+  margin-bottom: 32px;
+}
+
+.wizard-progress-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--border-primary);
+  transition: all var(--transition-normal);
+}
+
+.wizard-progress-dot.active {
+  background: var(--accent-blue);
+  width: 24px;
+  border-radius: 4px;
+}
+
+.wizard-progress-dot.done {
+  background: var(--accent-green);
+}
+
+.dep-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  margin-bottom: 24px;
+}
+
+.dep-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.dep-row:last-child {
+  border-bottom: none;
+}
+
+.dep-info {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.dep-icon {
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius-md);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  flex-shrink: 0;
+}
+
+.dep-icon.installed { background: rgba(63, 185, 80, 0.12); }
+
+.dep-icon.missing { background: rgba(248, 81, 73, 0.12); }
+
+.dep-icon.installing { background: rgba(88, 166, 255, 0.12); }
+
+.dep-name {
+  font-weight: 600;
+  font-size: var(--text-base);
+}
+
+.dep-desc {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  margin-top: 1px;
+}
+
+.dep-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.dep-version {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 160px;
+}
+
+.wizard-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-top: 24px;
+}
+
+.wizard-setup-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+.wizard-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px;
+  background: var(--bg-content);
+  border: 1px solid var(--border-primary);
+  border-radius: var(--radius-lg);
+}
+
+.wizard-option-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.wizard-option-label {
+  font-weight: 600;
+  font-size: var(--text-sm);
+}
+
+.wizard-option-desc {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+
+/* Toggle switch */
+.toggle-switch {
+  position: relative;
+  width: 44px;
+  height: 24px;
+  flex-shrink: 0;
+}
+
+.toggle-switch input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.toggle-slider {
+  position: absolute;
+  cursor: pointer;
+  inset: 0;
+  background: var(--border-primary);
+  border-radius: 12px;
+  transition: var(--transition-fast);
+}
+
+.toggle-slider::before {
+  content: '';
+  position: absolute;
+  height: 18px;
+  width: 18px;
+  left: 3px;
+  bottom: 3px;
+  background: var(--text-primary);
+  border-radius: 50%;
+  transition: var(--transition-fast);
+}
+
+.toggle-switch input:checked + .toggle-slider {
+  background: var(--accent-green);
+}
+
+.toggle-switch input:checked + .toggle-slider::before {
+  transform: translateX(20px);
+}
+
+/* Success animation */
+@keyframes checkmarkDraw {
+  0% { stroke-dashoffset: 30; }
+  100% { stroke-dashoffset: 0; }
+}
+
+.wizard-success-icon {
+  width: 80px;
+  height: 80px;
+  border-radius: 50%;
+  background: rgba(63, 185, 80, 0.12);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0 auto 24px;
+}
+
+.wizard-success-icon svg {
+  stroke-dasharray: 30;
+  animation: checkmarkDraw 600ms ease forwards;
+}
+
+/* ===== Getting Started Tour ===== */
+
+.tour-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 900;
+  pointer-events: none;
+}
+
+.tour-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.7);
+  z-index: 901;
+  pointer-events: auto;
+  transition: clip-path 300ms ease;
+}
+
+.tour-tooltip {
+  position: fixed;
+  z-index: 902;
+  background: var(--bg-card);
+  border: 1px solid var(--accent-blue);
+  border-radius: var(--radius-lg);
+  padding: 20px;
+  width: 320px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(88, 166, 255, 0.2);
+  pointer-events: auto;
+  animation: slideUp 250ms ease;
+}
+
+.tour-tooltip-title {
+  font-size: var(--text-base);
+  font-weight: 600;
+  margin-bottom: 8px;
+  color: var(--accent-blue);
+}
+
+.tour-tooltip-body {
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  line-height: 1.6;
+  margin-bottom: 16px;
+}
+
+.tour-tooltip-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.tour-dots {
+  display: flex;
+  gap: 6px;
+}
+
+.tour-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--border-primary);
+  transition: all var(--transition-fast);
+}
+
+.tour-dot.active {
+  background: var(--accent-blue);
+  transform: scale(1.3);
+}
+
+.tour-dot.done {
+  background: var(--accent-green);
+}
+
+.tour-tooltip-actions {
+  display: flex;
+  gap: 6px;
+}
+
+/* Tour highlight ring */
+.tour-highlight {
+  position: fixed;
+  z-index: 902;
+  border: 2px solid var(--accent-blue);
+  border-radius: var(--radius-md);
+  pointer-events: none;
+  box-shadow: 0 0 0 4px rgba(88, 166, 255, 0.15);
+  transition: all 300ms ease;
+  animation: tour-ring-pulse 2s ease-in-out infinite;
+}
+
+@keyframes tour-ring-pulse {
+  0%, 100% { box-shadow: 0 0 0 4px rgba(88, 166, 255, 0.15); }
+  50% { box-shadow: 0 0 0 8px rgba(88, 166, 255, 0.08); }
+}
+
+/* These carry the declarations that used to be split across two generations of
+   `.ai-msg` rules in this file plus a third copy in index.css. Only the union
+   was ever live, so the merge below is what the app actually rendered. */
+
+/* `.ai-msg` is the row wrapper, not the bubble.
+
+   It used to be the bubble, and the padding/max-width/radius left over from
+   that design were still landing here — on top of the padding the bubble sets
+   for itself, because AiChatPanel's scoped rule only overrides properties it
+   actually declares. That doubled the inset on every assistant message.
+
+   Only two things still belong on the wrapper. `word-break` has to be here so
+   an unbroken token (a URL, a container id) cannot widen the column, and the
+   animation stays because `@keyframes fadeInSlide` lives in overlays.css —
+   moved into the component, Svelte would scope the name and the reference
+   would dangle.
+
+   The bubbles themselves — `.ai-msg-user`, `.ai-msg-assistant`,
+   `.ai-msg-system` — are owned by AiChatPanel.svelte. Their copies here were
+   duplicates and are gone. What remains below deliberately does not move:
+   those rules target markdown injected with `{@html}`, which a scoped style
+   cannot reach. */
+.ai-msg {
+  word-break: break-word;
+  animation: fadeInSlide 0.2s ease-out;
+}
+
+.ai-msg pre {
+  background: var(--bg-app);
+  border: 1px solid var(--border-primary);
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+  margin: 6px 0;
+  overflow-x: auto;
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  line-height: 1.5;
+  position: relative;
+}
+
+.ai-msg code {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+}
+
+.ai-msg p + p { margin-top: 6px; }
+
+/* Like/Dislike Buttons */
+.ai-msg-feedback {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 6px;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.ai-msg:hover .ai-msg-feedback { opacity: 1; }
+
+.ai-msg-feedback button {
+  background: none;
+  border: 1px solid var(--border-primary);
+  border-radius: var(--radius-sm);
+  padding: 3px 5px;
+  cursor: pointer;
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  transition: all 0.15s;
+}
+
+.ai-msg-feedback button:hover:not(:disabled) {
+  border-color: var(--accent-blue);
+  color: var(--accent-blue);
+}
+
+.ai-msg-feedback button:disabled { cursor: default; }
+
+/* ===== AI Command Center Panel ===== */
+
+/* `.ai-panel`, its header, resizer, actions, messages and empty state used to
+   be duplicated here. AiChatPanel.svelte owns them in its own <style>, and
+   Svelte scopes those, so the copies here only ever won where the component
+   declared nothing — which is how `.ai-panel-messages` ended up painting
+   --bg-content over the panel's --bg-sidebar and split the panel into two
+   tones. Two of the declarations here also referenced --bg-primary and
+   --bg-hover, which resolved to nothing until tokens.css gained aliases for
+   both.
+
+   What stays below is deliberate: it targets markdown HTML injected at
+   runtime, which a scoped component style cannot reach. */
+
+/* An earlier generation of `.ai-msg`, `.ai-msg-user` and `.ai-msg-assistant`
+   sat here. index.css carried its own copies further down the cascade, so
+   these never actually applied; the live definitions are the ones above. */
+
+.ai-msg-assistant p {
+  margin: 0 0 8px 0;
+}
+
+.ai-msg-assistant p:last-child {
+  margin: 0;
+}
+
+.ai-think-block {
+  background: rgba(0, 0, 0, 0.2);
+  border-left: 2px solid var(--accent-blue);
+  border-radius: 4px;
+  margin: 8px 0;
+  overflow: hidden;
+}
+
+.ai-think-header {
+  font-size: 11px;
+  color: var(--text-muted);
+  background: rgba(0, 0, 0, 0.3);
+  padding: 4px 8px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.ai-think-content {
+  font-size: 12px;
+  color: var(--text-secondary);
+  padding: 8px;
+  white-space: pre-wrap;
+  font-style: italic;
+}
+
+/* Rendered markdown (offline help articles, AI chat) */
+.md-h {
+  margin: 18px 0 8px;
+  font-weight: 600;
+  color: var(--text-primary);
+  line-height: 1.4;
+}
+
+.md-h-title {
+  margin-top: 0;
+  font-size: var(--text-lg);
+}
+
+h3.md-h {
+  font-size: var(--text-sm);
+}
+
+h4.md-h {
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+}
+
+.md-link {
+  color: var(--accent-blue);
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.md-link:hover {
+  color: var(--accent-purple);
+}
+
+/* Superseded by the `.ai-msg pre` rule above, for the same reason as the
+   message bubbles. */
+
+.ai-msg pre code {
+  font-family: var(--font-mono);
+  font-size: 12px;
+}

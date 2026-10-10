@@ -19,7 +19,8 @@ pub struct LimaInstance {
 
 /// List Lima instances
 #[tauri::command]
-pub async fn lima_list() -> Result<Vec<LimaInstance>, String> {
+pub async fn lima_list() -> Result<Vec<LimaInstance>, crate::error::ColimaError> {
+    async move {
     let output = limactl_cmd()
         .args(["list", "--json"])
         .output()
@@ -59,6 +60,8 @@ pub async fn lima_list() -> Result<Vec<LimaInstance>, String> {
         .collect();
 
     Ok(instances)
+    }
+    .await.map_err(|e: String| crate::error::ColimaError::from(e))
 }
 
 fn format_bytes_lima(bytes: i64) -> String {
@@ -73,7 +76,11 @@ fn format_bytes_lima(bytes: i64) -> String {
 
 /// Start a Lima instance
 #[tauri::command]
-pub async fn lima_start(name: String) -> Result<String, String> {
+pub async fn lima_start(name: String) -> Result<String, crate::error::ColimaError> {
+    if !crate::validation::is_valid_resource_name(&name) {
+        return Err(crate::error::ColimaError::validation(format!("Invalid name: {:?}", name)));
+    }
+    async move {
     let output = limactl_cmd()
         .args(["start", &name])
         .output()
@@ -87,11 +94,17 @@ pub async fn lima_start(name: String) -> Result<String, String> {
     }
 
     Ok(format!("Lima instance '{}' started", name))
+    }
+    .await.map_err(|e: String| crate::error::ColimaError::from(e))
 }
 
 /// Stop a Lima instance
 #[tauri::command]
-pub async fn lima_stop(name: String) -> Result<String, String> {
+pub async fn lima_stop(name: String) -> Result<String, crate::error::ColimaError> {
+    if !crate::validation::is_valid_resource_name(&name) {
+        return Err(crate::error::ColimaError::validation(format!("Invalid name: {:?}", name)));
+    }
+    async move {
     let output = limactl_cmd()
         .args(["stop", &name])
         .output()
@@ -105,11 +118,17 @@ pub async fn lima_stop(name: String) -> Result<String, String> {
     }
 
     Ok(format!("Lima instance '{}' stopped", name))
+    }
+    .await.map_err(|e: String| crate::error::ColimaError::from(e))
 }
 
 /// Delete a Lima instance
 #[tauri::command]
-pub async fn lima_delete(name: String, force: bool) -> Result<String, String> {
+pub async fn lima_delete(name: String, force: bool) -> Result<String, crate::error::ColimaError> {
+    if !crate::validation::is_valid_resource_name(&name) {
+        return Err(crate::error::ColimaError::validation(format!("Invalid name: {:?}", name)));
+    }
+    async move {
     let mut args = vec!["delete"];
     if force {
         args.push("--force");
@@ -129,11 +148,18 @@ pub async fn lima_delete(name: String, force: bool) -> Result<String, String> {
     }
 
     Ok(format!("Lima instance '{}' deleted", name))
+    }
+    .await.map_err(|e: String| crate::error::ColimaError::from(e))
 }
 
 /// Get Lima instance info (shell)
 #[tauri::command]
-pub async fn lima_info(name: String) -> Result<String, String> {
+pub async fn lima_info(name: String) -> Result<String, crate::error::ColimaError> {
+    // No validation guard here on purpose: `limactl info` is global and `name`
+    // never reaches argv. Validating it would reject callers that pass an empty
+    // name before a VM is selected.
+    let _ = &name;
+    async move {
     let output = limactl_cmd()
         .args(["info"])
         .output()
@@ -148,11 +174,25 @@ pub async fn lima_info(name: String) -> Result<String, String> {
 
     let _ = name; // info is global, name kept for API consistency
     Ok(String::from_utf8_lossy(&output.stdout).to_string())
+    }
+    .await.map_err(|e: String| crate::error::ColimaError::from(e))
 }
 
 /// Execute a command inside a Lima VM
 #[tauri::command]
-pub async fn lima_shell(name: String, command: String) -> Result<String, String> {
+pub async fn lima_shell(name: String, command: String) -> Result<String, crate::error::ColimaError> {
+    if !crate::validation::is_valid_resource_name(&name) {
+        return Err(crate::error::ColimaError::validation(format!("Invalid name: {:?}", name)));
+    }
+    async move {
+    // Security validation (applies to both Tauri IPC and HTTP routes)
+    if !crate::validation::is_valid_k8s_name(&name) {
+        return Err("Invalid VM name".to_string());
+    }
+    if crate::validation::contains_shell_injection(&command) {
+        return Err("Command contains forbidden characters (shell injection blocked)".to_string());
+    }
+
     let output = limactl_cmd()
         .args(["shell", &name, "--", "sh", "-c", &command])
         .output()
@@ -166,15 +206,80 @@ pub async fn lima_shell(name: String, command: String) -> Result<String, String>
     }
 
     Ok(format!("{}{}", stdout, stderr))
+    }
+    .await.map_err(|e: String| crate::error::ColimaError::from(e))
 }
 
 /// List available Lima templates
 #[tauri::command]
-pub async fn lima_templates() -> Result<String, String> {
+pub async fn lima_templates() -> Result<String, crate::error::ColimaError> {
+    async move {
     let output = limactl_cmd()
         .args(["start", "--list-templates"])
         .output()
         .map_err(|e| format!("Failed to list templates: {}", e))?;
 
     Ok(String::from_utf8_lossy(&output.stdout).to_string())
+    }
+    .await.map_err(|e: String| crate::error::ColimaError::from(e))
+}
+
+/// Create a new Lima VM and auto-start it
+///
+/// The `#[tauri::command]` attribute was missing, so this was reachable over
+/// HTTP but not over IPC — creating a VM failed in the desktop app only.
+#[tauri::command]
+pub async fn lima_create(
+    name: String,
+    template: String,
+    cpus: u32,
+    memory: u32,
+    disk: u32,
+) -> Result<String, String> {
+    if !crate::validation::is_valid_resource_name(&name) {
+        return Err(format!("Invalid name: {:?}", name));
+    }
+    let name_start = name.clone();
+    tokio::task::spawn_blocking(move || {
+        let mut args = vec![
+            "create".to_string(),
+            format!("--name={}", name),
+            format!("--cpus={}", cpus),
+            format!("--memory={}", memory),
+            format!("--disk={}", disk),
+            "--tty=false".to_string(),
+        ];
+        if !template.is_empty() {
+            args.push(format!("template:{}", template));
+        }
+        let arg_refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
+        let output = limactl_cmd()
+            .args(&arg_refs)
+            .output()
+            .map_err(|e| format!("Failed to create Lima VM: {}", e))?;
+
+        if !output.status.success() {
+            return Err(format!(
+                "limactl create failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            ));
+        }
+
+        // Auto-start after create
+        let start_output = limactl_cmd()
+            .args(["start", &name_start])
+            .output()
+            .map_err(|e| format!("Failed to start Lima VM: {}", e))?;
+
+        if !start_output.status.success() {
+            return Err(format!(
+                "limactl start failed: {}",
+                String::from_utf8_lossy(&start_output.stderr)
+            ));
+        }
+
+        Ok(format!("VM '{}' created and started", name_start))
+    })
+    .await
+    .map_err(|e| format!("Task join error: {}", e))?
 }

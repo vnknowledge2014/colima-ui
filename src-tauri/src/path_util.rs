@@ -46,7 +46,32 @@ const USER_PATHS: &[&str] = &[
 /// The computed PATH, stored for use by `apply_path_to_cmd()` in late-spawned contexts.
 static COMPUTED_PATH: std::sync::OnceLock<String> = std::sync::OnceLock::new();
 
+/// `~/.colima-ui` — where this app keeps everything it writes.
+///
+/// Extracted when a third caller appeared (crash reports). Two ad-hoc copies of
+/// a path is a coincidence; three is a convention that should live in one place,
+/// so a future move does not leave one directory behind.
+///
+/// An empty `HOME` counts as missing, not as a valid prefix. `env::var` returns
+/// `Ok("")` for a variable that is set but blank, and
+/// `PathBuf::from("").join(".colima-ui")` is the *relative* path `.colima-ui` —
+/// which would put the knowledge bank and the crash reports in whatever
+/// directory the app happened to be launched from, silently, a different one
+/// each time.
+///
+/// The `/tmp` fallback matches what the two original callers did. A process with
+/// no `HOME` is not a normal desktop session, and losing the knowledge bank
+/// there is better than refusing to start.
+pub fn app_data_dir() -> PathBuf {
+    let home = env::var("HOME")
+        .ok()
+        .filter(|h| !h.is_empty())
+        .unwrap_or_else(|| "/tmp".to_string());
+    PathBuf::from(home).join(".colima-ui")
+}
+
 /// Ensure common binary paths are in the PATH environment variable.
+///
 /// Call this once at app startup **before any threads are spawned** to fix
 /// the PATH for all subsequent Command calls.
 ///
@@ -60,10 +85,8 @@ pub fn fix_path_env() {
 
     for extra in EXTRA_PATHS {
         let extra_str = extra.to_string();
-        if !paths.contains(&extra_str) {
-            if PathBuf::from(extra).exists() {
-                paths.push(extra_str);
-            }
+        if !paths.contains(&extra_str) && PathBuf::from(extra).exists() {
+            paths.push(extra_str);
         }
     }
 
@@ -111,6 +134,18 @@ pub fn fix_path_env() {
     // Store for per-Command application in late-spawned threads
     let _ = COMPUTED_PATH.set(new_path.clone());
 
+    // Fix #17: Guard against accidental use from multi-threaded context.
+    // This function MUST be called exactly once from main(), before any threads exist.
+    #[cfg(debug_assertions)]
+    {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        static CALLED: AtomicBool = AtomicBool::new(false);
+        assert!(
+            !CALLED.swap(true, Ordering::SeqCst),
+            "fix_path_env() must only be called once, from main() before the async runtime starts"
+        );
+    }
+
     // SAFETY: Called from main() before any threads are spawned (before tauri::Builder).
     // No concurrent readers/writers of the environment exist at this point.
     unsafe { env::set_var("PATH", &new_path) };
@@ -157,11 +192,10 @@ pub fn resolve_binary(name: &str) -> String {
 /// 1. DOCKER_HOST env var is NOT inherited from the user's shell
 /// 2. Colima doesn't create /var/run/docker.sock (no root access)
 /// 3. Bollard's connect_with_defaults() only checks /var/run/docker.sock
-pub fn detect_docker_host() -> Option<String> {
-    // First check if DOCKER_HOST is already set (e.g. from shell)
+pub fn detect_docker_host() -> Option<(String, String)> {
     if let Ok(host) = std::env::var("DOCKER_HOST") {
         if !host.is_empty() {
-            return Some(host);
+            return Some((host, "default".to_string()));
         }
     }
 
@@ -180,7 +214,6 @@ pub fn detect_docker_host() -> Option<String> {
             if name.starts_with('_') || name.starts_with('.') || !entry.path().is_dir() {
                 continue;
             }
-
             // Map profile to lima instance name
             let lima_name = if name == "default" {
                 "colima".to_string()
@@ -193,16 +226,18 @@ pub fn detect_docker_host() -> Option<String> {
                 // Found running instance — return its docker socket
                 let sock = colima_path.join(&name).join("docker.sock");
                 if sock.exists() {
-                    return Some(format!("unix://{}", sock.display()));
+                    return Some((format!("unix://{}", sock.display()), name.clone()));
                 }
             }
         }
     }
 
-    // Fallback: check the colima-level docker.sock symlink
+    // Fallback: the colima-level docker.sock symlink, which Colima repoints at
+    // whichever profile started last. Reached when the scan above found nothing
+    // running.
     let fallback = colima_path.join("docker.sock");
     if fallback.exists() {
-        return Some(format!("unix://{}", fallback.display()));
+        return Some((format!("unix://{}", fallback.display()), "default".to_string()));
     }
 
     None

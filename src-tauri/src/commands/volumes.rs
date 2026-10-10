@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
-use std::process::Command;
+
+use crate::commands::activity;
+use crate::commands::runtime;
 
 /// Docker volume info
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -33,39 +35,12 @@ pub struct VolumeInspect {
     pub created_at: String,
 }
 
-fn docker_cmd() -> Command {
-    let resolved = crate::path_util::resolve_binary("docker");
-    let mut cmd = Command::new(&resolved);
-    crate::path_util::apply_path_to_cmd(&mut cmd);
-    if let Some(host) = crate::path_util::detect_docker_host() {
-        cmd.env("DOCKER_HOST", host);
-    }
-    cmd
-}
-
-/// Run a Docker CLI command on a blocking thread pool with a 10s timeout.
-async fn docker_output(args: Vec<String>) -> Result<std::process::Output, String> {
-    let result = tokio::time::timeout(
-        std::time::Duration::from_secs(10),
-        tokio::task::spawn_blocking(move || {
-            docker_cmd()
-                .args(args.iter().map(|s| s.as_str()).collect::<Vec<&str>>())
-                .output()
-                .map_err(|e| format!("Failed to run docker command: {}", e))
-        }),
-    )
-    .await;
-
-    match result {
-        Ok(join_result) => join_result.map_err(|e| format!("Task join error: {}", e))?,
-        Err(_) => Err("Docker command timed out (daemon may be unresponsive)".to_string()),
-    }
-}
 
 /// List all Docker volumes
 #[tauri::command]
-pub async fn list_volumes() -> Result<Vec<DockerVolume>, String> {
-    let output = docker_output(vec!["volume".into(), "ls".into(), "--format".into(), "json".into()]).await?;
+pub async fn list_volumes() -> Result<Vec<DockerVolume>, crate::error::ColimaError> {
+    async move {
+    let output = runtime::run(vec!["volume".into(), "ls".into(), "--format".into(), "json".into()], runtime::DEFAULT_TIMEOUT).await?;
 
     if !output.status.success() {
         return Err(format!(
@@ -86,11 +61,17 @@ pub async fn list_volumes() -> Result<Vec<DockerVolume>, String> {
         .collect();
 
     Ok(volumes)
+    }
+    .await.map_err(|e: String| crate::error::ColimaError::from(e))
 }
 
 /// Create a Docker volume
 #[tauri::command]
-pub async fn create_volume(name: String, driver: String) -> Result<String, String> {
+pub async fn create_volume(name: String, driver: String) -> Result<String, crate::error::ColimaError> {
+    if !crate::validation::is_valid_resource_name(&name) {
+        return Err(crate::error::ColimaError::validation(format!("Invalid name: {:?}", name)));
+    }
+    async move {
     let mut args = vec!["volume".to_string(), "create".to_string()];
 
     if !driver.is_empty() && driver != "local" {
@@ -99,7 +80,7 @@ pub async fn create_volume(name: String, driver: String) -> Result<String, Strin
     }
     args.push(name.clone());
 
-    let output = docker_output(args).await?;
+    let output = runtime::run(args, runtime::DEFAULT_TIMEOUT).await?;
 
     if !output.status.success() {
         return Err(format!(
@@ -109,18 +90,26 @@ pub async fn create_volume(name: String, driver: String) -> Result<String, Strin
     }
 
     Ok(format!("Volume '{}' created", name))
+    }
+    .await.map_err(|e: String| crate::error::ColimaError::from(e))
 }
 
 /// Remove a Docker volume
 #[tauri::command]
-pub async fn remove_volume(name: String, force: bool) -> Result<String, String> {
+pub async fn remove_volume(name: String, force: bool) -> Result<String, crate::error::ColimaError> {
+    if !crate::validation::is_valid_resource_name(&name) {
+        return Err(crate::error::ColimaError::validation(format!("Invalid name: {:?}", name)));
+    }
+    // The block below takes ownership, so what the record needs is kept here.
+    let logged_name = name.clone();
+    let result = async move {
     let mut args = vec!["volume".to_string(), "rm".to_string()];
     if force {
         args.push("-f".to_string());
     }
     args.push(name.clone());
 
-    let output = docker_output(args).await?;
+    let output = runtime::run(args, runtime::DEFAULT_TIMEOUT).await?;
 
     if !output.status.success() {
         return Err(format!(
@@ -130,12 +119,22 @@ pub async fn remove_volume(name: String, force: bool) -> Result<String, String> 
     }
 
     Ok(format!("Volume '{}' removed", name))
+    }
+    .await;
+
+    crate::commands::activity::record(
+        activity::ActivityEntry::new(activity::ActivityKind::Destructive, "remove", "volume", &logged_name)
+            .outcome_of(&result),
+    );
+
+    result.map_err(|e: String| crate::error::ColimaError::from(e))
 }
 
 /// Prune unused Docker volumes
 #[tauri::command]
-pub async fn prune_volumes() -> Result<String, String> {
-    let output = docker_output(vec!["volume".into(), "prune".into(), "-f".into()]).await?;
+pub async fn prune_volumes() -> Result<String, crate::error::ColimaError> {
+    let result = async move {
+    let output = runtime::run(vec!["volume".into(), "prune".into(), "-f".into()], runtime::DEFAULT_TIMEOUT).await?;
 
     if !output.status.success() {
         return Err(format!(
@@ -145,12 +144,26 @@ pub async fn prune_volumes() -> Result<String, String> {
     }
 
     Ok(String::from_utf8_lossy(&output.stdout).to_string())
+    }
+    .await;
+
+    crate::commands::activity::record(
+        activity::ActivityEntry::new(activity::ActivityKind::Destructive, "prune", "volume", "")
+            .detail(result.as_deref().map(activity::prune_summary).unwrap_or_default())
+            .outcome_of(&result),
+    );
+
+    result.map_err(|e: String| crate::error::ColimaError::from(e))
 }
 
 /// Inspect a Docker volume (raw JSON)
 #[tauri::command]
-pub async fn inspect_volume(name: String) -> Result<String, String> {
-    let output = docker_output(vec!["volume".into(), "inspect".into(), name]).await?;
+pub async fn inspect_volume(name: String) -> Result<String, crate::error::ColimaError> {
+    if !crate::validation::is_valid_resource_name(&name) {
+        return Err(crate::error::ColimaError::validation(format!("Invalid name: {:?}", name)));
+    }
+    async move {
+    let output = runtime::run(vec!["volume".into(), "inspect".into(), name], runtime::DEFAULT_TIMEOUT).await?;
 
     if !output.status.success() {
         return Err(format!(
@@ -160,4 +173,6 @@ pub async fn inspect_volume(name: String) -> Result<String, String> {
     }
 
     Ok(String::from_utf8_lossy(&output.stdout).to_string())
+    }
+    .await.map_err(|e: String| crate::error::ColimaError::from(e))
 }

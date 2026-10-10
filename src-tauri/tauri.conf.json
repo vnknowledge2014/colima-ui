@@ -15,19 +15,48 @@
         "title": "ColimaUI",
         "titleBarStyle": "Overlay",
         "hiddenTitle": true,
+        "resizable": true,
+        "maximizable": true,
+        "minimizable": true,
+        "fullscreen": false,
         "width": 1200,
         "height": 800,
         "minWidth": 900,
-        "minHeight": 600
+        "minHeight": 600,
+        "backgroundColor": [
+          13,
+          17,
+          23,
+          255
+        ]
       }
     ],
     "security": {
-      "csp": null
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: blob:; connect-src 'self' http://127.0.0.1:* http://localhost:* https://*.openai.com https://api.anthropic.com https://generativelanguage.googleapis.com https://*.searx.* ws://127.0.0.1:* ws://localhost:*"
+    }
+  },
+  "plugins": {
+    "deep-link": {
+      "desktop": {
+        "schemes": [
+          "colimaui"
+        ]
+      }
+    },
+    "updater": {
+      "endpoints": [
+        "https://github.com/vnknowledge2014/colima-ui/releases/latest/download/latest.json"
+      ],
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDEwNUJDRDhDMkMxNzhENTgKUldSWWpSY3NqTTFiRU9HdHd5bVhrem1JQW93dHNNUDRWcW5IV0dIK1kxOW9yRzVXTkNtMStEVHUK"
     }
   },
   "bundle": {
     "active": true,
     "targets": "all",
+    "createUpdaterArtifacts": true,
+    "resources": [
+      "resources/**/*"
+    ],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

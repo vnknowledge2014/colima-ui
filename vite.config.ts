@@ -1,18 +1,27 @@
 import { defineConfig } from "vite";
-import react from "@vitejs/plugin-react";
+import { svelte } from "@sveltejs/vite-plugin-svelte";
+import { createRequire } from "node:module";
 
 // @ts-expect-error process is a nodejs global
 const host = process.env.TAURI_DEV_HOST;
 
+// The app's own version, so the frontend can tell whether a version-targeted
+// announcement is meant for this build. Read from `package.json`, which is
+// already the version `tauri.conf.json` ships.
+const { version: appVersion } = createRequire(import.meta.url)("./package.json");
+
 // https://vite.dev/config/
 export default defineConfig(async () => ({
-  plugins: [react()],
+  plugins: [svelte()],
+  define: {
+    __APP_VERSION__: JSON.stringify(appVersion),
+  },
   build: {
     rollupOptions: {
       output: {
         manualChunks(id: string) {
-          if (id.includes('node_modules/react/') || id.includes('node_modules/react-dom/') || id.includes('node_modules/jotai/')) {
-            return 'vendor-react';
+          if (id.includes('node_modules/svelte/')) {
+            return 'vendor-svelte';
           }
           if (id.includes('node_modules/@xterm/')) {
             return 'vendor-xterm';

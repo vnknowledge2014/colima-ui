@@ -1,0 +1,43 @@
+ColimaUI
+Copyright (c) 2026 vnknowledge2014
+
+This product is licensed under the MIT License (see LICENSE).
+
+---
+
+Third-party tools ColimaUI drives but does NOT distribute
+--------------------------------------------------------
+
+ColimaUI detects and runs tools already installed on the user's machine. It
+ships none of their binaries, so no redistribution obligation attaches to them.
+They are named here because the app depends on their behaviour:
+
+- Colima            — MIT License
+- Docker CLI        — Apache License 2.0
+- Lima / limactl    — Apache License 2.0
+- kubectl           — Apache License 2.0
+- Trivy             — Apache License 2.0 (image vulnerability scanning)
+
+Security rule pack
+------------------
+
+The rule descriptions in `src-tauri/resources/rules/` are written by this
+project. They reference identifiers published by external standards, and an
+identifier is a fact rather than a work:
+
+- CIS Docker Benchmark — © Center for Internet Security. Referenced by section
+  number only. The free PDF is licensed CC BY-NC-SA 4.0, which this project does
+  not rely on: no CIS text is reproduced, adapted, or paraphrased here.
+  "CIS Benchmarks" is a trademark of the Center for Internet Security. ColimaUI
+  is not certified by, affiliated with, or endorsed by CIS.
+
+- Docker Bench for Security — Apache License 2.0. Consulted for the numbering of
+  the CIS sections referenced above. No code or text from it is included; should
+  any be added later, its Apache-2.0 attribution belongs in this file.
+
+The OWASP Docker Top 10 (CC BY-NC-SA 4.0), the OWASP Container Security
+Verification Standard (CC BY-SA 4.0) and NIST SP 800-190 informed the shape of
+this work. Nothing currently shipped references or reproduces them; the idea of
+graded verification levels is acknowledged, but ColimaUI's L1/L2/L3 definitions
+are its own. If a future rule cites one of them, this file is where that is
+recorded.

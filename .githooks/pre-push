@@ -1,0 +1,51 @@
+#!/usr/bin/env bash
+#
+# Pre-push quality gate — runs before `git push` completes.
+#
+# Enforces the project policy documented in README → "Lint & Quality Gates":
+#   - ESLint (dead code, unused vars/imports, error-prone patterns)
+#   - TypeScript + Svelte type checks
+#   - CSS token + i18n key gates
+#   - Unit tests (vitest)
+#   - cargo clippy (Rust: dead code, unused imports, pedantic clippy)
+#
+# Escape hatch: SKIP_LINT_GATES=1 git push    (or)   git push --no-verify
+# There is no excuse to use it except emergencies.
+set -euo pipefail
+
+ROOT="$(git rev-parse --show-toplevel)"
+cd "$ROOT"
+
+if [ "${SKIP_LINT_GATES:-0}" = "1" ]; then
+  echo "⚠️  SKIP_LINT_GATES=1 — skipping gates (DO NOT do this lightly)"
+  exit 0
+fi
+
+run() {
+  echo "▶ $*"
+  "$@"
+}
+
+# One runner choice for the whole hook. The Rust gate used to hardcode `pnpm`
+# while the JS gates fell back to npm, so on a machine without pnpm the hook
+# died with "pnpm: command not found" after every JS gate had already passed.
+PM="npm run"
+if command -v pnpm >/dev/null 2>&1 && [ -f pnpm-lock.yaml ]; then
+  PM="pnpm"
+fi
+
+if [ -f package.json ]; then
+  run $PM lint
+  run $PM typecheck
+  run $PM check
+  run $PM check:tokens
+  run $PM check:i18n
+  # The suite is a few seconds and covers the modules that historically broke.
+  run $PM test
+fi
+
+if [ -f src-tauri/Cargo.toml ]; then
+  run $PM lint:rust
+fi
+
+echo "✅ All gates passed — safe to push."

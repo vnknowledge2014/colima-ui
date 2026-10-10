@@ -1,0 +1,60 @@
+{
+  "SchemaVersion": 2,
+  "ArtifactName": "scores:1",
+  "Results": [
+    {
+      "Target": "scores:1 (alpine 3.19)",
+      "Class": "os-pkgs",
+      "Vulnerabilities": [
+        {
+          "VulnerabilityID": "CVE-2024-1000",
+          "PkgName": "a",
+          "InstalledVersion": "1",
+          "Severity": "CRITICAL",
+          "CVSS": {
+            "redhat": {
+              "V3Score": 7.5
+            },
+            "nvd": {
+              "V3Score": 9.8
+            },
+            "ghsa": {
+              "V3Score": 8.2
+            }
+          }
+        },
+        {
+          "VulnerabilityID": "CVE-2024-1001",
+          "PkgName": "b",
+          "InstalledVersion": "2",
+          "Severity": "HIGH",
+          "CVSS": {
+            "redhat": {
+              "V3Score": 7.1
+            },
+            "ghsa": {
+              "V3Score": 8.1
+            },
+            "julia": {
+              "V2Score": 9.9
+            }
+          }
+        },
+        {
+          "VulnerabilityID": "CVE-2013-1002",
+          "PkgName": "c",
+          "InstalledVersion": "3",
+          "Severity": "MEDIUM",
+          "CVSS": {
+            "redhat": {
+              "V2Score": 6.4
+            },
+            "ghsa": {
+              "V2Score": 5.0
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

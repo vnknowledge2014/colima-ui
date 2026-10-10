@@ -75,13 +75,50 @@ fn colima_cmd() -> Command {
 /// List all Colima instances
 /// Uses the fast filesystem reader (shared with API server) for consistency.
 #[tauri::command]
-pub async fn list_instances() -> Result<Vec<ColimaInstance>, String> {
+pub async fn list_instances() -> Result<Vec<ColimaInstance>, crate::error::ColimaError> {
+    async move {
     Ok(crate::instance_reader::list_instances_fast())
+    }
+    .await.map_err(|e: String| crate::error::ColimaError::from(e))
 }
 
-/// Start a Colima instance with given configuration
+/// Does this profile already have a colima.yaml?
+///
+/// The answer decides whether `start_instance` may pass resource flags — see
+/// the doc comment there.
+fn profile_config_exists(profile: &str) -> bool {
+    let profile = if profile.is_empty() { "default" } else { profile };
+    crate::instance_reader::colima_home()
+        .join(profile)
+        .join("colima.yaml")
+        .exists()
+}
+
+/// Start a Colima instance.
+///
+/// # Why the flags are conditional
+///
+/// colima.yaml is the single source of truth for a profile's resources. The
+/// config page in Settings edits it directly, and colima re-reads it on every
+/// `colima start`.
+///
+/// If this function always passed `--cpu`/`--memory`/`--disk`, those flags
+/// would win and colima would write them back into colima.yaml — so a user who
+/// raised CPU in Settings and then pressed Start would watch the change revert,
+/// with nothing on screen explaining why.
+///
+/// So the flags are only passed when there is no colima.yaml to read: the
+/// first launch of a new profile, which is the one moment the wizard's answers
+/// are the only information that exists. After that the file wins.
+/// `start_instance_saved` takes the same position for the tray.
 #[tauri::command]
-pub async fn start_instance(config: StartConfig) -> Result<String, String> {
+pub async fn start_instance(config: StartConfig) -> Result<String, crate::error::ColimaError> {
+    crate::validation::ensure_valid_profile(&config.profile)
+        .map_err(crate::error::ColimaError::validation)?;
+    let is_first_start = !profile_config_exists(&config.profile);
+    // The block below takes ownership, so what the record needs is kept here.
+    let logged_profile = config.profile.clone();
+    let result = async move {
     // `colima start` blocks for 60-120s — run on thread pool to avoid starving tokio
     tokio::task::spawn_blocking(move || {
         let mut args = vec!["start".to_string()];
@@ -91,66 +128,68 @@ pub async fn start_instance(config: StartConfig) -> Result<String, String> {
             args.push(config.profile.clone());
         }
 
-        args.push("--runtime".to_string());
-        args.push(config.runtime);
+        if is_first_start {
+            args.push("--runtime".to_string());
+            args.push(config.runtime);
 
-        args.push("--cpu".to_string());
-        args.push(config.cpus.to_string());
+            args.push("--cpu".to_string());
+            args.push(config.cpus.to_string());
 
-        args.push("--memory".to_string());
-        args.push(config.memory.to_string());
+            args.push("--memory".to_string());
+            args.push(config.memory.to_string());
 
-        args.push("--disk".to_string());
-        args.push(config.disk.to_string());
+            args.push("--disk".to_string());
+            args.push(config.disk.to_string());
 
-        if !config.vm_type.is_empty() {
-            args.push("--vm-type".to_string());
-            args.push(config.vm_type);
-        }
+            if !config.vm_type.is_empty() {
+                args.push("--vm-type".to_string());
+                args.push(config.vm_type);
+            }
 
-        if !config.arch.is_empty() {
-            args.push("--arch".to_string());
-            args.push(config.arch);
-        }
+            if !config.arch.is_empty() {
+                args.push("--arch".to_string());
+                args.push(config.arch);
+            }
 
-        if !config.mount_type.is_empty() {
-            args.push("--mount-type".to_string());
-            args.push(config.mount_type);
-        }
+            if !config.mount_type.is_empty() {
+                args.push("--mount-type".to_string());
+                args.push(config.mount_type);
+            }
 
-        for mount in &config.mounts {
-            args.push("--mount".to_string());
-            args.push(mount.clone());
-        }
+            for mount in &config.mounts {
+                args.push("--mount".to_string());
+                args.push(mount.clone());
+            }
 
-        for dns in &config.dns {
-            args.push("--dns".to_string());
-            args.push(dns.clone());
-        }
+            for dns in &config.dns {
+                args.push("--dns".to_string());
+                args.push(dns.clone());
+            }
 
-        if config.network_address {
-            args.push("--network-address".to_string());
-        }
+            if config.network_address {
+                args.push("--network-address".to_string());
+            }
 
-        if config.kubernetes {
-            args.push("--kubernetes".to_string());
-            if !config.kubernetes_version.is_empty() {
-                args.push("--kubernetes-version".to_string());
-                args.push(config.kubernetes_version);
+            if config.kubernetes {
+                args.push("--kubernetes".to_string());
+                if !config.kubernetes_version.is_empty() {
+                    args.push("--kubernetes-version".to_string());
+                    args.push(config.kubernetes_version);
+                }
             }
         }
 
         let args_ref: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
+        let display = format!("colima {}", args.join(" "));
         let output = colima_cmd()
             .args(&args_ref)
             .output()
             .map_err(|e| format!("Failed to start colima: {}", e))?;
 
         if !output.status.success() {
-            return Err(format!(
-                "colima start failed: {}",
-                String::from_utf8_lossy(&output.stderr)
-            ));
+            // Carries the command and exit code, not just the message, so the
+            // error panel can show what actually ran.
+            return Err(crate::helpers::error_from_output(&display, &output));
         }
 
         Ok(format!(
@@ -159,17 +198,123 @@ pub async fn start_instance(config: StartConfig) -> Result<String, String> {
         ))
     })
     .await
-    .map_err(|e| format!("Task join error: {}", e))?
+    .map_err(|e| crate::error::ColimaError::internal(format!("Task join error: {}", e)))?
+    }
+    .await;
+
+    crate::commands::activity::record(
+        crate::commands::activity::ActivityEntry::new(
+            crate::commands::activity::ActivityKind::Lifecycle,
+            "start",
+            "instance",
+            &logged_profile,
+        )
+        .outcome_of(&result),
+    );
+
+    result
+}
+
+/// Start a Colima instance using the settings already saved for that profile.
+///
+/// Deliberately passes no resource flags: the tray has no UI to choose CPU or
+/// memory, and `colima start --profile X` reuses what the profile was last
+/// configured with. Passing defaults here would silently resize the user's VM.
+pub async fn start_instance_cli(profile: String) -> Result<String, crate::error::ColimaError> {
+    crate::validation::ensure_valid_profile(&profile).map_err(crate::error::ColimaError::validation)?;
+    tokio::task::spawn_blocking(move || {
+        let mut args = vec!["start".to_string()];
+        if profile != "default" && !profile.is_empty() {
+            args.push("--profile".to_string());
+            args.push(profile.clone());
+        }
+
+        let args_ref: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
+        let display = format!("colima {}", args.join(" "));
+        let output = colima_cmd()
+            .args(&args_ref)
+            .output()
+            .map_err(|e| format!("Failed to start colima: {}", e))?;
+
+        if !output.status.success() {
+            return Err(crate::helpers::error_from_output(&display, &output));
+        }
+
+        Ok(format!("Instance '{}' started", profile))
+    })
+    .await
+    .map_err(|e| crate::error::ColimaError::internal(format!("Task join error: {}", e)))?
+}
+
+/// Stop a Colima instance (CLI-only, no Tauri state).
+/// Used by HTTP route handlers which don't have access to Tauri managed state.
+pub async fn stop_instance_cli(profile: String, force: bool) -> Result<String, crate::error::ColimaError> {
+    crate::validation::ensure_valid_profile(&profile).map_err(crate::error::ColimaError::validation)?;
+    tokio::task::spawn_blocking(move || {
+        let mut args = vec!["stop".to_string()];
+        if profile != "default" && !profile.is_empty() {
+            args.push("--profile".to_string());
+            args.push(profile.clone());
+        }
+        if force {
+            args.push("--force".to_string());
+        }
+
+        let args_ref: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
+        let display = format!("colima {}", args.join(" "));
+        let output = colima_cmd()
+            .args(&args_ref)
+            .output()
+            .map_err(|e| format!("Failed to stop colima: {}", e))?;
+
+        if !output.status.success() {
+            return Err(crate::helpers::error_from_output(&display, &output));
+        }
+
+        Ok(format!("Instance '{}' stopped", profile))
+    })
+    .await
+    .map_err(|e| crate::error::ColimaError::internal(format!("Task join error: {}", e)))?
+}
+
+/// Delete a Colima instance (CLI-only, no Tauri state).
+/// Used by HTTP route handlers which don't have access to Tauri managed state.
+pub async fn delete_instance_cli(profile: String, force: bool) -> Result<String, crate::error::ColimaError> {
+    crate::validation::ensure_valid_profile(&profile).map_err(crate::error::ColimaError::validation)?;
+    tokio::task::spawn_blocking(move || {
+        let mut args = vec!["delete".to_string()];
+        if profile != "default" && !profile.is_empty() {
+            args.push("--profile".to_string());
+            args.push(profile.clone());
+        }
+        if force {
+            args.push("--force".to_string());
+        }
+
+        let args_ref: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
+        let display = format!("colima {}", args.join(" "));
+        let output = colima_cmd()
+            .args(&args_ref)
+            .output()
+            .map_err(|e| format!("Failed to delete colima: {}", e))?;
+
+        if !output.status.success() {
+            return Err(crate::helpers::error_from_output(&display, &output));
+        }
+
+        Ok(format!("Instance '{}' deleted", profile))
+    })
+    .await
+    .map_err(|e| crate::error::ColimaError::internal(format!("Task join error: {}", e)))?
 }
 
 /// Stop a Colima instance
 #[tauri::command]
-pub async fn stop_instance(
-    app: tauri::AppHandle,
-    docker_state: tauri::State<'_, std::sync::Arc<tokio::sync::RwLock<crate::docker_state::DockerState>>>,
-    profile: String,
-    force: bool,
-) -> Result<String, String> {
+pub async fn stop_instance(     app: tauri::AppHandle,     docker_state: tauri::State<'_, std::sync::Arc<tokio::sync::RwLock<crate::docker_state::DockerState>>>,     profile: String,     force: bool, ) -> Result<String, crate::error::ColimaError> {
+    crate::validation::ensure_valid_profile(&profile).map_err(crate::error::ColimaError::validation)?;
+    // The block below takes ownership, so what the record needs is kept here.
+    let logged_profile = profile.clone();
+    let result = async move {
     // Proactively clear Docker state BEFORE stopping — user may navigate to Docker
     // tabs while colima stop is still running (fire-and-forget pattern in the UI).
     // If we clear after, Bollard queries succeed during the shutdown window.
@@ -217,16 +362,29 @@ pub async fn stop_instance(
     })
     .await
     .map_err(|e| format!("Task join error: {}", e))?
+    }
+    .await;
+
+    crate::commands::activity::record(
+        crate::commands::activity::ActivityEntry::new(
+            crate::commands::activity::ActivityKind::Lifecycle,
+            "stop",
+            "instance",
+            &logged_profile,
+        )
+        .outcome_of(&result),
+    );
+
+    result.map_err(|e: String| crate::error::ColimaError::from(e))
 }
 
 /// Delete a Colima instance
 #[tauri::command]
-pub async fn delete_instance(
-    app: tauri::AppHandle,
-    docker_state: tauri::State<'_, std::sync::Arc<tokio::sync::RwLock<crate::docker_state::DockerState>>>,
-    profile: String,
-    force: bool,
-) -> Result<String, String> {
+pub async fn delete_instance(     app: tauri::AppHandle,     docker_state: tauri::State<'_, std::sync::Arc<tokio::sync::RwLock<crate::docker_state::DockerState>>>,     profile: String,     force: bool, ) -> Result<String, crate::error::ColimaError> {
+    crate::validation::ensure_valid_profile(&profile).map_err(crate::error::ColimaError::validation)?;
+    // The block below takes ownership, so what the record needs is kept here.
+    let logged_profile = profile.clone();
+    let result = async move {
     {
         let mut lock = docker_state.write().await;
         lock.docker = None;
@@ -271,11 +429,27 @@ pub async fn delete_instance(
     })
     .await
     .map_err(|e| format!("Task join error: {}", e))?
+    }
+    .await;
+
+    crate::commands::activity::record(
+        crate::commands::activity::ActivityEntry::new(
+            crate::commands::activity::ActivityKind::Destructive,
+            "delete",
+            "instance",
+            &logged_profile,
+        )
+        .outcome_of(&result),
+    );
+
+    result.map_err(|e: String| crate::error::ColimaError::from(e))
 }
 
 /// Get extended status of an instance
 #[tauri::command]
-pub async fn instance_status(profile: String) -> Result<InstanceStatus, String> {
+pub async fn instance_status(profile: String) -> Result<InstanceStatus, crate::error::ColimaError> {
+    crate::validation::ensure_valid_profile(&profile).map_err(crate::error::ColimaError::validation)?;
+    async move {
     let result = tokio::time::timeout(
         std::time::Duration::from_secs(10),
         tokio::task::spawn_blocking(move || {
@@ -314,22 +488,30 @@ pub async fn instance_status(profile: String) -> Result<InstanceStatus, String> 
         Ok(Err(e)) => Err(format!("Task join error: {}", e)),
         Err(_) => Err("colima status timed out (daemon may be unresponsive)".to_string()),
     }
+    }
+    .await.map_err(|e: String| crate::error::ColimaError::from(e))
 }
 
 /// SSH into a Colima instance (returns the command to execute)
 #[tauri::command]
-pub async fn get_ssh_command(profile: String) -> Result<Vec<String>, String> {
+pub async fn get_ssh_command(profile: String) -> Result<Vec<String>, crate::error::ColimaError> {
+    crate::validation::ensure_valid_profile(&profile).map_err(crate::error::ColimaError::validation)?;
+    async move {
     let mut args = vec!["ssh".to_string()];
     if profile != "default" && !profile.is_empty() {
         args.push("--profile".to_string());
         args.push(profile);
     }
     Ok(args)
+    }
+    .await.map_err(|e: String| crate::error::ColimaError::from(e))
 }
 
 /// Kubernetes operations
 #[tauri::command]
-pub async fn kubernetes_action(profile: String, action: String) -> Result<String, String> {
+pub async fn kubernetes_action(profile: String, action: String) -> Result<String, crate::error::ColimaError> {
+    crate::validation::ensure_valid_profile(&profile).map_err(crate::error::ColimaError::validation)?;
+    async move {
     let valid_actions = ["start", "stop", "delete", "reset"];
     if !valid_actions.contains(&action.as_str()) {
         return Err(format!("Invalid kubernetes action: {}", action));
@@ -368,6 +550,8 @@ pub async fn kubernetes_action(profile: String, action: String) -> Result<String
     })
     .await
     .map_err(|e| format!("Task join error: {}", e))?
+    }
+    .await.map_err(|e: String| crate::error::ColimaError::from(e))
 }
 
 // ===== Diagnostic Log Collection for AI Agent =====
@@ -375,7 +559,9 @@ pub async fn kubernetes_action(profile: String, action: String) -> Result<String
 // and inspects lock/pid/socket files to enable deep diagnostics.
 
 #[tauri::command]
-pub async fn collect_diagnostic_logs(profile: String) -> Result<String, String> {
+pub async fn collect_diagnostic_logs(profile: String) -> Result<String, crate::error::ColimaError> {
+    crate::validation::ensure_valid_profile(&profile).map_err(crate::error::ColimaError::validation)?;
+    async move {
     tokio::task::spawn_blocking(move || {
         let home = std::env::var("HOME").unwrap_or_else(|_| "/Users/unknown".to_string());
         let profile_dir = if profile.is_empty() || profile == "default" {
@@ -390,17 +576,14 @@ pub async fn collect_diagnostic_logs(profile: String) -> Result<String, String> 
         report.push_str("## Lima VM Logs\n\n");
         for log_file in &["ha.stderr.log", "ha.stdout.log", "serial.log", "serialv.log"] {
             let path = format!("{}/{}", lima_dir, log_file);
-            match std::fs::read_to_string(&path) {
-                Ok(content) => {
-                    // Take last 30 lines (most recent errors)
-                    let lines: Vec<&str> = content.lines().collect();
-                    let start = lines.len().saturating_sub(30);
-                    let tail: String = lines[start..].join("\n");
-                    if !tail.trim().is_empty() {
-                        report.push_str(&format!("### {}\n```\n{}\n```\n\n", log_file, tail));
-                    }
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                // Take last 30 lines (most recent errors)
+                let lines: Vec<&str> = content.lines().collect();
+                let start = lines.len().saturating_sub(30);
+                let tail: String = lines[start..].join("\n");
+                if !tail.trim().is_empty() {
+                    report.push_str(&format!("### {}\n```\n{}\n```\n\n", log_file, tail));
                 }
-                Err(_) => {}
             }
         }
 
@@ -438,7 +621,7 @@ pub async fn collect_diagnostic_logs(profile: String) -> Result<String, String> 
                 .map(|e| {
                     let name = e.file_name().to_string_lossy().to_string();
                     let meta = e.metadata().ok();
-                    let size = meta.as_ref().map(|m| m.len()).unwrap_or(0);
+                    let size = meta.as_ref().map_or(0, |m| m.len());
                     // For .pid files, read the content (it's a process ID)
                     let content = if name.ends_with(".pid") {
                         std::fs::read_to_string(e.path()).unwrap_or_default().trim().to_string()
@@ -470,4 +653,78 @@ pub async fn collect_diagnostic_logs(profile: String) -> Result<String, String> 
     })
     .await
     .map_err(|e| format!("Task join error: {}", e))?
+    }
+    .await.map_err(|e: String| crate::error::ColimaError::from(e))
+}
+
+#[tauri::command]
+pub async fn create_worker_node(master_profile: String, worker_profile: String, cpu: u32, memory: u32) -> Result<String, crate::error::ColimaError> {
+    crate::validation::ensure_valid_profile(&master_profile)
+        .map_err(crate::error::ColimaError::validation)?;
+    crate::validation::ensure_valid_profile(&worker_profile)
+        .map_err(crate::error::ColimaError::validation)?;
+    async move {
+    tokio::task::spawn_blocking(move || {
+        // 1. Get Master IP
+        let list_output = std::process::Command::new(crate::path_util::resolve_binary("colima"))
+            .args(["list", "-j"])
+            .output()
+            .map_err(|e| format!("Failed to list instances: {}", e))?;
+        let stdout = String::from_utf8_lossy(&list_output.stdout);
+        let mut master_ip = String::new();
+        for line in stdout.lines() {
+            if let Ok(instance) = serde_json::from_str::<ColimaInstance>(line) {
+                if instance.name == master_profile {
+                    master_ip = instance.address;
+                    break;
+                }
+            }
+        }
+        if master_ip.is_empty() {
+            return Err(format!("Could not find master node '{}' or its IP address", master_profile));
+        }
+
+        // 2. Get Master Token
+        let token_output = std::process::Command::new(crate::path_util::resolve_binary("colima"))
+            .args(["ssh", "-p", &master_profile, "--", "sudo", "cat", "/var/lib/rancher/k3s/server/node-token"])
+            .output()
+            .map_err(|e| format!("Failed to get node token: {}", e))?;
+        let token = String::from_utf8_lossy(&token_output.stdout).trim().to_string();
+        if token.is_empty() {
+            return Err("Failed to retrieve node token from master. Is kubernetes enabled?".to_string());
+        }
+
+        // 3. Start Worker Node
+        let args = vec![
+            "start".to_string(),
+            "-p".to_string(),
+            worker_profile,
+            "--kubernetes".to_string(),
+            "--cpu".to_string(),
+            cpu.to_string(),
+            "--memory".to_string(),
+            memory.to_string(),
+            "--network-address".to_string(),
+            "--k3s-arg".to_string(),
+            format!("--server=https://{}:6443", master_ip),
+            "--k3s-arg".to_string(),
+            format!("--token={}", token),
+        ];
+
+        let output = std::process::Command::new(crate::path_util::resolve_binary("colima"))
+            .args(args)
+            .output()
+            .map_err(|e| format!("Failed to start worker node: {}", e))?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(format!("Worker node start failed: {}", stderr));
+        }
+
+        Ok("Worker node created and joined successfully".to_string())
+    })
+    .await
+    .map_err(|e| format!("Task join error: {}", e))?
+    }
+    .await.map_err(|e: String| crate::error::ColimaError::from(e))
 }

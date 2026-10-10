@@ -1,0 +1,189 @@
+/**
+ * The frontend half of the error contract defined in `src-tauri/src/error.rs`.
+ *
+ * Both entry points now return the same payload:
+ *   - Tauri IPC rejects with the serialized `ColimaError`
+ *   - the HTTP API returns it as `ApiResponse.error`
+ *
+ * `normalizeError` is the single choke point that turns whatever was thrown
+ * into an `AppError`. Nothing downstream should inspect raw throwables.
+ */
+
+import { redact } from "./redact";
+import { t } from "./i18n.svelte";
+
+/** Mirrors `ErrorCode` in `src-tauri/src/error.rs`. Keep the two in sync. */
+export type ErrorCode =
+  | "not_installed"
+  | "not_running"
+  | "permission_denied"
+  | "timeout"
+  | "command_failed"
+  | "network"
+  | "validation"
+  | "not_found"
+  | "internal"
+  | "unknown";
+
+const KNOWN_CODES = new Set<string>([
+  "not_installed",
+  "not_running",
+  "permission_denied",
+  "timeout",
+  "command_failed",
+  "network",
+  "validation",
+  "not_found",
+  "internal",
+  "unknown",
+]);
+
+export interface AppError {
+  code: ErrorCode;
+  /** Technical description. Already redacted. */
+  detail: string;
+  /** The command that failed, when the backend knew it. */
+  command?: string;
+  exitCode?: number;
+  /** English fallback from the backend; `errorTitle`/`errorHint` prefer i18n. */
+  hint?: string;
+  /** Knowledge Base article slug. */
+  docId?: string;
+}
+
+/**
+ * Thrown by the API layer.
+ *
+ * It extends `Error` and stringifies to human-readable text on purpose: around
+ * 114 existing call sites do `globalToast("error", String(e))`, and this keeps
+ * every one of them working — and reading better than before — without a
+ * mechanical sweep. Call sites that want structure read `.appError`.
+ */
+export class AppErrorException extends Error {
+  readonly appError: AppError;
+
+  constructor(appError: AppError) {
+    super(appError.detail);
+    this.name = "AppError";
+    this.appError = appError;
+  }
+
+  /** Plain text, no `Error:` prefix — this is what `String(e)` produces. */
+  override toString(): string {
+    return errorMessage(this.appError);
+  }
+}
+
+/** Read a string field from an unknown object, if present. */
+function str(obj: Record<string, unknown>, ...keys: string[]): string | undefined {
+  for (const k of keys) {
+    const v = obj[k];
+    if (typeof v === "string" && v.length > 0) return v;
+  }
+  return undefined;
+}
+
+/**
+ * Turn anything that was thrown or returned as an error into an `AppError`.
+ *
+ * Accepts, in order of preference:
+ *   - a serialized `ColimaError` (both transports)
+ *   - an `AppErrorException` (already normalized)
+ *   - an `Error`
+ *   - a string
+ *   - anything else
+ */
+export function normalizeError(e: unknown): AppError {
+  if (e instanceof AppErrorException) return e.appError;
+
+  if (e && typeof e === "object") {
+    const o = e as Record<string, unknown>;
+
+    // The backend contract: { code, detail, command?, exit_code?, hint?, doc_id? }
+    const rawCode = typeof o.code === "string" ? o.code : undefined;
+    if (rawCode && typeof o.detail === "string") {
+      return {
+        code: (KNOWN_CODES.has(rawCode) ? rawCode : "unknown") as ErrorCode,
+        detail: redact(o.detail),
+        command: str(o, "command"),
+        exitCode: typeof o.exit_code === "number" ? o.exit_code : undefined,
+        hint: str(o, "hint"),
+        docId: str(o, "doc_id"),
+      };
+    }
+
+    if (e instanceof Error) {
+      return { code: "unknown", detail: redact(e.message) };
+    }
+
+    // Legacy shape from the previous contract: { type, message }.
+    const legacy = str(o, "message");
+    if (legacy) return { code: "unknown", detail: redact(legacy) };
+
+    try {
+      return { code: "unknown", detail: redact(JSON.stringify(e)) };
+    } catch {
+      return { code: "unknown", detail: redact(String(e)) };
+    }
+  }
+
+  if (typeof e === "string") return { code: "unknown", detail: redact(e) };
+
+  return { code: "unknown", detail: redact(String(e)) };
+}
+
+/** Wrap anything thrown into the exception type the API layer rejects with. */
+export function toAppException(e: unknown): AppErrorException {
+  return e instanceof AppErrorException ? e : new AppErrorException(normalizeError(e));
+}
+
+/**
+ * Localized short title for an error code.
+ *
+ * Rust deliberately does not produce user-facing wording — it emits a stable
+ * `code` and this maps it to the user's language.
+ */
+export function errorTitle(err: AppError): string {
+  return t(`errors.${err.code}.title`, { default: DEFAULT_TITLES[err.code] });
+}
+
+/**
+ * Sentinel for "this key has no translation".
+ *
+ * `t()` treats an empty-string default as falsy and returns the raw key
+ * instead, so an empty default cannot be used to detect a missing entry.
+ */
+const NO_TRANSLATION = "\u0000none";
+
+/** Localized remediation text, falling back to the backend's English hint. */
+export function errorHint(err: AppError): string | undefined {
+  const key = `errors.${err.code}.hint`;
+  const translated = t(key, { default: NO_TRANSLATION });
+  if (translated !== NO_TRANSLATION && translated !== key) return translated;
+  return err.hint;
+}
+
+/** One-line message: title plus detail when the detail adds information. */
+export function errorMessage(err: AppError): string {
+  const title = errorTitle(err);
+  if (!err.detail || err.detail === title) return title;
+  // For an unclassified error the title is a generic placeholder
+  // ("Something went wrong"), so prefixing it just pushes the part the user
+  // actually needs further along the line.
+  if (err.code === "unknown") return err.detail;
+  return `${title}: ${err.detail}`;
+}
+
+/** English fallbacks, used when a locale has no `errors.*` entry yet. */
+const DEFAULT_TITLES: Record<ErrorCode, string> = {
+  not_installed: "Required tool not installed",
+  not_running: "Colima is not running",
+  permission_denied: "Permission denied",
+  timeout: "Operation timed out",
+  command_failed: "Command failed",
+  network: "Network error",
+  validation: "Invalid input",
+  not_found: "Not found",
+  internal: "Internal error",
+  unknown: "Something went wrong",
+};

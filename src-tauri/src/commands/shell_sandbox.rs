@@ -41,10 +41,6 @@ const BANNED_PATTERNS: &[&str] = &[
     "sed -i",        // in-place edit
     "mv ", "cp ",    // file manipulation
     "pip install", "npm install", "yarn add",
-    "colima delete",
-    "docker system prune",
-    "docker rm ", "docker rmi ",
-    "docker volume rm", "docker network rm",
     "bash -c", "sh -c", "zsh -c",
     "python -c", "python3 -c",
     "curl -X POST", "curl -X PUT", "curl -X DELETE",
@@ -93,9 +89,10 @@ const SAFE_PREFIXES: &[&str] = &[
 /// Approve-required command prefixes — need user confirmation
 const APPROVE_PREFIXES: &[&str] = &[
     // Colima state changes
-    "colima start", "colima stop", "colima restart",
-    // Docker state changes
+    "colima start", "colima stop", "colima restart", "colima delete",
     "docker start ", "docker stop ", "docker restart ", "docker pull ",
+    "docker rm ", "docker rmi ", "docker system prune",
+    "docker volume rm", "docker network rm",
     "docker compose up", "docker compose down", "docker compose restart",
     // Process management
     "pkill ", "kill ", "killall ",
@@ -179,17 +176,41 @@ fn classify(command: &str) -> ClassifyResult {
 
 /// Execute a command with safety checks, timeout, and output truncation
 fn execute_command(command: &str) -> Result<ExecResult, String> {
-    let parts: Vec<&str> = command.trim().split_whitespace().collect();
+    let parts: Vec<&str> = command.split_whitespace().collect();
     if parts.is_empty() {
         return Err("Empty command".to_string());
     }
 
-    let output = Command::new(parts[0])
+    let mut child = Command::new(parts[0])
         .args(&parts[1..])
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .spawn()
-        .map_err(|e| format!("Failed to spawn '{}': {}", parts[0], e))?
+        .map_err(|e| format!("Failed to spawn '{}': {}", parts[0], e))?;
+
+    // Fix #9: Actually enforce the timeout (was declared but never used)
+    let timeout = std::time::Duration::from_secs(EXEC_TIMEOUT_SECS);
+    let start = std::time::Instant::now();
+
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => break,  // Process exited
+            Ok(None) => {
+                if start.elapsed() > timeout {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return Err(format!(
+                        "Command timed out after {}s and was killed",
+                        EXEC_TIMEOUT_SECS
+                    ));
+                }
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
+            Err(e) => return Err(format!("Error waiting for process: {}", e)),
+        }
+    }
+
+    let output = child
         .wait_with_output()
         .map_err(|e| format!("Command execution error: {}", e))?;
 
@@ -220,13 +241,17 @@ fn execute_command(command: &str) -> Result<ExecResult, String> {
 
 /// Classify a command's safety level (for UI display)
 #[tauri::command]
-pub async fn sandbox_classify(command: String) -> Result<ClassifyResult, String> {
+pub async fn sandbox_classify(command: String) -> Result<ClassifyResult, crate::error::ColimaError> {
+    async move {
     Ok(classify(&command))
+    }
+    .await.map_err(|e: String| crate::error::ColimaError::from(e))
 }
 
 /// Execute a safe command (auto-approved)
 #[tauri::command]
-pub async fn sandbox_execute(command: String) -> Result<ExecResult, String> {
+pub async fn sandbox_execute(command: String) -> Result<ExecResult, crate::error::ColimaError> {
+    async move {
     let result = classify(&command);
     match result.safety {
         CommandSafety::Safe => {
@@ -241,11 +266,14 @@ pub async fn sandbox_execute(command: String) -> Result<ExecResult, String> {
             Err(format!("banned:{}", result.reason))
         }
     }
+    }
+    .await.map_err(|e: String| crate::error::ColimaError::from(e))
 }
 
 /// Execute a command that was explicitly approved by the user
 #[tauri::command]
-pub async fn sandbox_execute_approved(command: String) -> Result<ExecResult, String> {
+pub async fn sandbox_execute_approved(command: String) -> Result<ExecResult, crate::error::ColimaError> {
+    async move {
     let result = classify(&command);
     match result.safety {
         CommandSafety::Banned => {
@@ -258,4 +286,6 @@ pub async fn sandbox_execute_approved(command: String) -> Result<ExecResult, Str
                 .map_err(|e| format!("Task join error: {}", e))?
         }
     }
+    }
+    .await.map_err(|e: String| crate::error::ColimaError::from(e))
 }

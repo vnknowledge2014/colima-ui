@@ -1,0 +1,119 @@
+/* ===== Inputs ===== */
+
+.input {
+  padding: 8px 12px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-primary);
+  background: var(--bg-input);
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+  font-family: var(--font-sans);
+  width: 100%;
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+  outline: none;
+  line-height: 1.5;
+}
+
+.input:hover:not(:focus) {
+  border-color: var(--border-accent);
+}
+
+.input:focus {
+  border-color: var(--accent-blue);
+  box-shadow: 0 0 0 3px rgba(96, 165, 250, 0.15);
+}
+
+.input::placeholder {
+  color: var(--text-muted);
+}
+
+/* Header search inputs (Images/Containers): expand smoothly on focus. No
+   :has() or wrapper state — works on any webview. */
+.header-search {
+  width: 180px;
+  transition: width 0.25s ease, border-color var(--transition-fast), box-shadow 0.2s ease;
+}
+
+.header-search:focus {
+  width: 260px;
+}
+
+.select {
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  cursor: pointer;
+  padding-right: 32px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%238B949E' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+}
+
+/* Webviews outside macOS draw the dropdown list with their own colors unless
+   the options are painted explicitly. */
+.select option {
+  background: var(--bg-card);
+  color: var(--text-primary);
+  padding: 6px 8px;
+}
+
+.checkbox {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 5px;
+  border: 1.5px solid var(--border-primary);
+  background: var(--bg-input);
+  cursor: pointer;
+  position: relative;
+  transition: all var(--transition-fast);
+  margin: 0;
+  display: inline-block;
+  vertical-align: middle;
+  flex-shrink: 0;
+}
+
+.checkbox:hover:not(:disabled) {
+  border-color: var(--accent-blue);
+  background: rgba(96, 165, 250, 0.08);
+}
+
+.checkbox:checked {
+  background: var(--accent-blue);
+  border-color: var(--accent-blue);
+  box-shadow: 0 0 0 1px rgba(96, 165, 250, 0.3);
+}
+
+.checkbox:checked::after {
+  content: "";
+  position: absolute;
+  top: 45%;
+  left: 50%;
+  transform: translate(-50%, -50%) rotate(45deg);
+  width: 4px;
+  height: 8px;
+  border: solid white;
+  border-width: 0 2px 2px 0;
+  border-radius: 1px;
+}
+
+.checkbox:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  background: var(--bg-sidebar);
+}
+
+.form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 16px;
+}
+
+.form-label {
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
