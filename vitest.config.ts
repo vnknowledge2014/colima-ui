@@ -14,5 +14,8 @@ export default defineConfig({
     setupFiles: ['./src/setupTests.ts'],
     include: ['src/**/*.{test,spec}.{js,ts,svelte}'],
     globals: true,
+    // jsdom + forked workers leak global mocks and the ELK layout worker state
+    // between files, causing flaky topology tests. vmThreads isolates properly.
+    pool: 'vmThreads',
   },
 })

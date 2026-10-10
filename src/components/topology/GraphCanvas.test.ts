@@ -44,7 +44,7 @@ describe("GraphCanvas", () => {
       // Every network owns containers, so all ten become boxes and the
       // containers are drawn inside them.
       await waitFor(() => expect(container.querySelectorAll("g.node")).toHaveLength(50));
-      expect(container.querySelectorAll("g.group")).toHaveLength(10);
+      await waitFor(() => expect(container.querySelectorAll("g.group")).toHaveLength(10));
       // Each container's only edge points at the network it is already drawn
       // inside, so none of them is worth a line.
       expect(container.querySelectorAll("line.edge")).toHaveLength(0);
