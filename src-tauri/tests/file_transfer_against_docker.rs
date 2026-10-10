@@ -74,7 +74,7 @@ fn wait_until(limit: Duration, label: &str, mut f: impl FnMut() -> bool) {
 }
 
 fn file_size(path: &Path) -> u64 {
-    std::fs::metadata(path).map(|m| m.len()).unwrap_or(0)
+    std::fs::metadata(path).map_or(0, |m| m.len())
 }
 
 fn sha256(path: &Path) -> String {

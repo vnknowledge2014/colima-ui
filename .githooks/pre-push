@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
 #
-# Pre-push lint gate — runs before `git push` completes.
+# Pre-push quality gate — runs before `git push` completes.
 #
-# Enforces the project lint policy (see AGENTS.md):
+# Enforces the project policy documented in README → "Lint & Quality Gates":
 #   - ESLint (dead code, unused vars/imports, error-prone patterns)
 #   - TypeScript + Svelte type checks
+#   - CSS token + i18n key gates
+#   - Unit tests (vitest)
 #   - cargo clippy (Rust: dead code, unused imports, pedantic clippy)
 #
 # Escape hatch: SKIP_LINT_GATES=1 git push    (or)   git push --no-verify
@@ -15,7 +17,7 @@ ROOT="$(git rev-parse --show-toplevel)"
 cd "$ROOT"
 
 if [ "${SKIP_LINT_GATES:-0}" = "1" ]; then
-  echo "⚠️  SKIP_LINT_GATES=1 — skipping lint gates (DO NOT do this lightly)"
+  echo "⚠️  SKIP_LINT_GATES=1 — skipping gates (DO NOT do this lightly)"
   exit 0
 fi
 
@@ -24,20 +26,26 @@ run() {
   "$@"
 }
 
+# One runner choice for the whole hook. The Rust gate used to hardcode `pnpm`
+# while the JS gates fell back to npm, so on a machine without pnpm the hook
+# died with "pnpm: command not found" after every JS gate had already passed.
+PM="npm run"
+if command -v pnpm >/dev/null 2>&1 && [ -f pnpm-lock.yaml ]; then
+  PM="pnpm"
+fi
+
 if [ -f package.json ]; then
-  if command -v pnpm >/dev/null 2>&1 && [ -f pnpm-lock.yaml ]; then
-    run pnpm lint
-    run pnpm typecheck
-    run pnpm check
-  else
-    run npm run lint
-    run npm run typecheck
-    run npm run check
-  fi
+  run $PM lint
+  run $PM typecheck
+  run $PM check
+  run $PM check:tokens
+  run $PM check:i18n
+  # The suite is a few seconds and covers the modules that historically broke.
+  run $PM test
 fi
 
 if [ -f src-tauri/Cargo.toml ]; then
-  run pnpm lint:rust
+  run $PM lint:rust
 fi
 
-echo "✅ All lint gates passed — safe to push."
+echo "✅ All gates passed — safe to push."

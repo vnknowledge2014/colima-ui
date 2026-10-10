@@ -74,7 +74,7 @@ Grab the latest release from [**GitHub Releases**](https://github.com/vnknowledg
 - Setup Wizard & Getting Started Tour for new users
 - Dark theme with glassmorphism effects and micro-animations
 - Context menus, keyboard shortcuts, global toast notifications
-- i18n support (English, Vietnamese, Chinese)
+- i18n support (English, Japanese, Vietnamese, Chinese)
 
 ---
 
@@ -111,14 +111,22 @@ hook, mirrored by CI). Agents and humans alike must run all four gates before
 committing:
 
 ```bash
-pnpm lint        # ESLint: dead code, unused vars/imports, `any`, error-prone patterns
-pnpm typecheck   # TypeScript
-pnpm check       # Svelte check
-pnpm lint:rust   # cargo clippy --all-targets -- -D warnings (dead code, unused imports)
+pnpm lint          # ESLint: dead code, unused vars/imports, `any`, error-prone patterns
+pnpm typecheck     # TypeScript
+pnpm check         # Svelte check
+pnpm check:tokens  # No var() reading a CSS custom property nothing defines
+pnpm check:i18n    # All locales carry the same keys
+pnpm test          # Unit tests (vitest)
+pnpm lint:rust     # cargo clippy --all-targets -- -D warnings (dead code, unused imports)
 ```
 
+The same set runs in CI (`.github/workflows/ci.yml`), which additionally runs
+`cargo test --lib`. Rust integration tests are marked `#[ignore]` because they
+need a real Docker daemon or Trivy; run them deliberately with
+`cargo test -- --ignored`.
+
 `git push --no-verify` / `SKIP_LINT_GATES=1` are emergency-only and need explicit
-approval. Full rules for agents: see `AGENTS.md`.
+approval.
 
 ### Production Build
 

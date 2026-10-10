@@ -171,6 +171,14 @@ jobs:
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Without these the bundles ship unsigned, `latest.json` carries no
+          # valid signature, and every client's update check fails signature
+          # verification — silently, on the user's side. The matching public key
+          # is already embedded in src-tauri/tauri.conf.json (updater.pubkey),
+          # so the secret must be the private half of THAT key: generating a new
+          # keypair strands every already-released install.
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           tagName: ${{ needs.prepare.outputs.tag }}
           releaseName: 'ColimaUI v${{ needs.prepare.outputs.version }}'

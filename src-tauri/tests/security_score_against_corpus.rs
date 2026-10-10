@@ -22,8 +22,7 @@ fn have(program: &str, args: &[&str]) -> bool {
     std::process::Command::new(program)
         .args(args)
         .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false)
+        .is_ok_and(|o| o.status.success())
 }
 
 fn local_images() -> Vec<String> {
@@ -42,8 +41,7 @@ fn local_images() -> Vec<String> {
 fn now_ms() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis() as i64)
-        .unwrap_or(0)
+        .map_or(0, |d| d.as_millis() as i64)
 }
 
 #[test]
@@ -143,8 +141,7 @@ fn a_pinned_non_root_image_beats_a_root_image_on_a_moving_tag() {
         let pulled = std::process::Command::new("docker")
             .args(["image", "inspect", image])
             .output()
-            .map(|o| o.status.success())
-            .unwrap_or(false);
+            .is_ok_and(|o| o.status.success());
         if !pulled {
             eprintln!("skipping: {} is not present locally", image);
             return;

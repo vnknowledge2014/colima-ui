@@ -82,8 +82,7 @@ pub async fn api_security_audit(
     // function of its arguments.
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis() as i64)
-        .unwrap_or(0);
+        .map_or(0, |d| d.as_millis() as i64);
 
     let result = crate::helpers::run_blocking(move || {
         security_scan::audit_image_blocking(

@@ -373,7 +373,7 @@ pub fn start_api_server() {
                     }
                     // Server stopped — kill all tracked port-forwards
                     if let Ok(fwds) = PORT_FORWARDS.lock() {
-                        for (_, pid) in fwds.iter() {
+                        for pid in fwds.values() {
                             #[cfg(unix)]
                             unsafe {
                                 libc::kill(*pid as i32, libc::SIGTERM);

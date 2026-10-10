@@ -4,7 +4,7 @@ on:
   push:
     branches: [main, staging, dev]
   pull_request:
-    branches: [main, staging]
+    branches: [main, staging, dev]
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
@@ -36,6 +36,17 @@ jobs:
 
       - name: Svelte check
         run: npm run check
+
+      - name: CSS token gate (a var() nothing defines paints nothing)
+        run: npm run check:tokens
+
+      - name: i18n key gate (locales must agree)
+        run: npm run check:i18n
+
+      # The suite exists and is fast; without this it was never enforced
+      # anywhere — not here, not in the pre-push hook.
+      - name: Unit tests (vitest)
+        run: npm test
 
   # ===== Rust Check (all platforms) =====
   rust-check:
@@ -89,6 +100,14 @@ jobs:
           else
             cargo clippy --all-targets --all-features -- -D warnings
           fi
+
+      # Native runner only: a cross-compiled target cannot execute its tests.
+      # Integration tests that need Docker/Trivy carry #[ignore], so a bare
+      # `cargo test` runs the unit tests and skips them.
+      - name: cargo test (unit)
+        if: matrix.target == ''
+        working-directory: src-tauri
+        run: cargo test --lib
 
   # ===== Frontend Build =====
   frontend-build:
