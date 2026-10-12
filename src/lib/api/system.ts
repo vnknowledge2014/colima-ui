@@ -153,15 +153,18 @@ export const sysMethods = {
     ),
   setResourceSaver: (enabled: boolean, idleMinutes: number) =>
     call<string>(
-      "set_resource_saver", { enabled, idle_minutes: idleMinutes }, "POST", "/api/system/resource-saver", undefined, { enabled, idle_minutes: idleMinutes }
+      // The Rust parameter is `threshold`; the HTTP body keeps its own name.
+      "set_resource_saver", { enabled, threshold: idleMinutes }, "POST", "/api/system/resource-saver", undefined, { enabled, idle_minutes: idleMinutes }
     ),
   getRuntimeInfo: () =>
     call<string>("get_runtime_info", undefined, "GET", "/api/system/runtime"),
   // Preset snapshots
-  savePresetSnapshot: (presetId: string, profile: string, snapshotJson: string, isAuto = false) =>
-    call<string>("save_preset_snapshot", { preset_id: presetId, profile, snapshot_json: snapshotJson, is_auto: isAuto }, "POST", "/api/presets/snapshot", undefined, { preset_id: presetId, profile, snapshot_json: snapshotJson, is_auto: isAuto }),
+  // Argument names follow the Rust parameters, which are also the column names
+  // the row lands in — `isAuto` named a field that does not exist.
+  savePresetSnapshot: (presetId: string, profile: string, snapshotJson: string, isManualOverride = false) =>
+    call<string>("save_preset_snapshot", { presetId, instanceProfile: profile, containersJson: snapshotJson, isManualOverride }, "POST", "/api/presets/snapshot", undefined, { preset_id: presetId, instance_profile: profile, containers_json: snapshotJson, is_manual_override: isManualOverride }),
   loadPresetSnapshot: (presetId: string, profile: string) =>
-    call<{ containers_json: string }>("load_preset_snapshot", { preset_id: presetId, profile }, "GET", "/api/presets/snapshot", { preset_id: presetId, profile }),
+    call<{ containers_json: string }>("load_preset_snapshot", { presetId, instanceProfile: profile }, "GET", "/api/presets/snapshot", { preset_id: presetId, instance_profile: profile }),
   listAllPresetSnapshots: (profile: string) =>
-    call<string>("list_all_preset_snapshots", { profile }, "GET", "/api/presets/snapshots", { profile }),
+    call<string>("list_all_preset_snapshots", { instanceProfile: profile }, "GET", "/api/presets/snapshots", { profile }),
 };

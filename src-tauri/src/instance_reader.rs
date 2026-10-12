@@ -283,3 +283,40 @@ pub fn list_instances_fast() -> Vec<ColimaInstance> {
 
     instances
 }
+
+/// Return the names of any *running* Colima profiles that use the containerd runtime.
+///
+/// The Docker state watcher uses this to explain why the Docker socket is missing
+/// even though a Colima VM is running. ColimaUI currently communicates through the
+/// Docker REST API only, so a profile started with `--runtime containerd` leaves the
+/// UI without a usable socket.
+pub fn running_containerd_profiles() -> Vec<String> {
+    let home = colima_home();
+    let mut profiles = Vec::new();
+    if !home.exists() {
+        return profiles;
+    }
+
+    if let Ok(entries) = std::fs::read_dir(&home) {
+        for entry in entries.flatten() {
+            let name = entry.file_name().to_string_lossy().to_string();
+            if name.starts_with('_') || name.starts_with('.') {
+                continue;
+            }
+            if !entry.path().is_dir() {
+                continue;
+            }
+            let lima_name = lima_instance_name(&name);
+            let lima_dir = home.join("_lima").join(&lima_name);
+            if !lima_dir.join("ha.sock").exists() && !lima_dir.join("ha.pid").exists() {
+                continue;
+            }
+            if let Some(inst) = read_instance(&home, &name) {
+                if inst.runtime == "containerd" {
+                    profiles.push(name);
+                }
+            }
+        }
+    }
+    profiles
+}

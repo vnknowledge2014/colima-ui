@@ -3,6 +3,7 @@
   import { uiState, dashboardState } from "./store.svelte";
   import { appState, loadAllSettings, getAppSetting, setAppSetting } from "./lib/settingsStore.svelte";
   import { startDataPoller, refreshManual } from "./lib/dataPoller";
+  import { handleGlobalKeydown } from "./lib/keyboardShortcuts";
   import { startTransferNotifications } from "./lib/transferNotifications";
   import { startAnnouncements } from "./lib/announcements";
   import { startAlertNotifications } from "./lib/alertNotifications";
@@ -159,6 +160,8 @@
   });
 </script>
 
+<svelte:window onkeydown={handleGlobalKeydown} />
+
 <ErrorBoundary>
 <div class="app-layout {isTauri ? 'tauri-app' : ''}" use:windowDragRegion>
   <Sidebar 
@@ -239,7 +242,6 @@
   <AiChatPanel />
   <NotificationPanel />
 
-  <ToastContainer />
   <ErrorDetailPanel />
 
   {#if showWizard}

@@ -52,12 +52,6 @@ const MUTATING: &[(&str, &str)] = &[
     ("src/commands/containers.rs", "pull_image"),
     // Config — why today behaves differently from yesterday.
     ("src/commands/colima_config.rs", "apply_colima_config"),
-    ("src/commands/alerts.rs", "alerts_save_rule"),
-    ("src/commands/alerts.rs", "alerts_delete_rule"),
-    ("src/commands/security_policy.rs", "security_policy_save"),
-    ("src/commands/security_policy.rs", "security_policy_delete"),
-    ("src/commands/security_watch.rs", "security_watch_set_enabled"),
-    ("src/commands/security_watch.rs", "security_watch_set_interval"),
     ("src/commands/self_heal.rs", "self_heal_save_rule"),
     ("src/commands/self_heal.rs", "self_heal_set_enabled"),
 ];

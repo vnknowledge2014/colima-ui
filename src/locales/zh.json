@@ -807,5 +807,9 @@
     "payload_covers": "包含 {n} 条事件",
     "payload_omitted": "，{n} 条未包含",
     "nothing_to_explain": "这些事件已不在最近的范围内。"
+  },
+  "docker": {
+    "unsupported_runtime": "不支持 {runtime} 运行时 ({profiles})",
+    "unsupported_runtime_hint": "ColimaUI 需要 Docker 运行时。停止配置文件并运行：`colima start --runtime docker`"
   }
 }

@@ -6,6 +6,7 @@
   import { dashboardState } from "../store.svelte";
   import { handleInstanceStarted, handleInstanceStopping, getCurrentPresetForInstance, BUILT_IN_PRESETS } from "../lib/presetStateManager";
   import { getAppSetting } from "../lib/settingsStore.svelte";
+  import { setVisibleInterval } from "../lib/visibleInterval";
 
   interface InstancePreset {
     id: string; label: string; cpus: number; memory: number; disk: number;
@@ -153,8 +154,7 @@ Format: {"minimal": {"cpus": N, "memory": N, "disk": N}, ...}`;
     // deleted outside this page (CLI, other tabs, the AI assistant). Without
     // polling, a stale in-memory list silently omits new clusters until the
     // user hits the manual refresh button.
-    const kindTimer = setInterval(fetchKind, 15000);
-    return () => clearInterval(kindTimer);
+    return setVisibleInterval(fetchKind, 15000);
   });
 
   $effect(() => {

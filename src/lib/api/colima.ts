@@ -26,5 +26,5 @@ export const colimaApi = {
     call<string>("kubernetes_action", { profile, action }, "POST", "/api/instances/k8s", { profile, action }),
 
   createWorkerNode: (masterProfile: string, workerProfile: string, cpus: number, memory: number) =>
-    call<string>("create_worker_node", { master_profile: masterProfile, worker_profile: workerProfile, cpu: cpus, memory }, "POST", "/api/instances/create-worker", undefined, { master_profile: masterProfile, worker_profile: workerProfile, cpu: cpus, memory }),
+    call<string>("create_worker_node", { masterProfile, workerProfile, cpu: cpus, memory }, "POST", "/api/instances/create-worker", undefined, { master_profile: masterProfile, worker_profile: workerProfile, cpu: cpus, memory }),
 };

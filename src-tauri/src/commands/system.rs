@@ -162,6 +162,138 @@ pub async fn check_tool(name: String) -> Result<serde_json::Value, crate::error:
     .await.map_err(|e: String| crate::error::ColimaError::from(e))
 }
 
+// ===== Dependency setup =====
+//
+// Both of these were reachable over HTTP but had no `#[tauri::command]`, so the
+// setup wizard failed in the desktop build — the same gap that was already fixed
+// once for `lima_create`. The logic lives here and the HTTP routes delegate to
+// it, so the two transports cannot drift apart again.
+
+#[derive(Debug, Clone, Serialize)]
+pub struct HomebrewStatus {
+    pub installed: bool,
+    pub version: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct InstallResult {
+    pub success: bool,
+    pub output: String,
+}
+
+/// Blocking probe for Homebrew. `brew` lives in `/opt/homebrew/bin` on Apple
+/// silicon, which a bundled .app does not inherit — hence `resolve_binary`.
+pub fn homebrew_status_blocking() -> HomebrewStatus {
+    let brew = path_util::resolve_binary("brew");
+    let mut cmd = Command::new(&brew);
+    cmd.arg("--version");
+    path_util::apply_path_to_cmd(&mut cmd);
+
+    match cmd.output() {
+        Ok(o) if o.status.success() => HomebrewStatus {
+            installed: true,
+            version: String::from_utf8_lossy(&o.stdout)
+                .lines()
+                .next()
+                .unwrap_or("")
+                .trim()
+                .to_string(),
+        },
+        _ => HomebrewStatus {
+            installed: false,
+            version: String::new(),
+        },
+    }
+}
+
+/// Check whether Homebrew is installed
+#[tauri::command]
+pub async fn check_homebrew() -> Result<HomebrewStatus, crate::error::ColimaError> {
+    tokio::task::spawn_blocking(homebrew_status_blocking)
+        .await
+        .map_err(|e| crate::error::ColimaError::from(format!("Task join error: {}", e)))
+}
+
+/// Blocking install of one of the three dependencies the wizard manages.
+///
+/// `name` and `method` are both validated against fixed lists before anything is
+/// spawned; neither ever reaches a shell.
+pub fn install_dependency_blocking(name: &str, method: &str) -> Result<InstallResult, String> {
+    const VALID_NAMES: [&str; 3] = ["colima", "docker", "lima"];
+    if !VALID_NAMES.contains(&name) {
+        return Err(format!("Invalid dependency name: {}", name));
+    }
+
+    // Package name per (method, dependency). Only apt renames anything.
+    let pkg = match (method, name) {
+        ("apt", "docker") => "docker.io".to_string(),
+        ("brew" | "apt" | "nix" | "wsl-brew", n) => n.to_string(),
+        ("manual", _) => {
+            return Ok(InstallResult {
+                success: true,
+                output: "Manual installation: visit https://github.com/abiosoft/colima".to_string(),
+            });
+        }
+        _ => return Err(format!("Unknown install method: {}", method)),
+    };
+
+    let mut cmd = match method {
+        "brew" => {
+            let mut c = Command::new(path_util::resolve_binary("brew"));
+            c.args(["install", &pkg]);
+            c
+        }
+        "apt" => {
+            let mut c = Command::new("sudo");
+            c.args(["apt-get", "install", "-y", &pkg]);
+            c
+        }
+        "nix" => {
+            let mut c = Command::new("nix-env");
+            c.args(["-iA", &format!("nixpkgs.{}", pkg)]);
+            c
+        }
+        "wsl-brew" => {
+            let mut c = Command::new("wsl");
+            c.args(["-e", "brew", "install", &pkg]);
+            c
+        }
+        _ => return Err(format!("Unknown install method: {}", method)),
+    };
+    path_util::apply_path_to_cmd(&mut cmd);
+
+    let output = cmd
+        .output()
+        .map_err(|e| format!("{} install failed: {}", method, e))?;
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+
+    if output.status.success() {
+        Ok(InstallResult {
+            success: true,
+            output: if stdout.is_empty() { stderr } else { stdout },
+        })
+    } else {
+        Ok(InstallResult {
+            success: false,
+            output: format!("Install failed: {}", stderr),
+        })
+    }
+}
+
+/// Install colima, docker, or lima through the chosen package manager
+#[tauri::command]
+pub async fn install_dependency(
+    name: String,
+    method: String,
+) -> Result<InstallResult, crate::error::ColimaError> {
+    tokio::task::spawn_blocking(move || install_dependency_blocking(&name, &method))
+        .await
+        .map_err(|e| format!("Task join error: {}", e))
+        .and_then(|r| r)
+        .map_err(crate::error::ColimaError::from)
+}
+
 // ===== Host Hardware Specs =====
 
 #[derive(Debug, Clone, Serialize)]

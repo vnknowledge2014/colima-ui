@@ -23,21 +23,25 @@ export const aiApi = {
     }, "POST", "/api/ai/chat", undefined, {
       provider, model, api_key: apiKey, messages, endpoint
     }),
+  // Tauri derives the expected argument names from the Rust parameters and
+  // camelCases them; only the HTTP body stays snake_case, matching serde on the
+  // axum handler. Passing snake_case to `invoke` fails with
+  // "missing required key apiKey" before the command is ever entered.
   listModels: (provider: string, apiKey: string, endpoint = "") =>
     call<string>("ai_list_models", {
-      provider, api_key: apiKey, endpoint
+      provider, apiKey, endpoint
     }, "POST", "/api/ai/models", undefined, {
       provider, api_key: apiKey, endpoint
     }),
   search: (query: string, instances?: string[], maxResults?: number, timeoutSecs?: number) =>
     call<SearchResult[]>("searxng_search", {
-      query, instances, max_results: maxResults, timeout_secs: timeoutSecs
+      query, instances, maxResults, timeoutSecs
     }, "POST", "/api/ai/search", undefined, {
       query, instances, max_results: maxResults, timeout_secs: timeoutSecs
     }),
   fetchPageMarkdown: (url: string, maxLength?: number, mode?: string) =>
     call<string>("fetch_page_as_markdown", {
-      url, max_length: maxLength, mode
+      url, maxLength, mode
     }, "POST", "/api/ai/fetch-page", undefined, {
       url, max_length: maxLength, mode
     }),

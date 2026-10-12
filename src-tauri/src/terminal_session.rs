@@ -395,8 +395,7 @@ impl SessionManager {
             .filter(|(_, s)| {
                 s.last_activity
                     .lock()
-                    .map(|a| a.elapsed() > max_idle)
-                    .unwrap_or(false)
+                    .is_ok_and(|a| a.elapsed() > max_idle)
             })
             .map(|(id, _)| id.clone())
             .collect();

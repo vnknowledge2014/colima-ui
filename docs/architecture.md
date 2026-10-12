@@ -60,12 +60,25 @@ graph TD
 The frontend detects whether it's running inside Tauri (native) or a browser:
 
 ```typescript
-// src/lib/api.ts
-const IS_TAURI = '__TAURI_IPC__' in window;
+// src/lib/env.ts — the single detection helper; never re-implement it inline.
+export function isRunningInTauri() {
+  if (typeof window === 'undefined') return false;
+  const w = window as Window & { __TAURI_INTERNALS__?: unknown; isTauri?: unknown; __TAURI_IPC__?: unknown };
+  return !!(w.__TAURI_INTERNALS__) ||   // Tauri v2
+         !!(w.isTauri) ||
+         !!(w.__TAURI_IPC__) ||          // Tauri v1, kept for older webviews
+         navigator.userAgent.includes('Tauri') ||
+         navigator.userAgent.includes('tauri');
+}
 
 // Desktop mode: Tauri IPC (invoke)
 // Browser mode: HTTP fetch to localhost:11420
 ```
+
+Several signals are checked rather than one: `__TAURI_IPC__` is the **v1** global
+and is absent in v2, which exposes `__TAURI_INTERNALS__`. A single-global check
+silently mis-detects the desktop app as a browser, and the failure is invisible —
+the UI merely loses the features it gates behind desktop mode.
 
 This allows **one codebase** to serve both modes without conditional branches in page components.
 

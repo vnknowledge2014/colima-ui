@@ -1,6 +1,6 @@
 [package]
 name = "colima-ui"
-version = "0.1.10"
+version = "0.2.0"
 description = "A modern desktop & web GUI for Colima — manage Docker, Kubernetes, and Linux VMs"
 authors = ["vnknowledge2014"]
 license = "MIT"

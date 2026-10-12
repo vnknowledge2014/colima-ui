@@ -517,8 +517,7 @@ pub fn write_atomic(home: &Path, profile: &str, doc: &Value) -> Result<String, C
 
     let stamp = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
+        .map_or(0, |d| d.as_secs());
     let backup = dir.join(format!("colima.yaml.{}.bak", stamp));
     crate::validation::assert_path_within(home, &backup).map_err(ColimaError::validation)?;
     std::fs::copy(&path, &backup)

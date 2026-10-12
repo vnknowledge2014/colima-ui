@@ -93,8 +93,7 @@ static REGISTRY: LazyLock<Mutex<HashMap<String, Entry>>> =
 fn now_ms() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_millis() as u64)
-        .unwrap_or(0)
+        .map_or(0, |d| d.as_millis() as u64)
 }
 
 fn lock_registry() -> std::sync::MutexGuard<'static, HashMap<String, Entry>> {
@@ -249,7 +248,7 @@ pub fn list() -> Vec<TransferSnapshot> {
     prune(&mut map);
     let mut out: Vec<TransferSnapshot> = map.values().map(|e| e.snapshot.clone()).collect();
     // Newest first, and never dependent on HashMap iteration order.
-    out.sort_by(|a, b| b.started_at.cmp(&a.started_at));
+    out.sort_by_key(|a| std::cmp::Reverse(a.started_at));
     out
 }
 

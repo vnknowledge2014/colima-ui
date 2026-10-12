@@ -55,8 +55,7 @@ pub fn detect_platform() -> PlatformInfo {
         Command::new("wsl")
             .arg("--list")
             .output()
-            .map(|o| o.status.success())
-            .unwrap_or(false)
+            .is_ok_and(|o| o.status.success())
     } else {
         false
     };

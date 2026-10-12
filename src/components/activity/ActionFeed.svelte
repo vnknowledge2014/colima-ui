@@ -12,8 +12,9 @@
   import { globalToast } from "../../lib/globalToast";
   import { t } from "../../lib/i18n.svelte";
   import ProGate from "../ProGate.svelte";
+  import { isRunningInTauri } from "../../lib/env";
 
-  const isTauri = "__TAURI_INTERNALS__" in window;
+  const isTauri = isRunningInTauri();
   let exporting = $state(false);
 
   async function exportFeed(format: "json" | "csv") {

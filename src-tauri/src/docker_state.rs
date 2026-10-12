@@ -37,6 +37,10 @@ pub struct DockerState {
     /// Set by stop_instance/delete_instance before running the colima command.
     /// The watcher auto-clears this when the socket is truly gone (detect_docker_host() returns None).
     pub suppressed: bool,
+    /// True once the watcher has emitted a containerd-unsupported warning.
+    /// Reset when no containerd profile is running, so a later switch to
+    /// containerd is still reported.
+    pub containerd_warned: bool,
 }
 
 impl DockerState {
@@ -45,13 +49,22 @@ impl DockerState {
     pub fn new() -> Self {
         let docker = connect_bollard();
         if docker.is_none() {
-            eprintln!("[DockerState] Docker daemon not reachable — starting with empty state");
+            let containerd = crate::instance_reader::running_containerd_profiles();
+            if containerd.is_empty() {
+                eprintln!("[DockerState] Docker daemon not reachable — starting with empty state");
+            } else {
+                eprintln!(
+                    "[DockerState] Docker daemon not reachable — running Colima profile(s) use the unsupported containerd runtime: {}. Use `colima start --runtime docker`.",
+                    containerd.join(", ")
+                );
+            }
         }
         Self {
             docker,
             containers_cache: vec![],
             images_cache: vec![],
             suppressed: false,
+            containerd_warned: false,
         }
     }
 
@@ -104,6 +117,25 @@ pub async fn start_docker_watcher(app: AppHandle, state: Arc<RwLock<DockerState>
                 }
             }
             None => {
+                let containerd = crate::instance_reader::running_containerd_profiles();
+                if !containerd.is_empty() {
+                    let mut lock = state.write().await;
+                    if !lock.containerd_warned {
+                        lock.containerd_warned = true;
+                        let payload = serde_json::json!({
+                            "runtime": "containerd",
+                            "profiles": containerd,
+                        });
+                        crate::sse::publish_sse_event("docker-unsupported-runtime", &payload);
+                        let _ = app.emit("docker-unsupported-runtime", payload.clone());
+                        eprintln!(
+                            "[DockerWatcher] containerd runtime is unsupported for profile(s): {}. Use `colima start --runtime docker`.",
+                            containerd.join(", ")
+                        );
+                    }
+                } else {
+                    state.write().await.containerd_warned = false;
+                }
                 tokio::time::sleep(std::time::Duration::from_secs(2)).await;
                 continue;
             }

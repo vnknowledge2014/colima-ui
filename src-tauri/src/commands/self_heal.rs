@@ -278,8 +278,7 @@ fn db() -> &'static Mutex<Connection> {
 fn now_ms() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis() as i64)
-        .unwrap_or(0)
+        .map_or(0, |d| d.as_millis() as i64)
 }
 
 pub fn init(conn: &Connection) -> Result<(), String> {
@@ -493,12 +492,7 @@ pub fn is_enabled() -> bool {
     conn.query_row("SELECT enabled FROM heal_config WHERE id = 1", [], |r| {
         r.get::<_, i64>(0)
     })
-    .map(|v| v != 0)
-    // Unreadable configuration means "do not act": the failure mode of a
-    // silent no-op is a container left down, and the failure mode of the
-    // opposite is a machine being restarted by software that cannot read
-    // its own settings.
-    .unwrap_or(false)
+    .is_ok_and(|v| v != 0)
 }
 
 pub fn set_enabled(on: bool) -> Result<(), String> {

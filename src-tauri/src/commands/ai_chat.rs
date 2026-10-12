@@ -8,12 +8,13 @@ pub struct ChatMessage {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AiChatRequest {
-    pub provider: String, // "anthropic" | "openai" | "gemini" | "ollama-local" | "ollama-cloud"
+    // "anthropic" | "openai" | "openai-compatible" | "gemini" | "ollama-local" | "ollama-cloud"
+    pub provider: String,
     pub model: String,
     pub api_key: String,
     pub messages: Vec<ChatMessage>,
     #[serde(default)]
-    pub endpoint: String, // custom endpoint for ollama-cloud
+    pub endpoint: String, // base URL for ollama-cloud and openai-compatible
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -235,15 +236,13 @@ pub async fn ai_chat(request: AiChatRequest) -> Result<String, crate::error::Col
     async move {
     match request.provider.as_str() {
         "anthropic" => call_anthropic(&request).await,
-        "openai" => call_openai(&request).await,
+        // A compatible gateway differs from OpenAI only in its base URL, which
+        // `call_openai` already reads from the request.
+        "openai" | "openai-compatible" => call_openai(&request).await,
         "gemini" => call_gemini(&request).await,
         "ollama-local" => call_ollama(&request, "http://localhost:11434").await,
         "ollama-cloud" => {
-            let endpoint = if request.endpoint.is_empty() {
-                "http://localhost:11434".to_string()
-            } else {
-                request.endpoint.trim_end_matches('/').to_string()
-            };
+            let endpoint = ollama_cloud_base(&request.endpoint)?;
             call_ollama(&request, &endpoint).await
         }
         _ => Err(format!("Unknown provider: {}", request.provider)),
@@ -259,20 +258,84 @@ pub async fn ai_list_models(     provider: String,     api_key: String,     endp
     match provider.as_str() {
         "ollama-local" => list_ollama_models("http://localhost:11434", "").await,
         "ollama-cloud" => {
-            let ep = if endpoint.is_empty() {
-                "http://localhost:11434".to_string()
-            } else {
-                endpoint.trim_end_matches('/').to_string()
-            };
+            let ep = ollama_cloud_base(&endpoint)?;
             list_ollama_models(&ep, &api_key).await
         }
         "gemini" => list_gemini_models(&api_key, &endpoint).await,
         "anthropic" => list_anthropic_models(&api_key, &endpoint).await,
-        "openai" => list_openai_models(&api_key, &endpoint).await,
+        "openai" => list_openai_models(&api_key, &endpoint, true).await,
+        // A gateway's catalogue is its own — Llama, Mistral, DeepSeek and the
+        // rest would all be dropped by the OpenAI-only name filter.
+        "openai-compatible" => list_openai_models(&api_key, &endpoint, false).await,
         _ => Ok("[]".to_string()),
     }
     }
     .await.map_err(|e: String| crate::error::ColimaError::from(e))
+}
+
+/// Strip the `/api/...` suffix Ollama's own docs quote, so the caller can append
+/// its own path exactly once.
+///
+/// Mirrors `normalizeOllamaBaseUrl` in `src/lib/aiProviderConfig.ts`.
+fn normalize_ollama_base(raw: &str) -> String {
+    let trimmed = raw.trim().trim_end_matches('/');
+    if trimmed.is_empty() {
+        return String::new();
+    }
+
+    let lowered = trimmed.to_ascii_lowercase();
+    for suffix in ["/api/chat", "/api/tags", "/api/generate", "/api/show", "/api"] {
+        if let Some(prefix) = lowered.strip_suffix(suffix) {
+            return trimmed[..prefix.len()].trim_end_matches('/').to_string();
+        }
+    }
+
+    trimmed.to_string()
+}
+
+/// Resolve the host for `ollama-cloud`, refusing to guess one.
+///
+/// This used to fall back to `http://localhost:11434`, which made the provider
+/// indistinguishable from `ollama-local`: a blank field quietly answered from
+/// the local daemon, or failed naming a host the user never chose.
+fn ollama_cloud_base(endpoint: &str) -> Result<String, String> {
+    let base = normalize_ollama_base(endpoint);
+    if base.is_empty() {
+        return Err(
+            "Ollama Cloud needs an Endpoint URL. Set it in Settings → AI Provider (e.g. https://ollama.com)."
+                .to_string(),
+        );
+    }
+    Ok(base)
+}
+
+/// Reduce a user-supplied endpoint to the base a request path is appended to.
+///
+/// Mirrors `normalizeOpenAiBaseUrl` in `src/lib/aiProviderConfig.ts`: the
+/// streaming path runs in the webview and the non-streaming path runs here, and
+/// one endpoint setting feeds both — they cannot disagree about what it means.
+fn normalize_openai_base(raw: &str) -> String {
+    let trimmed = raw.trim().trim_end_matches('/');
+    if trimmed.is_empty() {
+        return String::new();
+    }
+
+    let without_completions = match trimmed.to_ascii_lowercase().strip_suffix("/chat/completions") {
+        Some(prefix) => trimmed[..prefix.len()].trim_end_matches('/'),
+        None => trimmed,
+    };
+
+    // No path after the authority means the version segment was left off.
+    let has_path = match without_completions.find("://") {
+        Some(scheme_end) => without_completions[scheme_end + 3..].contains('/'),
+        None => without_completions.contains('/'),
+    };
+
+    if has_path {
+        without_completions.to_string()
+    } else {
+        format!("{}/v1", without_completions)
+    }
 }
 
 // ===== Model listing =====
@@ -399,21 +462,34 @@ async fn list_anthropic_models(api_key: &str, endpoint: &str) -> Result<String, 
     serde_json::to_string(&models).map_err(|e| crate::redact::redact_err("Serialize error", e))
 }
 
-async fn list_openai_models(api_key: &str, endpoint: &str) -> Result<String, String> {
-    if api_key.is_empty() {
+/// List models from an OpenAI-shaped `/v1/models` catalogue.
+///
+/// `only_official` keeps the OpenAI name filter; a compatible gateway serves
+/// models under any vendor's name, so filtering there returns nothing.
+async fn list_openai_models(
+    api_key: &str,
+    endpoint: &str,
+    only_official: bool,
+) -> Result<String, String> {
+    // A self-hosted gateway needs no credential, so the key is only mandatory
+    // when the request is going to OpenAI itself.
+    if api_key.is_empty() && endpoint.is_empty() {
         return Ok("[]".to_string());
     }
-    
+
     let base = if endpoint.is_empty() {
-        "https://api.openai.com/v1"
+        "https://api.openai.com/v1".to_string()
     } else {
-        endpoint.trim_end_matches('/')
+        normalize_openai_base(endpoint)
     };
     let url = format!("{}/models", base);
 
-    let resp = http_client()
-        .get(&url)
-        .header("Authorization", format!("Bearer {}", api_key))
+    let mut req = http_client().get(&url);
+    if !api_key.is_empty() {
+        req = req.header("Authorization", format!("Bearer {}", api_key));
+    }
+
+    let resp = req
         .send()
         .await
         .map_err(|e| crate::redact::redact_err("Request failed", e))?;
@@ -432,7 +508,8 @@ async fn list_openai_models(api_key: &str, endpoint: &str) -> Result<String, Str
             arr.iter()
                 .filter_map(|m| {
                     let id = m["id"].as_str()?;
-                    if id.starts_with("gpt-")
+                    if !only_official
+                        || id.starts_with("gpt-")
                         || id.starts_with("o1")
                         || id.starts_with("o3")
                         || id.starts_with("o4")
@@ -544,9 +621,9 @@ async fn call_openai(req: &AiChatRequest) -> Result<String, String> {
     });
 
     let base = if req.endpoint.is_empty() {
-        "https://api.openai.com/v1"
+        "https://api.openai.com/v1".to_string()
     } else {
-        req.endpoint.trim_end_matches('/')
+        normalize_openai_base(&req.endpoint)
     };
     let url = format!("{}/chat/completions", base);
 
@@ -712,4 +789,74 @@ async fn call_ollama(req: &AiChatRequest, base_url: &str) -> Result<String, Stri
             let preview: String = resp_text.chars().take(200).collect();
             crate::redact::redact(&format!("No response content from Ollama — raw: {}", preview))
         })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{normalize_ollama_base, ollama_cloud_base, normalize_openai_base};
+
+    #[test]
+    fn an_ollama_host_keeps_one_api_path_however_it_was_pasted() {
+        for input in [
+            "https://ollama.com",
+            "https://ollama.com/",
+            "https://ollama.com/api",
+            "https://ollama.com/api/chat",
+            "https://ollama.com/api/tags",
+            "  https://ollama.com/api/chat  ",
+        ] {
+            assert_eq!(normalize_ollama_base(input), "https://ollama.com", "input: {input:?}");
+        }
+        // A port is part of the host, not a path to strip.
+        assert_eq!(
+            normalize_ollama_base("http://192.168.1.10:11434/api/chat"),
+            "http://192.168.1.10:11434"
+        );
+    }
+
+    #[test]
+    fn ollama_cloud_refuses_to_guess_a_host_instead_of_using_the_local_daemon() {
+        // The old fallback answered from localhost:11434, making this provider
+        // silently identical to ollama-local.
+        let err = ollama_cloud_base("").expect_err("a blank endpoint must not resolve");
+        assert!(err.contains("Endpoint URL"), "unhelpful message: {err}");
+        assert!(!err.contains("localhost"), "must not point at the local daemon: {err}");
+
+        assert!(ollama_cloud_base("   ").is_err());
+        assert_eq!(ollama_cloud_base("https://ollama.com/api").unwrap(), "https://ollama.com");
+    }
+
+    /// The same table is asserted in `src/lib/aiProviderConfig.test.ts`. The two
+    /// implementations feed one endpoint setting and must not diverge.
+    #[test]
+    fn every_form_of_a_proxy_url_reduces_to_one_base() {
+        for input in [
+            "http://localhost:4000",
+            "http://localhost:4000/",
+            "http://localhost:4000/v1",
+            "http://localhost:4000/v1/",
+            "http://localhost:4000/v1/chat/completions",
+            "  http://localhost:4000/v1  ",
+        ] {
+            assert_eq!(normalize_openai_base(input), "http://localhost:4000/v1", "input: {input:?}");
+        }
+    }
+
+    #[test]
+    fn a_gateway_mounted_under_a_path_keeps_it() {
+        assert_eq!(
+            normalize_openai_base("https://openrouter.ai/api/v1"),
+            "https://openrouter.ai/api/v1"
+        );
+        assert_eq!(
+            normalize_openai_base("https://api.groq.com/openai/v1/chat/completions"),
+            "https://api.groq.com/openai/v1"
+        );
+    }
+
+    #[test]
+    fn an_empty_endpoint_stays_empty_so_the_caller_picks_its_default() {
+        assert_eq!(normalize_openai_base(""), "");
+        assert_eq!(normalize_openai_base("   "), "");
+    }
 }

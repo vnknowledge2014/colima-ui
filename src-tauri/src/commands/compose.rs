@@ -111,6 +111,24 @@ pub async fn compose_restart(project_name: String) -> Result<String, crate::erro
     .await.map_err(|e: String| crate::error::ColimaError::from(e))
 }
 
+/// Stop a Docker Compose project (stops containers without removing them)
+#[tauri::command]
+pub async fn compose_stop(project_name: String) -> Result<String, crate::error::ColimaError> {
+    async move {
+    let output = runtime::run(vec!["compose".into(), "-p".into(), project_name.clone(), "stop".into()], runtime::DEFAULT_TIMEOUT).await?;
+
+    if !output.status.success() {
+        return Err(format!(
+            "docker compose stop failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        ));
+    }
+
+    Ok(format!("Compose project '{}' stopped", project_name))
+    }
+    .await.map_err(|e: String| crate::error::ColimaError::from(e))
+}
+
 /// Get compose project logs
 #[tauri::command]
 pub async fn compose_logs(project_name: String, lines: u32) -> Result<String, crate::error::ColimaError> {

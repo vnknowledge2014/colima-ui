@@ -8,21 +8,43 @@
   import { setAppSetting, getAppSetting } from "../../lib/settingsStore.svelte";
   import { normalizeError } from "../../lib/errors";
   import SettingsSection from "./SettingsSection.svelte";
+  import ModelPicker from "./ModelPicker.svelte";
   import type { AgentMemoryItem } from "../../lib/api/knowledgeBank";
+  import {
+    AI_PROVIDERS,
+    DEFAULT_PROVIDER,
+    activateProvider,
+    findProvider,
+    getProviderField,
+    setProviderField,
+  } from "../../lib/aiProviderConfig";
 
-  const AI_PROVIDERS = [
-    { id: "anthropic", label: "Anthropic" },
-    { id: "openai", label: "OpenAI" },
-    { id: "gemini", label: "Google Gemini" },
-    { id: "ollama-local", label: "Ollama Local" },
-    { id: "ollama-cloud", label: "Ollama Cloud" },
-  ];
+  // The fields seed from the stored provider and are edited independently
+  // afterwards, so they read the saved provider rather than the live one.
+  const savedProvider = getAppSetting("ai_provider", DEFAULT_PROVIDER);
+  let aiProvider = $state(savedProvider);
+  let aiModel = $state(getProviderField(savedProvider, "model"));
+  let aiApiKey = $state(getProviderField(savedProvider, "api_key"));
+  let aiEndpoint = $state(getProviderField(savedProvider, "endpoint"));
 
-  let aiProvider = $state(getAppSetting("ai_provider", "anthropic"));
-  let aiModel = $state(getAppSetting("ai_model", ""));
-  let aiApiKey = $state(getAppSetting("ai_api_key", ""));
-  let aiEndpoint = $state(getAppSetting("ai_endpoint", ""));
-  
+  let providerSpec = $derived(findProvider(aiProvider));
+
+  /**
+   * Swap the whole credential set, not just the model.
+   *
+   * Key and endpoint belong to the provider that issued them; carrying them
+   * across a switch sends one provider's secret to another and points requests
+   * at the wrong host.
+   */
+  function onProviderChange() {
+    activateProvider(aiProvider);
+    aiModel = getProviderField(aiProvider, "model");
+    aiApiKey = getProviderField(aiProvider, "api_key");
+    aiEndpoint = getProviderField(aiProvider, "endpoint");
+    availableModels = [];
+    modelsError = "";
+  }
+
   function getInitialSearxngInstances() {
     try { 
       return JSON.parse(getAppSetting("ai_searxng_instances", '["http://localhost:8888/search","https://search.inetol.net/search","https://searx.be/search","https://search.brave4u.com/search","https://priv.au/search"]')).join("\n"); 
@@ -40,6 +62,7 @@
   let searxngError = $state("");
   let availableModels = $state<string[]>([]);
   let modelsFetching = $state(false);
+  let modelsError = $state("");
 
   let apiKeyInput = $state<HTMLInputElement>();
   let aiCardEl = $state<HTMLDivElement>();
@@ -64,11 +87,10 @@
     });
   });
 
-  // Persist AI settings
-  $effect(() => { setAppSetting("ai_provider", aiProvider); });
-  $effect(() => { setAppSetting("ai_model", aiModel); });
-  $effect(() => { setAppSetting("ai_api_key", aiApiKey); });
-  $effect(() => { setAppSetting("ai_endpoint", aiEndpoint); });
+  // Persist AI settings, each under the provider it belongs to
+  $effect(() => { setProviderField(aiProvider, "model", aiModel); });
+  $effect(() => { setProviderField(aiProvider, "api_key", aiApiKey); });
+  $effect(() => { setProviderField(aiProvider, "endpoint", aiEndpoint); });
   $effect(() => {
     const arr = searxngInstances.split("\n").map((s: string) => s.trim()).filter(Boolean);
     setAppSetting("ai_searxng_instances", JSON.stringify(arr));
@@ -79,12 +101,21 @@
 
   async function fetchModels() {
     modelsFetching = true;
+    modelsError = "";
     try {
       const raw = await aiApi.listModels(aiProvider, aiApiKey, aiEndpoint);
       const parsed: string[] = JSON.parse(typeof raw === "string" ? raw : "[]");
       availableModels = [...new Set(parsed)];
-    } catch {
+      // An empty list is the shape a rejected credential arrives in, so say so
+      // rather than leaving the user staring at a dropdown that never opens.
+      if (availableModels.length === 0) {
+        modelsError = providerSpec?.needsKey && !aiApiKey
+          ? "No models — enter an API key first"
+          : "No models returned — check the API key and endpoint";
+      }
+    } catch (e) {
       availableModels = [];
+      modelsError = normalizeError(e).detail;
     } finally {
       modelsFetching = false;
     }
@@ -168,129 +199,128 @@
   });
 </script>
 
-<!-- AI & Diagnostics -->
-<SettingsSection title="AI & Diagnostics" icon="Robot" bind:el={aiCardEl}>
-
-  <!-- AI Provider -->
-  <div style="margin-bottom: 16px;">
-    <div style="font-size: var(--text-xs); font-weight: 600; color: var(--text-secondary); margin-bottom: 10px; text-transform: uppercase; letter-spacing: 0.05em; display: flex; align-items: center; gap: 6px;">
-      <Icon name="Gear" size={12} /> AI Provider
-    </div>
-    <div style="display: flex; gap: 8px; margin-bottom: 8px;">
-      <div style="flex: 1;">
-        <label for="aiProvider" style="font-size: 11px; color: var(--text-muted); display: block; margin-bottom: 4px;">Provider</label>
-        <select id="aiProvider" bind:value={aiProvider} onchange={() => aiModel = ""} class="input select">
-          {#each AI_PROVIDERS as p (p.id)}
-            <option value={p.id}>{p.label}</option>
-          {/each}
-        </select>
-      </div>
-      <div style="flex: 1;">
-        <label for="aiModel" style="font-size: 11px; color: var(--text-muted); display: block; margin-bottom: 4px;">
-          Model {#if modelsFetching}<span class="spinner" style="width: 10px; height: 10px; border-width: 1.5px; display: inline-block; vertical-align: middle; margin-left: 4px;"></span>{/if}
-        </label>
-        <input id="aiModel" type="text" list="settings-ai-models" bind:value={aiModel} placeholder="Type or select..." class="input" />
-        <datalist id="settings-ai-models">
-          {#each availableModels as m (m)}
-            <option value={m}></option>
-          {/each}
-        </datalist>
-        <button class="btn btn-ghost" style="font-size: 10px; padding: 2px 6px; margin-top: 4px; display: flex; align-items: center; gap: 3px;"
-          onclick={fetchModels} disabled={modelsFetching}>
-          <Icon name="Refresh" size={10} /> {modelsFetching ? "Fetching..." : "Refresh models"}
-        </button>
-      </div>
-    </div>
-    {#if aiProvider !== "ollama-local"}
-      <div style="margin-bottom: 8px;">
-        <label for="aiApiKey" style="font-size: 11px; color: var(--text-muted); display: block; margin-bottom: 4px;">API Key</label>
-        <input id="aiApiKey" bind:this={apiKeyInput} type="password" bind:value={aiApiKey} placeholder="Enter API key..." class="input" style="font-family: var(--font-mono);" />
-      </div>
-    {/if}
-    {#if aiProvider === "ollama-cloud"}
-      <div>
-        <label for="aiEndpoint" style="font-size: 11px; color: var(--text-muted); display: block; margin-bottom: 4px;">Endpoint URL</label>
-        <input id="aiEndpoint" type="text" bind:value={aiEndpoint} placeholder="https://your-ollama-server.com" class="input" style="font-family: var(--font-mono);" />
-      </div>
-    {/if}
+<!--
+  Four separate sections rather than one card with hand-drawn dividers: these
+  settings are independent of each other, and `SettingsSection` already draws
+  the heading and the separation every other settings panel uses.
+-->
+<SettingsSection
+  title="AI Provider"
+  icon="Robot"
+  description="The model every AI feature talks to. Each provider keeps its own key, endpoint and model — switching back restores them."
+  bind:el={aiCardEl}
+>
+  <!-- Ordered by dependency: the credential has to exist before the model list
+       can be fetched, so the key comes before the model field it unlocks. -->
+  <div class="form-group">
+    <label class="form-label" for="aiProvider">Provider</label>
+    <select id="aiProvider" bind:value={aiProvider} onchange={onProviderChange} class="input select">
+      {#each AI_PROVIDERS as p (p.id)}
+        <option value={p.id}>{p.label}</option>
+      {/each}
+    </select>
   </div>
 
-  <div style="border-top: 1px solid var(--border-subtle); margin: 0 0 16px;"></div>
+  {#if providerSpec?.needsKey}
+    <div class="form-group">
+      <label class="form-label" for="aiApiKey">API Key</label>
+      <input id="aiApiKey" bind:this={apiKeyInput} type="password" bind:value={aiApiKey} placeholder="Enter API key…" class="input mono" />
+    </div>
+  {/if}
 
-  <!-- Web Search -->
-  <div style="margin-bottom: 16px;">
-    <div style="font-size: var(--text-xs); font-weight: 600; color: var(--text-secondary); margin-bottom: 10px; text-transform: uppercase; letter-spacing: 0.05em; display: flex; align-items: center; gap: 6px;">
-      <Icon name="Search" size={12} /> Web Search
-    </div>
-    <div style="font-size: var(--text-xs); color: var(--text-muted); margin-bottom: 10px; line-height: 1.6; padding: 8px 10px; background: rgba(88,166,255,0.06); border-radius: var(--radius-md); border: 1px solid rgba(88,166,255,0.1);">
-      Search uses SearXNG instances first, then DuckDuckGo as fallback.
-      Public SearXNG instances may rate-limit API access.
-      For reliable results, run a local instance: <code style="font-size: 10px; background: var(--surface-inset); padding: 1px 4px; border-radius: var(--radius-sm);">docker run -d -p 8888:8080 searxng/searxng</code>
-    </div>
-    <div style="margin-bottom: 8px;">
-      <label for="searxngInstances" style="font-size: 11px; color: var(--text-muted); display: block; margin-bottom: 4px;">SearXNG Instances (one per line)</label>
-      <textarea id="searxngInstances" bind:value={searxngInstances} rows="4" placeholder="http://localhost:8888/search&#10;https://search.inetol.net/search" class="input" style="font-family: var(--font-mono); resize: vertical; line-height: 1.5;"></textarea>
-    </div>
-    <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
-      <button class="btn btn-ghost" style="font-size: var(--text-xs); display: flex; align-items: center; gap: 4px;"
-        onclick={testSearxng} disabled={searxngTesting}>
-        {#if searxngTesting}
-          <span class="spinner" style="width: 10px; height: 10px; border-width: 1.5px;"></span> Testing...
-        {:else}
-          <Icon name="Search" size={12} /> Test Web Search
-        {/if}
-      </button>
-      {#if searxngStatus === "ok"}
-        <span style="color: var(--accent-green); font-size: var(--text-xs); display: flex; align-items: center; gap: 4px;">
-          <Icon name="Check" size={12} color="var(--accent-green)" /> Connected{searxngError ? ` — ${searxngError}` : ''}
-        </span>
-      {/if}
-      {#if searxngStatus === "fail"}
-        <span style="color: var(--accent-red); font-size: var(--text-xs); display: flex; align-items: center; gap: 4px;">
-          <Icon name="Error" size={12} color="var(--accent-red)" /> Failed{searxngError ? ` — ${searxngError}` : ''}
-        </span>
+  {#if providerSpec?.needsEndpoint}
+    <div class="form-group">
+      <label class="form-label" for="aiEndpoint">Endpoint URL</label>
+      <input id="aiEndpoint" type="text" bind:value={aiEndpoint} placeholder={providerSpec.endpointPlaceholder ?? ""} class="input mono" />
+      {#if providerSpec.presets}
+        <div class="preset-row">
+          <span class="field-note">Presets:</span>
+          {#each providerSpec.presets as preset (preset.label)}
+            <button class="preset-chip" onclick={() => (aiEndpoint = preset.endpoint)}>{preset.label}</button>
+          {/each}
+        </div>
       {/if}
     </div>
+  {/if}
+
+  <div class="form-group" style="margin-bottom: 0;">
+    <label class="form-label" for="aiModel">Model</label>
+    <ModelPicker bind:value={aiModel} models={availableModels} fetching={modelsFetching} onRefresh={fetchModels} />
+    {#if modelsError}
+      <p class="field-note error">{modelsError}</p>
+    {:else if availableModels.length > 0}
+      <p class="field-note">{availableModels.length} models available</p>
+    {/if}
+    {#if providerSpec?.modelHint}
+      <p class="field-note">{providerSpec.modelHint}</p>
+    {/if}
+  </div>
+</SettingsSection>
+
+<SettingsSection
+  title="Web Search"
+  icon="Search"
+  description="Search tries your SearXNG instances first, then falls back to DuckDuckGo. Public instances often rate-limit API access."
+>
+  <div class="settings-inset" style="margin-bottom: 16px;">
+    <p class="field-note" style="margin: 0;">
+      For reliable results, run a local instance:
+      <code>docker run -d -p 8888:8080 searxng/searxng</code>
+    </p>
   </div>
 
-  <div style="border-top: 1px solid var(--border-subtle); margin: 0 0 16px;"></div>
-
-  <!-- Content Processing -->
-  <div style="margin-bottom: 16px;">
-    <div style="font-size: var(--text-xs); font-weight: 600; color: var(--text-secondary); margin-bottom: 10px; text-transform: uppercase; letter-spacing: 0.05em; display: flex; align-items: center; gap: 6px;">
-      <Icon name="Bolt" size={12} /> Content Processing
-    </div>
-    <div style="display: flex; gap: 8px;">
-      <div style="flex: 1;">
-        <label for="contentMode" style="font-size: 11px; color: var(--text-muted); display: block; margin-bottom: 4px;">Content Mode</label>
-        <select id="contentMode" bind:value={contentMode} class="input select">
-          <option value="full">Full — Keep images + links</option>
-          <option value="compact">Compact — Strip images only</option>
-          <option value="minimal">Minimal — Strip images + links</option>
-        </select>
-      </div>
-      <div style="flex: 1;">
-        <label for="maxPageSize" style="font-size: 11px; color: var(--text-muted); display: block; margin-bottom: 4px;">Max Page Size (chars)</label>
-        <input id="maxPageSize" type="number" bind:value={maxPageSize} min="1000" max="50000" step="1000" class="input" style="font-family: var(--font-mono);" />
-      </div>
-    </div>
+  <div class="form-group">
+    <label class="form-label" for="searxngInstances">SearXNG instances (one per line)</label>
+    <textarea id="searxngInstances" bind:value={searxngInstances} rows="4" placeholder="http://localhost:8888/search&#10;https://search.inetol.net/search" class="input mono instances"></textarea>
   </div>
 
-  <div style="border-top: 1px solid var(--border-subtle); margin: 0 0 16px;"></div>
-
-  <!-- Behavior -->
-  <div>
-    <div style="font-size: var(--text-xs); font-weight: 600; color: var(--text-secondary); margin-bottom: 10px; text-transform: uppercase; letter-spacing: 0.05em;">
-      Behavior
-    </div>
-    <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: var(--text-sm);">
-      <input type="checkbox" class="checkbox" bind:checked={autoTrigger} />
-      <span>Auto-trigger on errors</span>
-    </label>
-    <div style="font-size: var(--text-xs); color: var(--text-muted); margin-top: 4px; margin-left: 24px;">
-      When enabled, any application error automatically opens the AI diagnostics bubble and starts investigation.
-    </div>
+  <div class="action-row">
+    <button class="btn btn-ghost" onclick={testSearxng} disabled={searxngTesting}>
+      {#if searxngTesting}
+        <span class="spinner"></span> Testing…
+      {:else}
+        <Icon name="Search" size={14} /> Test web search
+      {/if}
+    </button>
+    {#if searxngStatus === "ok"}
+      <span class="status ok">
+        <Icon name="Check" size={14} color="var(--accent-green)" /> Connected{searxngError ? ` — ${searxngError}` : ''}
+      </span>
+    {:else if searxngStatus === "fail"}
+      <span class="status fail">
+        <Icon name="Error" size={14} color="var(--accent-red)" /> Failed{searxngError ? ` — ${searxngError}` : ''}
+      </span>
+    {/if}
   </div>
+</SettingsSection>
+
+<SettingsSection
+  title="Content Processing"
+  icon="Bolt"
+  description="How much of a fetched page the AI is given to read."
+>
+  <div class="form-group">
+    <label class="form-label" for="contentMode">Content mode</label>
+    <select id="contentMode" bind:value={contentMode} class="input select">
+      <option value="full">Full — keep images + links</option>
+      <option value="compact">Compact — strip images only</option>
+      <option value="minimal">Minimal — strip images + links</option>
+    </select>
+  </div>
+  <div class="form-group" style="margin-bottom: 0;">
+    <label class="form-label" for="maxPageSize">Max page size (characters)</label>
+    <input id="maxPageSize" type="number" bind:value={maxPageSize} min="1000" max="50000" step="1000" class="input mono" />
+  </div>
+</SettingsSection>
+
+<SettingsSection title="AI Behavior" icon="Gear">
+  <label class="toggle-row">
+    <input type="checkbox" class="checkbox" bind:checked={autoTrigger} />
+    <span>Auto-trigger on errors</span>
+  </label>
+  <p class="field-note indented">
+    Any application error opens the AI diagnostics bubble and starts investigating on its own.
+  </p>
 </SettingsSection>
 
 <!-- AI Knowledge & Memory -->
@@ -351,3 +381,101 @@
     {/if}
   </div>
 </SettingsSection>
+
+<style>
+  /* Identifiers the user copies or compares character by character — keys,
+     URLs, byte counts — read in the mono face. */
+  .mono {
+    font-family: var(--font-mono);
+  }
+
+  .instances {
+    resize: vertical;
+    line-height: 1.5;
+  }
+
+  .field-note {
+    margin: 0;
+    font-size: var(--text-xs);
+    color: var(--text-muted);
+    line-height: 1.5;
+  }
+
+  .field-note.error {
+    color: var(--accent-red);
+  }
+
+  /* Lines up with the label beside the checkbox, not the checkbox itself. */
+  .field-note.indented {
+    margin-top: 4px;
+    padding-left: 24px;
+  }
+
+  .field-note code {
+    font-size: var(--text-xs);
+    background: var(--bg-secondary);
+    padding: 1px 5px;
+    border-radius: var(--radius-sm);
+  }
+
+  .preset-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+    margin-top: 2px;
+  }
+
+  .preset-chip {
+    padding: 2px 8px;
+    font-size: var(--text-xs);
+    color: var(--text-secondary);
+    background: var(--surface-inset);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+  }
+
+  .preset-chip:hover {
+    color: var(--text-primary);
+    border-color: var(--border-primary);
+  }
+
+  .action-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+
+  .status {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    font-size: var(--text-xs);
+  }
+
+  .status.ok {
+    color: var(--accent-green);
+  }
+
+  .status.fail {
+    color: var(--accent-red);
+  }
+
+  .toggle-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: var(--text-sm);
+    cursor: pointer;
+  }
+
+  /* The shared spinner is sized for a page; inside a button it has to match
+     the icon it replaces. */
+  .btn .spinner {
+    width: 12px;
+    height: 12px;
+    border-width: 1.5px;
+  }
+</style>

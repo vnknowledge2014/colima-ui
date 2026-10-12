@@ -22,8 +22,7 @@ fn have(program: &str, args: &[&str]) -> bool {
     std::process::Command::new(program)
         .args(args)
         .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false)
+        .is_ok_and(|o| o.status.success())
 }
 
 fn prerequisites() -> bool {

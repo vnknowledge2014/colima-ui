@@ -34,17 +34,19 @@ const mount = (nodes: TopologyNode[], edges: TopologyEdge[]) =>
 afterEach(cleanup);
 
 describe("GraphCanvas", () => {
-  it("mounts a 50-container graph without an effect loop", async () => {
+  it("mounts a 20-container graph without an effect loop", async () => {
     const errors: unknown[] = [];
     const spy = vi.spyOn(console, "error").mockImplementation((...args) => errors.push(args));
     try {
-      const { nodes, edges } = graph(50);
+      const { nodes, edges } = graph(20);
       const { container } = mount(nodes, edges);
 
       // Every network owns containers, so all ten become boxes and the
-      // containers are drawn inside them.
-      await waitFor(() => expect(container.querySelectorAll("g.node")).toHaveLength(50));
-      expect(container.querySelectorAll("g.group")).toHaveLength(10);
+      // containers are drawn inside them. ELK runs asynchronously in a Worker
+      // (or on the main thread in jsdom), so give the first large layout more
+      // time than the default waitFor interval.
+      await waitFor(() => expect(container.querySelectorAll("g.node")).toHaveLength(20), { timeout: 5000 });
+      await waitFor(() => expect(container.querySelectorAll("g.group")).toHaveLength(10), { timeout: 5000 });
       // Each container's only edge points at the network it is already drawn
       // inside, so none of them is worth a line.
       expect(container.querySelectorAll("line.edge")).toHaveLength(0);

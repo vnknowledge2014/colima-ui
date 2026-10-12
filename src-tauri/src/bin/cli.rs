@@ -287,7 +287,7 @@ async fn handle_container(action: ContainerAction, json: bool) {
                                 truncate(&c.name, 24),
                                 truncate(&c.image, 29),
                                 truncate(&c.status, 19),
-                                &c.ports
+                                c.ports
                             );
                         }
                         println!("\n{} containers total", containers.len());
@@ -414,7 +414,7 @@ async fn handle_image(action: ImageAction, json: bool) {
                     } else {
                         println!("{:<40} {:<15} {:<15}", "REPOSITORY", "TAG", "SIZE");
                         for img in &images {
-                            println!("{:<40} {:<15} {:<15}", truncate(&img.repository, 39), truncate(&img.tag, 14), &img.size);
+                            println!("{:<40} {:<15} {:<15}", truncate(&img.repository, 39), truncate(&img.tag, 14), img.size);
                         }
                     }
                 }

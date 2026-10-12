@@ -191,7 +191,7 @@ pub fn kill_all_streams() -> usize {
 }
 
 pub fn active_stream_count() -> usize {
-    RUNNING.lock().map(|m| m.len()).unwrap_or(0)
+    RUNNING.lock().map_or(0, |m| m.len())
 }
 
 /// Job ids cancelled before their child existed.
@@ -238,8 +238,7 @@ pub fn disarm_cancel(job_id: &str) {
 fn register(job_id: &str, child: Child) -> Result<(Arc<Mutex<Child>>, Arc<AtomicBool>), String> {
     let armed = PENDING_CANCEL
         .lock()
-        .map(|mut pending| pending.remove(job_id))
-        .unwrap_or(false);
+        .is_ok_and(|mut pending| pending.remove(job_id));
 
     let mut map = RUNNING
         .lock()
@@ -296,7 +295,7 @@ fn collect_stderr(rx: Option<Receiver<String>>) -> String {
 }
 
 fn file_len(path: &Path) -> u64 {
-    std::fs::metadata(path).map(|m| m.len()).unwrap_or(0)
+    std::fs::metadata(path).map_or(0, |m| m.len())
 }
 
 /// Sibling scratch file a streamed download is written to before it is published.

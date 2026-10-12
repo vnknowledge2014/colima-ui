@@ -54,7 +54,6 @@
   height: var(--header-height);
   padding-top: var(--header-pad-top);
   padding-bottom: var(--header-pad-bottom);
-  -webkit-app-region: drag;
 }
 
 .sidebar-logo {
@@ -185,7 +184,6 @@
   padding-bottom: var(--header-pad-bottom);
   flex-shrink: 0;
   background: var(--bg-content);
-  -webkit-app-region: drag;
   /* Single row at every width: title and actions truncate/shrink instead of
      wrapping to a second line when the window narrows. */
   overflow: hidden;
@@ -218,7 +216,6 @@
 .content-header-actions {
   display: flex;
   gap: 8px;
-  -webkit-app-region: no-drag;
   flex-shrink: 1;
   min-width: 0;
 }

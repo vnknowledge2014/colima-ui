@@ -81,6 +81,10 @@ pub fn build_router() -> Router {
         .route("/api/system/host-specs", get(api_host_specs))
         .route("/api/system/engine-resources", get(api_engine_resources))
         .route("/api/system/install", post(api_install_dep))
+        .route(
+            "/api/system/autostart",
+            get(api_get_autostart_status).post(api_configure_autostart),
+        )
         // Colima instances
         .route("/api/instances", get(api_list_instances))
         .route("/api/instances/start", post(api_start_instance))
@@ -195,6 +199,7 @@ pub fn build_router() -> Router {
         .route("/api/compose/up", post(api_compose_up))
         .route("/api/compose/down", post(api_compose_down))
         .route("/api/compose/restart", post(api_compose_restart))
+        .route("/api/compose/stop", post(api_compose_stop))
         .route("/api/compose/logs", get(api_compose_logs))
         .route("/api/compose/ps", get(api_compose_ps))
         .route("/api/compose/diagnose", post(api_compose_diagnose))
@@ -403,7 +408,7 @@ pub fn start_api_server() {
                     }
                     // Server stopped — kill all tracked port-forwards
                     if let Ok(fwds) = PORT_FORWARDS.lock() {
-                        for (_, pid) in fwds.iter() {
+                        for pid in fwds.values() {
                             #[cfg(unix)]
                             unsafe {
                                 libc::kill(*pid as i32, libc::SIGTERM);

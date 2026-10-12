@@ -1,5 +1,7 @@
 pub mod announcements;
 pub mod agent_loop;
+/// Start Colima at login, via launchd (macOS) or systemd --user (Linux).
+pub mod autostart;
 pub mod ai_chat;
 pub mod colima;
 pub mod colima_config;

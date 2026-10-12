@@ -19,7 +19,12 @@ export interface ParsedTools {
   schedCrons: string[][];
   schedTimers: string[][];
   schedCancels: string[][];
+  /** `[label, prompt?]` per chip. Deliberately excluded from `hasTools`. */
+  suggests: string[][];
 }
+
+/** The chat panel renders at most this many chips; the rest are dropped. */
+export const MAX_SUGGESTIONS = 3;
 
 export function parseAiTools(responseText: string): ParsedTools {
   const queries = [...responseText.matchAll(/\[QUERY:\s*([^|]+)\s*(?:\|\s*(.+?))?\]/gi)];
@@ -44,6 +49,9 @@ export function parseAiTools(responseText: string): ParsedTools {
   const schedTimers = [...responseText.matchAll(/\[SCHEDULE_TIMER:\s*(\d+)\s*(?:\|\s*(.+?))?\]/gi)];
   const schedCancels = [...responseText.matchAll(/\[SCHEDULE_CANCEL:\s*(.+?)\]/gi)];
 
+  // Follow-ups the user can click. Not a tool: nothing runs until they do.
+  const suggests = [...responseText.matchAll(/\[SUGGEST:\s*([^|\]]+?)\s*(?:\|\s*(.+?))?\]/gi)];
+
   const cleanText = responseText
     .replace(/\[QUERY:\s*[^|]+\s*(?:\|.+?)?\]/gi, "")
     .replace(/\[EVENT_APPROVE:\s*[^|]+\s*(?:\|.+?)?\]/gi, "")
@@ -63,6 +71,7 @@ export function parseAiTools(responseText: string): ParsedTools {
     .replace(/\[SCHEDULE_CRON:\s*[^|]+\s*(?:\|.+?)?\]/gi, "")
     .replace(/\[SCHEDULE_TIMER:\s*\d+\s*(?:\|.+?)?\]/gi, "")
     .replace(/\[SCHEDULE_CANCEL:\s*.+?\]/gi, "")
+    .replace(/\[SUGGEST:\s*[^|\]]+?\s*(?:\|.+?)?\]/gi, "")
     .trim();
 
   const hasTools = queries.length > 0 || eventApprovals.length > 0 || hasDiagnose || hasQueryState || 
@@ -91,6 +100,9 @@ export function parseAiTools(responseText: string): ParsedTools {
     secPatchGens,
     schedCrons,
     schedTimers,
-    schedCancels
+    schedCancels,
+    // Capped here rather than at the call site so every consumer gets the same
+    // list and a chatty model cannot flood the panel.
+    suggests: suggests.slice(0, MAX_SUGGESTIONS)
   };
 }

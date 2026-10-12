@@ -6,7 +6,7 @@
  * error-prone patterns. Everything here runs with `--max-warnings=0`,
  * so a single warning fails the push.
  *
- * Agents MUST run `pnpm lint` before committing. See AGENTS.md.
+ * Agents MUST run `pnpm lint` before committing. See README → "Lint & Quality Gates".
  */
 import js from '@eslint/js';
 import tseslint from 'typescript-eslint';

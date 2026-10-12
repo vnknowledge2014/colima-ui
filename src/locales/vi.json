@@ -807,5 +807,9 @@
     "payload_covers": "Gồm {n} sự kiện",
     "payload_omitted": ", {n} không được đưa vào",
     "nothing_to_explain": "Các sự kiện này không còn trong khoảng gần đây nữa."
+  },
+  "docker": {
+    "unsupported_runtime": "Runtime {runtime} không được hỗ trợ ({profiles})",
+    "unsupported_runtime_hint": "ColimaUI yêu cầu runtime Docker. Dừng profile và chạy: `colima start --runtime docker`"
   }
 }

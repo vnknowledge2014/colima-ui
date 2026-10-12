@@ -189,6 +189,9 @@ pub struct VMStatus {
 // ============================================================
 
 /// Trait for container runtime operations (Docker, Podman, nerdctl).
+// `async_trait` expands each method with its own `#[must_use]` future; newer clippy
+// flags that as a double `must_use` on every method. Expansion artefact, not our code.
+#[allow(clippy::double_must_use)]
 #[async_trait]
 pub trait ContainerRuntime: Send + Sync {
     /// Runtime name (e.g., "docker", "podman", "nerdctl")
@@ -233,6 +236,7 @@ pub trait ContainerRuntime: Send + Sync {
 }
 
 /// Trait for VM manager operations (Colima, Lima, Vagrant, etc.).
+#[allow(clippy::double_must_use)] // async_trait expansion artefact, see ContainerRuntime
 #[async_trait]
 pub trait VMManager: Send + Sync {
     /// Manager name (e.g., "colima", "lima", "vagrant")
@@ -250,6 +254,7 @@ pub trait VMManager: Send + Sync {
 }
 
 /// Trait for Orchestrator operations (Kubernetes/kubectl, Helm, Kind).
+#[allow(clippy::double_must_use)] // async_trait expansion artefact, see ContainerRuntime
 #[async_trait]
 pub trait Orchestrator: Send + Sync {
     /// Orchestrator name (e.g., "kubectl")
@@ -260,6 +265,7 @@ pub trait Orchestrator: Send + Sync {
 }
 
 /// Trait for Compose manager operations (docker-compose, podman-compose).
+#[allow(clippy::double_must_use)] // async_trait expansion artefact, see ContainerRuntime
 #[async_trait]
 pub trait ComposeManager: Send + Sync {
     /// Manager name (e.g., "docker-compose")

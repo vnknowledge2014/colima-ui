@@ -1,6 +1,6 @@
 # Backend Reference
 
-The Rust backend (~12,800 lines) is organized into layers: **commands** (business logic), **routes** (HTTP delegation), **adapters** (CLI abstraction), and **services** (orchestration).
+The Rust backend (~33,700 lines across 101 files) is organized into layers: **commands** (business logic), **routes** (HTTP delegation), **adapters** (CLI abstraction), and **services** (orchestration).
 
 ## Module Map
 
@@ -19,8 +19,8 @@ src-tauri/src/
 ├── terminal_session.rs    # PTY-based terminal session for xterm.js
 ├── poller.rs              # Background instance status poller
 ├── path_util.rs           # macOS PATH fixup for Finder/Dock launches
-├── commands/              # Business logic (14 modules)
-├── routes/                # HTTP route handlers (14 modules)
+├── commands/              # Business logic (41 modules)
+├── routes/                # HTTP route handlers (25 modules)
 ├── adapters/              # Unified DevOps adapter traits (7 modules)
 └── services/              # High-level orchestration (4 modules)
 ```
@@ -31,21 +31,46 @@ The central business logic layer. Both Tauri IPC and HTTP routes call into these
 
 | Module | Lines | Responsibility |
 |--------|-------|---------------|
-| `containers.rs` | 717 | Docker container & image CRUD, stats, exec, run, prune |
-| `knowledge_bank.rs` | 848 | SQLite knowledge bank: solutions, feedback, memory, settings, presets |
-| `searxng.rs` | 631 | SearXNG/DuckDuckGo web search + HTML→Markdown conversion |
-| `colima.rs` | 602 | Colima instance lifecycle + diagnostics + worker nodes |
-| `ai_chat.rs` | 560 | Multi-provider AI chat (Anthropic/OpenAI/Google/Ollama/...) |
-| `kubernetes.rs` | 472 | kubectl operations: pods, deployments, services, namespaces, events |
-| `system.rs` | 445 | System info, tool checks, host specs, resource saver mode |
-| `shell_sandbox.rs` | 282 | 3-tier command sandbox: safe/approve/banned classification |
-| `lima.rs` | 241 | Lima VM lifecycle + shell + templates + create |
-| `models.rs` | 188 | Ollama model management (list, pull, serve, delete) |
-| `compose.rs` | 155 | Docker Compose project management |
-| `networks.rs` | 145 | Docker network CRUD + prune |
-| `volumes.rs` | 153 | Docker volume CRUD + prune |
-| `agent_loop.rs` | 134 | AI agent tool execution loop |
-| `runtime.rs` | 60 | Runtime detection (docker vs nerdctl) |
+| `containers.rs` | 966 | Docker container & image CRUD, stats, exec, run, prune |
+| `knowledge_bank.rs` | 1001 | SQLite knowledge bank: solutions, feedback, memory, settings, presets |
+| `searxng.rs` | 628 | SearXNG/DuckDuckGo web search + HTML→Markdown conversion |
+| `colima.rs` | 730 | Colima instance lifecycle + diagnostics + worker nodes |
+| `ai_chat.rs` | 862 | Multi-provider AI chat (Anthropic/OpenAI/Google/Ollama/...) |
+| `kubernetes.rs` | 644 | kubectl operations: pods, deployments, services, namespaces, events |
+| `system.rs` | 598 | System info, tool checks, host specs, resource saver mode |
+| `shell_sandbox.rs` | 291 | 3-tier command sandbox: safe/approve/banned classification |
+| `lima.rs` | 285 | Lima VM lifecycle + shell + templates + create |
+| `models.rs` | 200 | Ollama model management (list, pull, serve, delete) |
+| `compose.rs` | 156 | Docker Compose project management |
+| `networks.rs` | 166 | Docker network CRUD + prune |
+| `volumes.rs` | 178 | Docker volume CRUD + prune |
+| `agent_loop.rs` | 135 | AI agent tool execution loop |
+| `runtime.rs` | 159 | Runtime detection (docker vs nerdctl) |
+| `self_heal.rs` | 1122 | Self-healing rules & kill switch (no route performs a repair) |
+| `colima_config.rs` | 1101 | Read/write Colima instance configuration |
+| `file_transfer.rs` | 1067 | Container copy & image TAR transfer jobs |
+| `security_scan.rs` | 942 | Trivy scan orchestration |
+| `security_rules.rs` | 780 | Configuration rule pack |
+| `activity.rs` | 757 | Activity record: what was done to the machine |
+| `diagnostics.rs` | 680 | Diagnostic bundle collection |
+| `metrics_collector.rs` | 667 | The app's only sampling loop; Pro plugs in via `set_metric_writer` |
+| `k8s_cluster.rs` | 632 | Cluster health, nodes, component status |
+| `activity_feed.rs` | 577 | Feed assembly and export (JSON/CSV) |
+| `kb_articles.rs` | 482 | Bundled knowledge-base articles (5 locales) |
+| `compose_diagnose.rs` | 473 | Compose file diagnosis (schema, undefined refs, YAML) |
+| `topology.rs` | 465 | Topology graph endpoint |
+| `security_score.rs` | 415 | Score computation with scanner/db provenance |
+| `k8s_resources.rs` | 308 | Generic K8s resource browsing & CRDs |
+| `system_capabilities.rs` | 276 | Capability reporting |
+| `dockerfile_parse.rs` | 270 | Dockerfile parsing for the layer/security views |
+| `security_catalog.rs` | 248 | Base-image alternatives catalog (local table) |
+| `announcements.rs` | 239 | Release notes & advisories feed (fetch + filter) |
+| `compose_services.rs` | 232 | Per-service compose inspection |
+| `engine_resources.rs` | 232 | Aggregate engine CPU/memory (one-shot, expensive) |
+| `autostart.rs` | 217 | Launch-at-login toggle |
+| `activity_coverage.rs` | 182 | Asserts every mutating command records activity |
+| `terminal.rs` | 126 | PTY terminal command surface |
+| `kind.rs` | 63 | Kind cluster lifecycle |
 
 ### Key Patterns
 
@@ -74,21 +99,30 @@ Thin HTTP handlers that extract request parameters and delegate to `commands/`:
 
 | Module | Lines | Endpoints |
 |--------|-------|-----------|
-| `k8s.rs` | 1,182 | 30+ Kubernetes endpoints (complex kubectl logic) |
-| `payloads.rs` | 807 | All request/response struct definitions |
-| `system.rs` | 261 | System info, tool checks, install deps, prune |
+| `k8s.rs` | 832 | 30+ Kubernetes endpoints (complex kubectl logic) |
+| `payloads.rs` | 896 | All request/response struct definitions |
+| `system.rs` | 217 | System info, tool checks, install deps, prune |
 | `containers.rs` | 171 | Container CRUD, logs, stats, exec, run |
-| `ai.rs` | 142 | AI chat, CLI chat, tool execution |
-| `kb.rs` | 105 | Knowledge bank queries, feedback, memory |
+| `ai.rs` | 255 | AI chat, CLI chat, tool execution |
+| `kb.rs` | 184 | Knowledge bank queries, feedback, memory |
 | `images.rs` | 87 | Image CRUD, pull, prune |
-| `ws.rs` | 79 | WebSocket terminal sessions |
 | `lima.rs` | 77 | Lima VM operations |
 | `instances.rs` | 69 | Colima instance management |
-| `compose.rs` | 65 | Docker Compose operations |
+| `compose.rs` | 76 | Docker Compose operations |
 | `networks.rs` | 53 | Network CRUD |
 | `volumes.rs` | 54 | Volume CRUD |
 | `models.rs` | 45 | Ollama model management |
-| `misc.rs` | 17 | SSE events endpoint |
+| `misc.rs` | 221 | SSE events endpoint |
+| `security.rs` | 158 | Security scan/score/rules endpoints |
+| `colima_config.rs` | 97 | Read/write Colima instance configuration |
+| `file_transfer.rs` | 90 | Container copy & image TAR transfer jobs |
+| `self_heal.rs` | 84 | Self-healing rules & kill switch (no route performs a repair) |
+| `activity.rs` | 68 | Activity record: what was done to the machine |
+| `capabilities.rs` | 35 | Capability probe endpoints |
+| `diagnostics.rs` | 31 | Diagnostic bundle collection |
+| `announcements.rs` | 21 | Release notes & advisories feed (fetch + filter) |
+| `system_capabilities.rs` | 17 | Capability reporting |
+| `topology.rs` | 15 | Topology graph endpoint |
 
 ### Delegation Pattern
 
@@ -111,12 +145,12 @@ Trait-based abstraction over CLI tools for future testability:
 | Module | Lines | Abstraction |
 |--------|-------|-------------|
 | `traits.rs` | 270 | `ContainerRuntime`, `VmManager`, `Orchestrator` traits |
-| `docker.rs` | 370 | Docker CLI adapter |
-| `nerdctl.rs` | 367 | nerdctl CLI adapter |
-| `colima.rs` | 246 | Colima CLI adapter |
-| `lima.rs` | 186 | Lima CLI adapter |
-| `compose.rs` | 52 | Docker Compose adapter |
-| `kubectl.rs` | 49 | kubectl adapter |
+| `docker.rs` | 372 | Docker CLI adapter |
+| `nerdctl.rs` | 372 | nerdctl CLI adapter |
+| `colima.rs` | 252 | Colima CLI adapter |
+| `lima.rs` | 192 | Lima CLI adapter |
+| `compose.rs` | 58 | Docker Compose adapter |
+| `kubectl.rs` | 55 | kubectl adapter |
 
 ## Services Layer (`services/`)
 

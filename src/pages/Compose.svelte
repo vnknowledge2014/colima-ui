@@ -7,6 +7,7 @@
   import RowActions from "../components/RowActions.svelte";
   import * as Icons from "../components/Icons.svelte";
   import { viewInTopology, consumeFocus } from "../lib/topology-link";
+  import { setVisibleInterval } from "../lib/visibleInterval";
 
   let projects = $state<ComposeProject[]>([]);
   let loading = $state(true);
@@ -38,17 +39,17 @@
       const match = focus ? projects.find((p) => p.Name === focus) : undefined;
       if (match) openProject(match);
     });
-    const interval = setInterval(() => {
-      if (document.visibilityState === "visible") fetchProjects();
-    }, 15000);
-    return () => clearInterval(interval);
+    return setVisibleInterval(fetchProjects, 15000);
   });
 
-  async function handleAction(name: string, action: "down" | "restart") {
+  async function handleAction(name: string, action: "down" | "restart" | "stop") {
     actionLoading = `${name}-${action}`;
     try {
       if (action === "down") {
         await composeApi.down(name);
+        globalToast("success", `Project '${name}' stopped and removed`);
+      } else if (action === "stop") {
+        await composeApi.stop(name);
         globalToast("success", `Project '${name}' stopped`);
       } else {
         await composeApi.restart(name);
@@ -156,14 +157,21 @@
                   </div>
                 {/if}
               </div>
-              <!-- Restart stays inline as the routine move; Down tears the whole
-                   project off, so it sits behind the overflow menu. -->
+              <!-- Stop keeps the project visible; Restart stays inline as the
+                   routine move; Down tears the whole project off, so it sits
+                   behind the overflow menu. -->
               <RowActions
                 inline={[
                   {
                     icon: Icons.Topology,
                     label: t('common.view_in_topology', { default: 'View in topology' }),
                     onclick: () => viewInTopology("project", p.Name),
+                  },
+                  {
+                    icon: Icons.Stop,
+                    label: t('compose.stop', { default: 'Stop' }),
+                    disabled: !!isLoading,
+                    onclick: () => handleAction(p.Name, "stop"),
                   },
                   {
                     icon: Icons.Refresh,
@@ -174,7 +182,7 @@
                 ]}
                 menu={[{
                   label: t('compose.down', { default: 'Down' }),
-                  icon: Icons.Stop,
+                  icon: Icons.Trash,
                   danger: true,
                   disabled: !!isLoading,
                   action: () => handleAction(p.Name, "down"),

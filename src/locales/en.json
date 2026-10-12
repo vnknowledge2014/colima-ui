@@ -807,5 +807,9 @@
     "payload_covers": "Covers {n} events",
     "payload_omitted": ", {n} not included",
     "nothing_to_explain": "These events are no longer in the recent window."
+  },
+  "docker": {
+    "unsupported_runtime": "{runtime} runtime is not supported ({profiles})",
+    "unsupported_runtime_hint": "ColimaUI requires the Docker runtime. Stop the profile and run: colima start --runtime docker"
   }
 }

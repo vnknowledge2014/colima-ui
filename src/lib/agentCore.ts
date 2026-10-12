@@ -5,6 +5,7 @@ import { newId } from "./ids";
 import { getCategory, executeEvent } from "./aiEventBus";
 import { BUILT_IN_PRESETS } from "./presetStateManager";
 import { parseAiTools } from "./aiToolParser";
+import { findProvider } from "./aiProviderConfig";
 
 export interface AgentCallbacks {
   onStatus: (text: string) => void;
@@ -33,20 +34,23 @@ export async function runAgent(
 
   const aborted = () => signal?.aborted === true;
 
-  if (!apiKey && provider !== "ollama-local") {
-    callbacks.onMessage({ id: newId(), role: "system", content: "⚠️ API Key not configured." });
-    return;
-  }
+  // Driven by the provider registry rather than a hardcoded id list, so a
+  // provider added there is guarded correctly without editing this function.
+  const spec = findProvider(provider);
+
   if (!model) {
-    callbacks.onMessage({ id: Date.now().toString(), role: "system", content: "⚠️ No AI model selected. Go to **Settings → AI & Diagnostics** and pick a model." });
+    callbacks.onMessage({ id: newId(), role: "system", content: "⚠️ No AI model selected. Go to **Settings → AI Provider** and pick a model." });
     return;
   }
-  if (!apiKey && provider !== "ollama-local" && provider !== "ollama-cloud") {
-    callbacks.onMessage({ id: Date.now().toString(), role: "system", content: "⚠️ API Key not configured. Go to **Settings → AI & Diagnostics** to add your API key." });
+  if (spec?.needsEndpoint && !endpoint) {
+    callbacks.onMessage({ id: newId(), role: "system", content: `⚠️ ${spec.label} requires an **Endpoint URL**. Go to **Settings → AI Provider** and set it (e.g. \`${spec.endpointPlaceholder ?? "https://your-host.com"}\`).` });
     return;
   }
-  if ((provider === "ollama-cloud") && !endpoint) {
-    callbacks.onMessage({ id: Date.now().toString(), role: "system", content: "⚠️ Ollama Cloud requires an **Endpoint URL**. Go to **Settings → AI & Diagnostics** and set the endpoint (e.g. `https://your-ollama-host.com`)." });
+  // A self-hosted gateway on localhost usually has no credential at all, so a
+  // key is only required when the request is going to the vendor's own API.
+  const keyRequired = spec ? spec.needsKey && !(spec.needsEndpoint && endpoint) : true;
+  if (keyRequired && !apiKey) {
+    callbacks.onMessage({ id: newId(), role: "system", content: "⚠️ API Key not configured. Go to **Settings → AI Provider** to add your API key." });
     return;
   }
   // ─────────────────────────────────────────────────────────────────────────

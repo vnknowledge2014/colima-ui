@@ -48,6 +48,16 @@ pub async fn api_compose_restart(
 }
 
 
+pub async fn api_compose_stop(
+    Json(body): Json<ComposeProjectBody>,
+) -> (StatusCode, Json<ApiResponse<String>>) {
+    match compose::compose_stop(body.project_name).await {
+        Ok(out) => ok(out),
+        Err(e) => err(e.to_string()),
+    }
+}
+
+
 pub async fn api_compose_logs(
     Query(q): Query<ComposeLogsQuery>,
 ) -> (StatusCode, Json<ApiResponse<String>>) {

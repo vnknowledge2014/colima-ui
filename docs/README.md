@@ -17,3 +17,4 @@ Detailed technical documentation for the ColimaUI project.
 | [Polar billing setup](polar-billing-setup.md) | Console guide: seat-based products, checkout links, access token, test purchase |
 | [Pricing rationale](pricing-rationale.md) | Why Free / Pro / Pro Teams are priced and scoped the way they are |
 | [Topology design philosophy](topology-design-philosophy.md) | Design rules for the topology graph page — read before adding node kinds or node actions |
+| [Telemetry](telemetry.md) | What leaves the machine, when, and what it discloses |

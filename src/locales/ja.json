@@ -807,5 +807,9 @@
     "payload_covers": "{n} 件のイベントを含みます",
     "payload_omitted": "、{n} 件は含まれていません",
     "nothing_to_explain": "これらのイベントは直近の対象範囲から外れています。"
+  },
+  "docker": {
+    "unsupported_runtime": "{runtime} ランタイムはサポートされていません ({profiles})",
+    "unsupported_runtime_hint": "ColimaUI には Docker ランタイムが必要です。プロファイルを停止して `colima start --runtime docker` を実行してください"
   }
 }
