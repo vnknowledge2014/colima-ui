@@ -198,7 +198,7 @@ pub fn health(writing: bool) -> WriterHealth {
         accepted_batches: ACCEPTED_BATCHES.load(Ordering::Relaxed),
         dropped_batches: DROPPED_BATCHES.load(Ordering::Relaxed),
         skipped_batches: SKIPPED_BATCHES.load(Ordering::Relaxed),
-        db_bytes: std::fs::metadata(db_path()).map(|m| m.len()).unwrap_or(0),
+        db_bytes: std::fs::metadata(db_path()).map_or(0, |m| m.len()),
         writing,
     }
 }
@@ -449,7 +449,7 @@ pub fn run_retention(conn: &mut Connection, now_ms: i64, size_cap: u64, path: &s
 /// deleted the newest data would make the feature useless exactly when it
 /// mattered.
 fn enforce_size_cap(conn: &mut Connection, cap: u64, path: &std::path::Path) -> Result<(), String> {
-    let size = std::fs::metadata(path).map(|m| m.len()).unwrap_or(0);
+    let size = std::fs::metadata(path).map_or(0, |m| m.len());
     if size <= cap {
         return Ok(());
     }
@@ -505,8 +505,7 @@ pub fn spawn_retention() {
 fn now_ms() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis() as i64)
-        .unwrap_or(0)
+        .map_or(0, |d| d.as_millis() as i64)
 }
 
 // ===== Reading =====

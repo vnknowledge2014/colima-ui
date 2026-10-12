@@ -2,7 +2,9 @@
   "getting_started": {
     "title": "欢迎使用 Colima UI",
     "language_select": "选择语言",
-    "next": "下一步"
+    "next": "下一步",
+    "subtitle": "Your cross-platform graphical interface for managing Colima instances, Docker containers, Kubernetes clusters, and Linux VMs.",
+    "skip": "Skip Setup"
   },
   "sidebar": {
     "overview": "概览",
@@ -33,7 +35,9 @@
     "colima_running": "{count} 个运行中",
     "colima_stopped": "已停止",
     "colima_instances": "实例",
-    "security": "安全"
+    "security": "安全",
+    "ai_panel_close": "Close the AI panel (⌘K)",
+    "ai_panel_open": "Open the AI panel beside the page (⌘K)"
   },
   "dashboard": {
     "title": "仪表盘",
@@ -58,11 +62,15 @@
     "of": "/",
     "reclaimable": "可回收",
     "allocated_memory": "已分配内存",
-    "allocated_disk": "已分配磁盘"
+    "allocated_disk": "已分配磁盘",
+    "loading": "Loading..."
   },
   "settings": {
     "title": "设置",
-    "language": "语言"
+    "language": "语言",
+    "subtitle": "Configure ColimaUI, AI behavior, and resources",
+    "appearance": "Appearance",
+    "language_desc": "Change the application language"
   },
   "errors": {
     "panel_title": "错误详情",
@@ -143,7 +151,34 @@
     "standalone": "独立",
     "running_lower": "运行中",
     "copy_in": "复制文件到容器",
-    "copy_out": "从容器复制文件"
+    "copy_out": "从容器复制文件",
+    "remove": "Remove",
+    "title": "Containers",
+    "running": "running",
+    "total": "total",
+    "search": "Search containers...",
+    "run": "Run",
+    "active_workspace": "Active Workspace",
+    "selected": "selected",
+    "select_running": "All running",
+    "select_stopped": "All stopped",
+    "start_selected": "Start Selected",
+    "stop_selected": "Stop Selected",
+    "restart_selected": "Restart Selected",
+    "removing": "Removing...",
+    "remove_selected": "Remove Selected",
+    "clear": "Clear",
+    "name": "Name",
+    "image": "Image",
+    "status": "Status",
+    "ports": "Ports",
+    "actions": "Actions",
+    "stop": "Stop",
+    "start": "Start",
+    "paused": "Paused",
+    "unpause": "Unpause",
+    "restart": "Restart",
+    "no_containers": "No containers"
   },
   "diff": {
     "no_changes": "没有变更",
@@ -158,7 +193,12 @@
     "subtitle": "故障排查指南，离线可用。",
     "search": "搜索文章…",
     "no_results": "没有匹配的文章。",
-    "pick": "请选择一篇文章。"
+    "pick": "请选择一篇文章。",
+    "shortcut_ai": "Toggle the AI panel",
+    "shortcut_refresh": "Refresh data",
+    "shortcut_pages": "Jump to Dashboard through Activity",
+    "shortcut_escape": "Leave the input, then close the panel",
+    "shortcuts": "Keyboard shortcuts"
   },
   "colima_config": {
     "title": "Colima 配置",
@@ -231,7 +271,11 @@
     "connection_failed": "连接失败",
     "failed_to_connect": "无法连接: {error}",
     "ensure_running": "请确认实例正在运行。",
-    "session_ended": "会话已结束 (退出码: {code})"
+    "session_ended": "会话已结束 (退出码: {code})",
+    "title": "Terminal",
+    "new_session": "New Session",
+    "no_sessions": "No terminal sessions",
+    "instructions": "Open a new SSH session to a running instance."
   },
   "compose": {
     "diagnose": {
@@ -273,7 +317,16 @@
       "cancel": "取消",
       "history_title": "已应用的修复",
       "history_undone": "已撤销"
-    }
+    },
+    "title": "Docker Compose",
+    "projects_count": "projects",
+    "stop": "Stop",
+    "restart": "Restart",
+    "down": "Down",
+    "error_title": "Docker not connected",
+    "empty_title": "No Compose Projects",
+    "error_text": "Docker daemon is not connected. Make sure a Colima profile is running.",
+    "empty_text": "Start a docker-compose project to see it listed here."
   },
   "pro": {
     "gate": {
@@ -414,7 +467,12 @@
     "related": "相关",
     "kind_service": "服务",
     "node_service": "Compose 服务",
-    "status_not_created": "未创建"
+    "status_not_created": "未创建",
+    "subtitle": "Visual representation of K3s Master and Worker nodes",
+    "refresh": "Refresh",
+    "error_title": "Error loading topology",
+    "no_nodes": "No K3s Nodes Found",
+    "empty_text": "Enable Kubernetes on your Colima instances to view topology."
   },
   "transfer": {
     "export_title": "导出镜像",
@@ -441,7 +499,27 @@
   },
   "images": {
     "export": "导出 TAR",
-    "import": "导入 TAR"
+    "import": "导入 TAR",
+    "title": "Images",
+    "count": "images",
+    "search": "Search images...",
+    "pruning": "Pruning...",
+    "prune": "Prune",
+    "pull": "Pull Image",
+    "pull_title": "Pull Docker Image",
+    "name": "Image name",
+    "pull_action": "Pull",
+    "cancel": "Cancel",
+    "selected": "selected",
+    "removing": "Removing...",
+    "remove_selected": "Remove Selected",
+    "clear": "Clear",
+    "repository": "Repository",
+    "tag": "Tag",
+    "id": "Image ID",
+    "created": "Created",
+    "size": "Size",
+    "actions": "Actions"
   },
   "activity": {
     "title": "活动",
@@ -576,7 +654,26 @@
     "remove_confirm": "删除数据卷“{name}”？",
     "remove_selected_title": "删除选中的数据卷",
     "remove_count": "删除 {count} 个",
-    "remove_batch_confirm": "删除 {count} 个数据卷？\n\n{names}\n\n此操作无法撤销。"
+    "remove_batch_confirm": "删除 {count} 个数据卷？\n\n{names}\n\n此操作无法撤销。",
+    "title": "Volumes",
+    "count_label": "volume(s)",
+    "removing": "Removing...",
+    "pruning": "Pruning...",
+    "prune": "Prune",
+    "create_button": "Create Volume",
+    "refresh": "Refresh",
+    "create_title": "Create Volume",
+    "name": "Name",
+    "driver": "Driver",
+    "creating": "Creating...",
+    "create": "Create",
+    "cancel": "Cancel",
+    "search": "Search volumes...",
+    "loading": "Loading volumes...",
+    "no_search": "No volumes match your search",
+    "no_found": "No volumes found",
+    "scope": "Scope",
+    "remove": "Remove"
   },
   "security": {
     "title": "安全",
@@ -704,7 +801,31 @@
     "detonation_heading": "运行镜像并观察",
     "detonation_lead": "扫描说明镜像里有什么。这里说明它运行时做了什么 —— 在一个结束后即被销毁的独立实例中。",
     "falco_heading": "此刻正在发生什么",
-    "falco_lead": "由 Falco 检测到的运行时事件，并对应到你熟悉的 compose 服务名。检测由 Falco 完成，ColimaUI 只是读取它报告的内容。"
+    "falco_lead": "由 Falco 检测到的运行时事件，并对应到你熟悉的 compose 服务名。检测由 Falco 完成，ColimaUI 只是读取它报告的内容。",
+    "status_scanning": "scanning…",
+    "status_failed": "scan failed",
+    "status_unscanned": "not scanned",
+    "images_heading": "Images",
+    "and_more_images": "{count} more scored images",
+    "next_actions": "Next actions",
+    "next_actions_empty": "Nothing left to fix at this strictness",
+    "gain_unknown": "not measured",
+    "next_actions_more": "and more, not shown",
+    "posture": "Security posture",
+    "posture_empty": "Nothing scanned yet",
+    "posture_coverage": "average over scanned images",
+    "posture_empty_text": "Scanning is something you ask for — pick an image and scan it, and its score lands here.",
+    "posture_lowest": "Lowest",
+    "pack": "pack",
+    "db": "database",
+    "posture_mixed": "These scores came from different scanner or rule-pack versions, so they are not comparable. Scan again to line them up.",
+    "sections": "Security sections",
+    "tab_overview": "Overview",
+    "tab_images": "Images",
+    "tab_runtime": "Runtime",
+    "tab_history": "History",
+    "history_title": "Score history is not available yet",
+    "history_text": "Scores are not stored between runs yet, so there is no trend to draw. Today's score is on the Overview."
   },
   "self_heal": {
     "title": "自我修复",
@@ -811,5 +932,105 @@
   "docker": {
     "unsupported_runtime": "不支持 {runtime} 运行时 ({profiles})",
     "unsupported_runtime_hint": "ColimaUI 需要 Docker 运行时。停止配置文件并运行：`colima start --runtime docker`"
+  },
+  "fake": {
+    "greeting": "Hello {name}!",
+    "msg": "{a} + {b} = {c}"
+  },
+  "a": {
+    "b": {
+      "c": {
+        "d": {
+          "e": {
+            "f": "deep fallback"
+          }
+        }
+      }
+    }
+  },
+  "instances": {
+    "title": "Instances",
+    "running": "running",
+    "total": "total",
+    "refresh": "Refresh",
+    "new": "New Instance",
+    "kind": "Kind Cluster",
+    "empty_title": "No instances",
+    "empty_text": "Create a Colima VM or Kind cluster to get started."
+  },
+  "kubernetes": {
+    "context": "Context",
+    "enable_text": "Enable Kubernetes in the Instances tab, or switch to a different context above.",
+    "retry": "Retry Connection",
+    "title": "Kubernetes",
+    "connected": "Connected"
+  },
+  "linux_vms": {
+    "loading_title": "Linux VMs",
+    "loading": "Loading VMs...",
+    "title": "Linux VMs (Lima)",
+    "vm_count": "VMs",
+    "refresh": "Refresh VMs",
+    "new_vm": "New VM",
+    "stop": "Stop",
+    "start": "Start",
+    "delete": "Delete VM",
+    "no_vms_title": "No Linux VMs",
+    "no_vms_text": "Create a Linux VM to get started."
+  },
+  "models": {
+    "title": "AI Models",
+    "docker_runner": "Docker Model Runner",
+    "ramalama_runner": "Ramalama",
+    "refresh": "Refresh Models",
+    "pull": "Pull Model",
+    "error_support": "AI model support not available",
+    "error_krunkit": "GPU support requires krunkit. Install it first:",
+    "error_restart": "Then restart Colima:",
+    "error_tools": "Required tools are not installed. Make sure Colima is available.",
+    "error_default": "Model management requires Colima started with krunkit VM type for GPU access.",
+    "loading": "Loading models...",
+    "serve": "Serve",
+    "delete": "Delete",
+    "colima_not_running": "Colima is not running",
+    "no_models": "No models installed",
+    "start_colima": "Start a Colima instance first to manage AI models.",
+    "pull_to_start": "Pull a model to get started with AI inference.",
+    "popular": "Popular Models"
+  },
+  "networks": {
+    "title": "Networks",
+    "count": "networks",
+    "removing": "Removing...",
+    "pruning": "Pruning...",
+    "prune": "Prune",
+    "create_button": "Create Network",
+    "refresh": "↻ Refresh",
+    "create_title": "Create Network",
+    "name": "Name",
+    "driver": "Driver",
+    "subnet": "Subnet (optional)",
+    "creating": "Creating...",
+    "create": "Create",
+    "cancel": "Cancel",
+    "search": "Search networks...",
+    "loading": "Loading networks...",
+    "no_match": "No networks match your search",
+    "no_networks": "No networks found",
+    "remove": "Remove"
+  },
+  "xray": {
+    "title": "X-Ray Analysis",
+    "subtitle": "Visualizing resource dependencies in namespace",
+    "hover_hint": "Hover over a card to see connections.",
+    "refresh": "Refresh",
+    "ingress": "Ingress",
+    "no_ingress": "No ingresses found",
+    "services": "Services",
+    "no_services": "No services found",
+    "workloads": "Workloads",
+    "no_workloads": "No workloads found",
+    "pods": "Pods",
+    "no_pods": "No pods found"
   }
 }

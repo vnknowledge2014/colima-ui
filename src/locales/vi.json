@@ -2,7 +2,9 @@
   "getting_started": {
     "title": "Chào mừng đến với Colima UI",
     "language_select": "Chọn Ngôn Ngữ",
-    "next": "Tiếp tục"
+    "next": "Tiếp tục",
+    "subtitle": "Your cross-platform graphical interface for managing Colima instances, Docker containers, Kubernetes clusters, and Linux VMs.",
+    "skip": "Skip Setup"
   },
   "sidebar": {
     "overview": "Tổng quan",
@@ -33,7 +35,9 @@
     "colima_running": "{count} đang chạy",
     "colima_stopped": "Đang tắt",
     "colima_instances": "Máy ảo",
-    "security": "Bảo mật"
+    "security": "Bảo mật",
+    "ai_panel_close": "Close the AI panel (⌘K)",
+    "ai_panel_open": "Open the AI panel beside the page (⌘K)"
   },
   "dashboard": {
     "title": "Bảng Điều Khiển",
@@ -58,11 +62,15 @@
     "of": "trên",
     "reclaimable": "có thể thu hồi",
     "allocated_memory": "RAM được cấp",
-    "allocated_disk": "Dung lượng được cấp"
+    "allocated_disk": "Dung lượng được cấp",
+    "loading": "Loading..."
   },
   "settings": {
     "title": "Cài đặt",
-    "language": "Ngôn ngữ"
+    "language": "Ngôn ngữ",
+    "subtitle": "Configure ColimaUI, AI behavior, and resources",
+    "appearance": "Appearance",
+    "language_desc": "Change the application language"
   },
   "errors": {
     "panel_title": "Chi tiết lỗi",
@@ -143,7 +151,34 @@
     "standalone": "Đứng riêng",
     "running_lower": "đang chạy",
     "copy_in": "Copy file vào container",
-    "copy_out": "Copy file ra khỏi container"
+    "copy_out": "Copy file ra khỏi container",
+    "remove": "Remove",
+    "title": "Containers",
+    "running": "running",
+    "total": "total",
+    "search": "Search containers...",
+    "run": "Run",
+    "active_workspace": "Active Workspace",
+    "selected": "selected",
+    "select_running": "All running",
+    "select_stopped": "All stopped",
+    "start_selected": "Start Selected",
+    "stop_selected": "Stop Selected",
+    "restart_selected": "Restart Selected",
+    "removing": "Removing...",
+    "remove_selected": "Remove Selected",
+    "clear": "Clear",
+    "name": "Name",
+    "image": "Image",
+    "status": "Status",
+    "ports": "Ports",
+    "actions": "Actions",
+    "stop": "Stop",
+    "start": "Start",
+    "paused": "Paused",
+    "unpause": "Unpause",
+    "restart": "Restart",
+    "no_containers": "No containers"
   },
   "diff": {
     "no_changes": "Không có thay đổi",
@@ -158,7 +193,12 @@
     "subtitle": "Hướng dẫn xử lý sự cố. Dùng được khi không có mạng.",
     "search": "Tìm bài viết…",
     "no_results": "Không tìm thấy bài viết phù hợp.",
-    "pick": "Chọn một bài viết."
+    "pick": "Chọn một bài viết.",
+    "shortcut_ai": "Toggle the AI panel",
+    "shortcut_refresh": "Refresh data",
+    "shortcut_pages": "Jump to Dashboard through Activity",
+    "shortcut_escape": "Leave the input, then close the panel",
+    "shortcuts": "Keyboard shortcuts"
   },
   "colima_config": {
     "title": "Cấu hình Colima",
@@ -231,7 +271,11 @@
     "connection_failed": "Kết nối thất bại",
     "failed_to_connect": "Không thể kết nối: {error}",
     "ensure_running": "Hãy chắc chắn instance đang chạy.",
-    "session_ended": "Phiên đã kết thúc (mã thoát: {code})"
+    "session_ended": "Phiên đã kết thúc (mã thoát: {code})",
+    "title": "Terminal",
+    "new_session": "New Session",
+    "no_sessions": "No terminal sessions",
+    "instructions": "Open a new SSH session to a running instance."
   },
   "compose": {
     "diagnose": {
@@ -273,7 +317,16 @@
       "cancel": "Huỷ",
       "history_title": "Các bản sửa đã áp dụng",
       "history_undone": "đã hoàn tác"
-    }
+    },
+    "title": "Docker Compose",
+    "projects_count": "projects",
+    "stop": "Stop",
+    "restart": "Restart",
+    "down": "Down",
+    "error_title": "Docker not connected",
+    "empty_title": "No Compose Projects",
+    "error_text": "Docker daemon is not connected. Make sure a Colima profile is running.",
+    "empty_text": "Start a docker-compose project to see it listed here."
   },
   "pro": {
     "gate": {
@@ -414,7 +467,12 @@
     "related": "Liên quan",
     "kind_service": "Dịch vụ",
     "node_service": "Service compose",
-    "status_not_created": "Chưa tạo"
+    "status_not_created": "Chưa tạo",
+    "subtitle": "Visual representation of K3s Master and Worker nodes",
+    "refresh": "Refresh",
+    "error_title": "Error loading topology",
+    "no_nodes": "No K3s Nodes Found",
+    "empty_text": "Enable Kubernetes on your Colima instances to view topology."
   },
   "transfer": {
     "export_title": "Xuất image",
@@ -441,7 +499,27 @@
   },
   "images": {
     "export": "Xuất TAR",
-    "import": "Nhập TAR"
+    "import": "Nhập TAR",
+    "title": "Images",
+    "count": "images",
+    "search": "Search images...",
+    "pruning": "Pruning...",
+    "prune": "Prune",
+    "pull": "Pull Image",
+    "pull_title": "Pull Docker Image",
+    "name": "Image name",
+    "pull_action": "Pull",
+    "cancel": "Cancel",
+    "selected": "selected",
+    "removing": "Removing...",
+    "remove_selected": "Remove Selected",
+    "clear": "Clear",
+    "repository": "Repository",
+    "tag": "Tag",
+    "id": "Image ID",
+    "created": "Created",
+    "size": "Size",
+    "actions": "Actions"
   },
   "activity": {
     "title": "Hoạt động",
@@ -576,7 +654,26 @@
     "remove_confirm": "Xoá volume \"{name}\"?",
     "remove_selected_title": "Xoá các Volume đã chọn",
     "remove_count": "Xoá {count}",
-    "remove_batch_confirm": "Xoá {count} volume?\n\n{names}\n\nKhông thể hoàn tác."
+    "remove_batch_confirm": "Xoá {count} volume?\n\n{names}\n\nKhông thể hoàn tác.",
+    "title": "Volumes",
+    "count_label": "volume(s)",
+    "removing": "Removing...",
+    "pruning": "Pruning...",
+    "prune": "Prune",
+    "create_button": "Create Volume",
+    "refresh": "Refresh",
+    "create_title": "Create Volume",
+    "name": "Name",
+    "driver": "Driver",
+    "creating": "Creating...",
+    "create": "Create",
+    "cancel": "Cancel",
+    "search": "Search volumes...",
+    "loading": "Loading volumes...",
+    "no_search": "No volumes match your search",
+    "no_found": "No volumes found",
+    "scope": "Scope",
+    "remove": "Remove"
   },
   "security": {
     "title": "Bảo mật",
@@ -704,7 +801,31 @@
     "detonation_heading": "Chạy thử một image và quan sát",
     "detonation_lead": "Quét cho biết bên trong image có gì. Phần này cho biết nó làm gì khi chạy — trong một instance riêng, bị huỷ ngay sau đó.",
     "falco_heading": "Đang có chuyện gì lúc này",
-    "falco_lead": "Sự kiện thời gian chạy do Falco phát hiện, khớp với tên compose service bạn quen dùng. Falco phát hiện; ColimaUI đọc lại những gì nó báo."
+    "falco_lead": "Sự kiện thời gian chạy do Falco phát hiện, khớp với tên compose service bạn quen dùng. Falco phát hiện; ColimaUI đọc lại những gì nó báo.",
+    "status_scanning": "scanning…",
+    "status_failed": "scan failed",
+    "status_unscanned": "not scanned",
+    "images_heading": "Images",
+    "and_more_images": "{count} more scored images",
+    "next_actions": "Next actions",
+    "next_actions_empty": "Nothing left to fix at this strictness",
+    "gain_unknown": "not measured",
+    "next_actions_more": "and more, not shown",
+    "posture": "Security posture",
+    "posture_empty": "Nothing scanned yet",
+    "posture_coverage": "average over scanned images",
+    "posture_empty_text": "Scanning is something you ask for — pick an image and scan it, and its score lands here.",
+    "posture_lowest": "Lowest",
+    "pack": "pack",
+    "db": "database",
+    "posture_mixed": "These scores came from different scanner or rule-pack versions, so they are not comparable. Scan again to line them up.",
+    "sections": "Security sections",
+    "tab_overview": "Overview",
+    "tab_images": "Images",
+    "tab_runtime": "Runtime",
+    "tab_history": "History",
+    "history_title": "Score history is not available yet",
+    "history_text": "Scores are not stored between runs yet, so there is no trend to draw. Today's score is on the Overview."
   },
   "self_heal": {
     "title": "Tự phục hồi",
@@ -811,5 +932,105 @@
   "docker": {
     "unsupported_runtime": "Runtime {runtime} không được hỗ trợ ({profiles})",
     "unsupported_runtime_hint": "ColimaUI yêu cầu runtime Docker. Dừng profile và chạy: `colima start --runtime docker`"
+  },
+  "fake": {
+    "greeting": "Hello {name}!",
+    "msg": "{a} + {b} = {c}"
+  },
+  "a": {
+    "b": {
+      "c": {
+        "d": {
+          "e": {
+            "f": "deep fallback"
+          }
+        }
+      }
+    }
+  },
+  "instances": {
+    "title": "Instances",
+    "running": "running",
+    "total": "total",
+    "refresh": "Refresh",
+    "new": "New Instance",
+    "kind": "Kind Cluster",
+    "empty_title": "No instances",
+    "empty_text": "Create a Colima VM or Kind cluster to get started."
+  },
+  "kubernetes": {
+    "context": "Context",
+    "enable_text": "Enable Kubernetes in the Instances tab, or switch to a different context above.",
+    "retry": "Retry Connection",
+    "title": "Kubernetes",
+    "connected": "Connected"
+  },
+  "linux_vms": {
+    "loading_title": "Linux VMs",
+    "loading": "Loading VMs...",
+    "title": "Linux VMs (Lima)",
+    "vm_count": "VMs",
+    "refresh": "Refresh VMs",
+    "new_vm": "New VM",
+    "stop": "Stop",
+    "start": "Start",
+    "delete": "Delete VM",
+    "no_vms_title": "No Linux VMs",
+    "no_vms_text": "Create a Linux VM to get started."
+  },
+  "models": {
+    "title": "AI Models",
+    "docker_runner": "Docker Model Runner",
+    "ramalama_runner": "Ramalama",
+    "refresh": "Refresh Models",
+    "pull": "Pull Model",
+    "error_support": "AI model support not available",
+    "error_krunkit": "GPU support requires krunkit. Install it first:",
+    "error_restart": "Then restart Colima:",
+    "error_tools": "Required tools are not installed. Make sure Colima is available.",
+    "error_default": "Model management requires Colima started with krunkit VM type for GPU access.",
+    "loading": "Loading models...",
+    "serve": "Serve",
+    "delete": "Delete",
+    "colima_not_running": "Colima is not running",
+    "no_models": "No models installed",
+    "start_colima": "Start a Colima instance first to manage AI models.",
+    "pull_to_start": "Pull a model to get started with AI inference.",
+    "popular": "Popular Models"
+  },
+  "networks": {
+    "title": "Networks",
+    "count": "networks",
+    "removing": "Removing...",
+    "pruning": "Pruning...",
+    "prune": "Prune",
+    "create_button": "Create Network",
+    "refresh": "↻ Refresh",
+    "create_title": "Create Network",
+    "name": "Name",
+    "driver": "Driver",
+    "subnet": "Subnet (optional)",
+    "creating": "Creating...",
+    "create": "Create",
+    "cancel": "Cancel",
+    "search": "Search networks...",
+    "loading": "Loading networks...",
+    "no_match": "No networks match your search",
+    "no_networks": "No networks found",
+    "remove": "Remove"
+  },
+  "xray": {
+    "title": "X-Ray Analysis",
+    "subtitle": "Visualizing resource dependencies in namespace",
+    "hover_hint": "Hover over a card to see connections.",
+    "refresh": "Refresh",
+    "ingress": "Ingress",
+    "no_ingress": "No ingresses found",
+    "services": "Services",
+    "no_services": "No services found",
+    "workloads": "Workloads",
+    "no_workloads": "No workloads found",
+    "pods": "Pods",
+    "no_pods": "No pods found"
   }
 }

@@ -174,8 +174,7 @@ static SESSIONS: LazyLock<Mutex<HashMap<String, Session>>> =
 fn now_ms() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_millis() as i64)
-        .unwrap_or(0)
+        .map_or(0, |d| d.as_millis() as i64)
 }
 
 /// Short, collision-resistant, and safe inside a Colima profile name.
@@ -515,7 +514,7 @@ pub fn list_sessions() -> Vec<DetonationSession> {
         return Vec::new();
     };
     let mut all: Vec<DetonationSession> = sessions.values().map(|s| s.view.clone()).collect();
-    all.sort_by(|a, b| b.started_ms.cmp(&a.started_ms));
+    all.sort_by_key(|a| std::cmp::Reverse(a.started_ms));
     all
 }
 
@@ -577,11 +576,10 @@ fn has_active_session() -> bool {
     let now = now_ms();
     SESSIONS
         .lock()
-        .map(|s| {
+        .is_ok_and(|s| {
             s.values()
                 .any(|s| !is_terminal(s.view.status) && !is_wedged(&s.view, now))
         })
-        .unwrap_or(false)
 }
 
 /// How many finished sessions are kept for review.

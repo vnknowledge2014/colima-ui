@@ -572,8 +572,7 @@ fn parse_time_ms(time: &str, fields: &serde_json::Value) -> i64 {
         return nanos / 1_000_000;
     }
     chrono::DateTime::parse_from_rfc3339(time)
-        .map(|dt| dt.timestamp_millis())
-        .unwrap_or(0)
+        .map_or(0, |dt| dt.timestamp_millis())
 }
 
 /// A container named the way the user names it.
