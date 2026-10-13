@@ -68,7 +68,7 @@ async fn a_crash_loop_arrives_as_one_event_per_restart() {
     drop(docker(&["rm", "-f", CONTAINER])); // clear a leftover from a previous run
 
     let docker_client = connect();
-    let mut stream = docker_client.events(Some(bollard::system::EventsOptions::<String>::default()));
+    let mut stream = docker_client.events(Some(bollard::query_parameters::EventsOptions::default()));
 
     // Fails immediately, so Docker restarts it as fast as it is willing to.
     let started = docker(&[

@@ -181,7 +181,7 @@ pub async fn list_containers(     state: tauri::State<'_, std::sync::Arc<tokio::
         if let Some(docker) = &lock.docker {
             match tokio::time::timeout(
                 std::time::Duration::from_secs(5),
-                docker.list_containers(Some(bollard::container::ListContainersOptions::<String> {
+                docker.list_containers(Some(bollard::query_parameters::ListContainersOptions {
                     all,
                     ..Default::default()
                 })),
@@ -394,7 +394,7 @@ pub async fn list_images(     state: tauri::State<'_, std::sync::Arc<tokio::sync
         if let Some(docker) = &lock.docker {
             match tokio::time::timeout(
                 std::time::Duration::from_secs(5),
-                docker.list_images(Some(bollard::image::ListImagesOptions::<String> {
+                docker.list_images(Some(bollard::query_parameters::ListImagesOptions {
                     all: false,
                     ..Default::default()
                 })),

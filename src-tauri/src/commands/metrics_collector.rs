@@ -243,50 +243,53 @@ fn cpu_percent(cur: CpuCounters, prev: CpuCounters, online_cpus: u64) -> f64 {
 
 /// Memory actually in use, as Docker reports it: page cache that can be reclaimed
 /// does not count against the container.
-fn memory_used(stats: &bollard::container::MemoryStats) -> u64 {
-    use bollard::container::MemoryStatsStats;
+fn memory_used(stats: &bollard::models::ContainerMemoryStats) -> u64 {
     let usage = stats.usage.unwrap_or(0);
-    let inactive = match stats.stats {
-        Some(MemoryStatsStats::V1(v1)) => v1.total_inactive_file,
-        Some(MemoryStatsStats::V2(v2)) => v2.inactive_file,
-        None => 0,
-    };
+    let inactive = stats
+        .stats
+        .as_ref()
+        .and_then(|m| m.get("inactive_file").copied())
+        .or_else(|| stats.stats.as_ref().and_then(|m| m.get("total_inactive_file").copied()))
+        .unwrap_or(0);
     usage.saturating_sub(inactive)
 }
 
-fn blkio_total(stats: &bollard::container::BlkioStats, op: &str) -> u64 {
+fn blkio_total(stats: &bollard::models::ContainerBlkioStats, op: &str) -> u64 {
     stats
         .io_service_bytes_recursive
         .as_ref()
         .map_or(0, |entries| {
             entries
                 .iter()
-                .filter(|e| e.op.eq_ignore_ascii_case(op))
-                .map(|e| e.value)
+                .filter(|e| e.op.as_ref().is_some_and(|s| s.eq_ignore_ascii_case(op)))
+                .filter_map(|e| e.value)
                 .sum()
         })
 }
 
 /// Turn one API reading into a sample, differencing CPU against the last tick.
 fn sample_from_api(
-    stats: &bollard::container::Stats,
+    stats: &bollard::models::ContainerStatsResponse,
     id: &str,
     name: &str,
     ts: i64,
     instance: &str,
 ) -> MetricSample {
+    let cpu_stats = stats.cpu_stats.as_ref();
+    let cpu_usage = cpu_stats.and_then(|c| c.cpu_usage.as_ref());
     let cur: CpuCounters = (
-        stats.cpu_stats.cpu_usage.total_usage,
-        stats.cpu_stats.system_cpu_usage.unwrap_or(0),
+        cpu_usage.and_then(|u| u.total_usage).unwrap_or(0),
+        cpu_stats.and_then(|c| c.system_cpu_usage).unwrap_or(0),
     );
-    let online = stats.cpu_stats.online_cpus.unwrap_or_else(|| {
-        stats
-            .cpu_stats
-            .cpu_usage
-            .percpu_usage
-            .as_ref()
-            .map_or(1, |v| v.len() as u64)
-    });
+    let online = cpu_stats
+        .and_then(|c| c.online_cpus)
+        .map(|n| n as u64)
+        .or_else(|| {
+            cpu_usage
+                .and_then(|u| u.percpu_usage.as_ref())
+                .map(|v| v.len() as u64)
+        })
+        .unwrap_or(1);
 
     // No previous reading means no elapsed interval to divide by. Reporting 0%
     // matches what `docker stats` shows for a container's first sample.
@@ -296,15 +299,22 @@ fn sample_from_api(
         m.insert(id.to_string(), cur);
     }
 
-    let mem_bytes = memory_used(&stats.memory_stats);
-    let mem_limit_bytes = stats.memory_stats.limit.unwrap_or(0);
+    let memory_stats = stats.memory_stats.as_ref();
+    let mem_bytes = memory_stats.map_or(0, memory_used);
+    let mem_limit_bytes = memory_stats.and_then(|m| m.limit).unwrap_or(0);
     let (net_rx_bytes, net_tx_bytes) = stats
         .networks
         .as_ref()
         .map_or((0, 0), |nets| {
             nets.values()
-                .fold((0u64, 0u64), |(rx, tx), n| (rx + n.rx_bytes, tx + n.tx_bytes))
+                .fold((0u64, 0u64), |(rx, tx), n| (
+                    rx + n.rx_bytes.unwrap_or(0),
+                    tx + n.tx_bytes.unwrap_or(0),
+                ))
         });
+
+    let blkio = stats.blkio_stats.as_ref();
+    let pids = stats.pids_stats.as_ref().and_then(|p| p.current).unwrap_or(0) as u32;
 
     MetricSample {
         ts,
@@ -321,9 +331,9 @@ fn sample_from_api(
         },
         net_rx_bytes,
         net_tx_bytes,
-        block_read_bytes: blkio_total(&stats.blkio_stats, "read"),
-        block_write_bytes: blkio_total(&stats.blkio_stats, "write"),
-        pids: stats.pids_stats.current.unwrap_or(0) as u32,
+        block_read_bytes: blkio.map_or(0, |b| blkio_total(b, "read")),
+        block_write_bytes: blkio.map_or(0, |b| blkio_total(b, "write")),
+        pids,
     }
 }
 
@@ -332,12 +342,12 @@ fn sample_from_api(
 /// Returns `None` when the API is unreachable, so the caller can fall back to the
 /// CLI rather than reporting an empty machine.
 async fn sample_via_api(ts: i64, instance: &str) -> Option<Vec<MetricSample>> {
-    use bollard::container::{ListContainersOptions, StatsOptions};
+    use bollard::query_parameters::{ListContainersOptions, StatsOptions};
     use futures_util::StreamExt;
 
     let docker = crate::docker_state::connect_bollard()?;
     let containers = docker
-        .list_containers(Some(ListContainersOptions::<String> {
+        .list_containers(Some(ListContainersOptions {
             all: false,
             ..Default::default()
         }))

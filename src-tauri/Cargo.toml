@@ -30,7 +30,7 @@ axum = "0.8"
 tower-http = { version = "0.7", features = ["cors"] }
 serde_yml = "0.0.12"
 libc = "0.2"
-bollard = "0.18"
+bollard = "0.21"
 futures-util = "0.3"
 tokio-stream = { version = "0.1", features = ["sync"] }
 async-stream = "0.3"

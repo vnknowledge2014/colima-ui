@@ -210,11 +210,10 @@ async fn fetch_current_docker_state() -> Option<serde_json::Value> {
 
 /// Fetch current Docker containers + images and return as JSON.
 async fn fetch_docker_state(docker: &bollard::Docker) -> Option<serde_json::Value> {
-    use bollard::container::ListContainersOptions;
-    use bollard::image::ListImagesOptions;
+    use bollard::query_parameters::{ListContainersOptions, ListImagesOptions};
 
     let containers = docker
-        .list_containers(Some(ListContainersOptions::<String> {
+        .list_containers(Some(ListContainersOptions {
             all: true,
             ..Default::default()
         }))
@@ -222,7 +221,7 @@ async fn fetch_docker_state(docker: &bollard::Docker) -> Option<serde_json::Valu
         .unwrap_or_default();
 
     let images = docker
-        .list_images(Some(ListImagesOptions::<String> {
+        .list_images(Some(ListImagesOptions {
             all: false,
             ..Default::default()
         }))
