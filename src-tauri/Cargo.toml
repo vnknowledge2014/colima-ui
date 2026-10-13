@@ -27,7 +27,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["full"] }
 axum = "0.8"
-tower-http = { version = "0.6", features = ["cors"] }
+tower-http = { version = "0.7", features = ["cors"] }
 serde_yml = "0.0.12"
 libc = "0.2"
 bollard = "0.18"
@@ -35,9 +35,9 @@ futures-util = "0.3"
 tokio-stream = { version = "0.1", features = ["sync"] }
 async-stream = "0.3"
 reqwest = { version = "0.12", features = ["json", "cookies"] }
-scraper = "0.20"
+scraper = "0.27"
 html2md = "0.2"
-rusqlite = { version = "0.32", features = ["bundled"] }
+rusqlite = { version = "0.40", features = ["bundled"] }
 regex-lite = "0.1"
 chrono = { version = "0.4", features = ["serde"] }
 tauri-plugin-http = "2.5.9"
