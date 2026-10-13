@@ -1,6 +1,4 @@
-use bollard::container::ListContainersOptions;
-use bollard::image::ListImagesOptions;
-use bollard::system::EventsOptions;
+use bollard::query_parameters::{EventsOptions, ListContainersOptions, ListImagesOptions};
 use bollard::Docker;
 use futures_util::stream::StreamExt;
 use std::sync::Arc;
@@ -170,7 +168,7 @@ pub async fn start_docker_watcher(app: AppHandle, state: Arc<RwLock<DockerState>
         // fires kill→stop→die within ~200ms), wait for the burst to settle before
         // refreshing. This ensures we always capture the FINAL state, not an
         // intermediate transition state.
-        let mut stream = docker.events(Some(EventsOptions::<String>::default()));
+        let mut stream = docker.events(Some(EventsOptions::default()));
         let debounce_ms: u64 = 500; // wait 500ms after last event before fetching
 
         loop {
@@ -313,7 +311,7 @@ pub fn map_containers(containers: &[bollard::models::ContainerSummary]) -> Vec<s
             "Names": names,
             "Image": c.image.clone().unwrap_or_default(),
             "Status": c.status.clone().unwrap_or_default(),
-            "State": c.state.clone().unwrap_or_default(),
+            "State": c.state.unwrap_or(bollard::models::ContainerSummaryStateEnum::EMPTY),
             "Ports": ports,
             "CreatedAt": c.created.unwrap_or(0).to_string(),
             "Size": c.size_rw.unwrap_or(0).to_string(),
@@ -360,7 +358,7 @@ async fn update_cache(
 ) -> Result<serde_json::Value, String> {
     let containers = match tokio::time::timeout(
         std::time::Duration::from_secs(5),
-        docker.list_containers(Some(ListContainersOptions::<String> {
+        docker.list_containers(Some(ListContainersOptions {
             all: true,
             ..Default::default()
         })),
@@ -379,7 +377,7 @@ async fn update_cache(
 
     let images = match tokio::time::timeout(
         std::time::Duration::from_secs(5),
-        docker.list_images(Some(ListImagesOptions::<String> {
+        docker.list_images(Some(ListImagesOptions {
             all: false,
             ..Default::default()
         })),
