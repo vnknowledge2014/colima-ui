@@ -40,7 +40,7 @@ html2md = "0.2"
 rusqlite = { version = "0.40", features = ["bundled"] }
 regex-lite = "0.1"
 chrono = { version = "0.4", features = ["serde"] }
-tauri-plugin-http = "2.5.9"
+tauri-plugin-http = "2.8.2"
 tauri-plugin-updater = "2"
 # OAuth return path: the provider redirects to colimaui://auth-callback and the
 # OS hands the URL back to the running app.
@@ -53,7 +53,7 @@ portable-pty = "0.9"
 async-trait = "0.1"
 clap = { version = "4", features = ["derive"], optional = true }
 tauri-plugin-dialog = "2"
-tauri-plugin-notification = "2"
+tauri-plugin-notification = "2.6.0"
 
 # The auth session (tokens + PKCE verifier) lives in the macOS Keychain, never
 # on disk. Only macOS has a backend here; elsewhere the session is in-memory and
