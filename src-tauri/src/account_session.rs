@@ -29,6 +29,7 @@
 
 /// Keychain service name. Stable across versions — changing it orphans every
 /// stored session and silently signs everyone out.
+#[cfg(target_os = "macos")]
 const SERVICE: &str = "com.colima.ui.account";
 
 /// Whether the keychain backend is disabled for this build/run.
