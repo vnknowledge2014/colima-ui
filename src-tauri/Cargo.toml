@@ -45,7 +45,7 @@ tauri-plugin-updater = "2"
 # OAuth return path: the provider redirects to colimaui://auth-callback and the
 # OS hands the URL back to the running app.
 tauri-plugin-deep-link = "2"
-rand = "0.8"
+rand = "0.10"
 sha2 = "0.11.0"
 # Real pseudo-terminal. Replaces the `script(1)` wrapper, which only bought
 # character echo — a PTY is what carries window size, signals and job control.
