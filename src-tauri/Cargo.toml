@@ -28,13 +28,13 @@ serde_json = "1"
 tokio = { version = "1", features = ["full"] }
 axum = "0.8"
 tower-http = { version = "0.7", features = ["cors"] }
-serde_yml = "0.0.12"
+serde_yml = "0.0.13"
 libc = "0.2"
 bollard = "0.21"
 futures-util = "0.3"
 tokio-stream = { version = "0.1", features = ["sync"] }
 async-stream = "0.3"
-reqwest = { version = "0.12", features = ["json", "cookies"] }
+reqwest = { version = "0.13", features = ["json", "cookies"] }
 scraper = "0.27"
 html2md = "0.2"
 rusqlite = { version = "0.40", features = ["bundled"] }
@@ -45,7 +45,7 @@ tauri-plugin-updater = "2"
 # OAuth return path: the provider redirects to colimaui://auth-callback and the
 # OS hands the URL back to the running app.
 tauri-plugin-deep-link = "2"
-rand = "0.8"
+rand = "0.10"
 sha2 = "0.11.0"
 # Real pseudo-terminal. Replaces the `script(1)` wrapper, which only bought
 # character echo — a PTY is what carries window size, signals and job control.

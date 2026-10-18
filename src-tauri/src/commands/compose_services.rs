@@ -56,7 +56,7 @@ fn parse_depends_on(value: Option<&serde_yml::Value>) -> Vec<String> {
             .collect(),
         Some(serde_yml::Value::Mapping(map)) => map
             .iter()
-            .filter_map(|(k, _)| k.as_str().map(|s| s.to_string()))
+            .map(|(k, _)| k.clone())
             .collect(),
         _ => Vec::new(),
     }
