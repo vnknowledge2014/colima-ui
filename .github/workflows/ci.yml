@@ -11,7 +11,10 @@ env:
 
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  # Cancel superseded PR runs only. Every push to main has to finish: with
+  # cancel-in-progress on, rapid merges cancelled each other and left main
+  # commits that never got a verdict.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   # ===== Lint & Type Check (fast — runs first) =====
