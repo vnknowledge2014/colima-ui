@@ -11,10 +11,10 @@
    * buttons does not answer that question.
    *
    * The tabs are layers of that same question: Overview is the summary, Images
-   * is where a single image is examined, History is the layer that later work
-   * fills in. It is shown, and says plainly that it is not available yet,
-   * instead of appearing when the feature does — a tab that materialises later
-   * reads as an accident.
+   * is where a single image is examined, Runtime and History are the layers that
+   * later phases fill in. They are shown, and say plainly that they are not
+   * available yet, instead of appearing when the feature does — a tab that
+   * materialises later reads as an accident.
    *
    * ## Scanning is something you ask for
    *
@@ -51,8 +51,16 @@
   import FindingsTable from "../components/security/FindingsTable.svelte";
   import RuleChecklist from "../components/security/RuleChecklist.svelte";
   import AlternativesPanel from "../components/security/AlternativesPanel.svelte";
+  import TriageList from "../components/security/TriageList.svelte";
+  import SecurityPatchDiff from "../components/security/SecurityPatchDiff.svelte";
+  import ProGate from "../components/ProGate.svelte";
+  import ScoreTrendChart from "../components/security/ScoreTrendChart.svelte";
+  import PolicyEditor from "../components/security/PolicyEditor.svelte";
+  import ScheduledRescanSwitch from "../components/security/ScheduledRescanSwitch.svelte";
+  import DetonationPanel from "../components/security/DetonationPanel.svelte";
+  import EventStream from "../components/security/EventStream.svelte";
 
-  type Tab = "overview" | "images" | "history";
+  type Tab = "overview" | "images" | "runtime" | "history";
 
   let images = $state<DockerImage[]>([]);
   let tab = $state<Tab>("overview");
@@ -303,6 +311,14 @@
     </button>
     <button
       class="tab-btn"
+      class:active={tab === "runtime"}
+      aria-current={tab === "runtime" ? "page" : undefined}
+      onclick={() => (tab = "runtime")}
+    >
+      {t("security.tab_runtime", { default: "Runtime" })}
+    </button>
+    <button
+      class="tab-btn"
       class:active={tab === "history"}
       aria-current={tab === "history" ? "page" : undefined}
       onclick={() => (tab = "history")}
@@ -311,7 +327,37 @@
     </button>
   </nav>
 
-  {#if tab === "history"}
+  {#if tab === "runtime"}
+    <!-- Two different questions, in the order a user asks them: what is
+         happening on the containers I am already running, and what would happen
+         if I ran this unknown image.
+         Wrapped rather than left as bare siblings: cards on this page are
+         spaced by their container, the way `.overview` does it, not by margins
+         on the cards themselves. -->
+    <div class="stack">
+      <section class="card block">
+        <h2>{t("security.falco_heading", { default: "What is happening right now" })}</h2>
+        <p class="card-lead">
+          {t("security.falco_lead", {
+            default:
+              "Runtime events detected by Falco, matched to the compose services you know them by. Falco does the detecting; ColimaUI reads what it reports.",
+          })}
+        </p>
+        <EventStream />
+      </section>
+
+      <section class="card block">
+        <h2>{t("security.detonation_heading", { default: "Run an image and watch it" })}</h2>
+        <p class="card-lead">
+          {t("security.detonation_lead", {
+            default:
+              "Scanning says what is inside an image. This says what it does when it runs — in a separate instance that is destroyed afterwards.",
+          })}
+        </p>
+        <DetonationPanel images={images.map(refName)} />
+      </section>
+    </div>
+  {:else if tab === "history"}
     <!-- Shown rather than hidden: this is a layer the page will grow, and a tab
          that appears out of nowhere later reads as a glitch. Saying what is
          missing is more honest than an empty panel. -->
@@ -424,9 +470,80 @@
               />
             </section>
 
+            <!-- Free ranks by rule weight across every image; this ranks this
+                 image by the score each fix actually returns, measured by
+                 re-scoring, and attaches the edits. Gated on entitlement, not on
+                 a sidecar: it is Rust in this binary, so a paying customer with
+                 no optional component installed still gets it. -->
+            <section class="card block">
+              <h2>{t("security.triage_heading", { default: "Fix in this order" })}</h2>
+              <ProGate
+                id="security.triage"
+                variant="preview"
+                feature={t("security.triage_feature", { default: "Ranked fixes with patches" })}
+                description={t("security.triage_desc", {
+                  default:
+                    "See what each fix is worth to this image's score, and get the Dockerfile edit for the ones that have one.",
+                })}
+              >
+                {#snippet preview()}
+                  <!-- A real shape, labelled as an example rather than passed
+                       off as this image's result. -->
+                  <div style="padding: 16px; font-size: var(--text-xs); color: var(--text-secondary);">
+                    <div style="color: var(--text-muted); margin-bottom: 6px;">
+                      {t("security.triage_example", { default: "Example" })}
+                    </div>
+                    <div>1. Runs as root — <span style="color: var(--accent-green);">+8 points</span> · needs review</div>
+                    <div>2. Image is not pinned to a digest — <span style="color: var(--accent-green);">+6 points</span> · manual</div>
+                    <div>3. Uses ADD where COPY would do — <span style="color: var(--accent-green);">+2 points</span> · patch ready</div>
+                  </div>
+                {/snippet}
+                <TriageList audit={currentAudit} {level} />
+                <SecurityPatchDiff />
+              </ProGate>
+            </section>
+
             <section class="card block">
               <h2>{t("security.findings_heading", { default: "Known vulnerabilities" })}</h2>
               <FindingsTable findings={currentAudit.scan.findings} />
+            </section>
+
+            <section class="card block">
+              <h2>{t("security.history_heading", { default: "Score over time" })}</h2>
+              <ProGate
+                id="security.history"
+                variant="preview"
+                feature={t("security.history_feature", { default: "Score history and policy" })}
+                description={t("security.history_desc", {
+                  default:
+                    "Keep every scan, see whether this image is improving, and get warned when it slips below a bar you set.",
+                })}
+              >
+                {#snippet preview()}
+                  <div style="padding: 16px; font-size: var(--text-xs); color: var(--text-secondary);">
+                    <div style="color: var(--text-muted); margin-bottom: 6px;">
+                      {t("security.history_example", { default: "Example" })}
+                    </div>
+                    <div>rule pack v1 · trivy · 12 scans · <span style="color: var(--accent-green);">+14</span></div>
+                    <div style="color: var(--accent-yellow);">
+                      {t("security.history.break", { default: "Ruler changed — scores before and after are not comparable." })}
+                    </div>
+                    <div>rule pack v2 · trivy · 3 scans</div>
+                  </div>
+                {/snippet}
+                <ScoreTrendChart imageDigest={currentAudit.scan.imageDigest} />
+                <h3 style="font-size: var(--text-sm); margin: 12px 0 6px;">
+                  {t("security.policy_heading", { default: "Policy" })}
+                </h3>
+                <PolicyEditor />
+              </ProGate>
+
+              <!-- Outside the gate on purpose: the control that stops a
+                   background job must stay reachable after entitlement
+                   lapses. -->
+              <div style="margin-top: 12px; border-top: 1px solid var(--border-subtle); padding-top: 10px;">
+                <ScheduledRescanSwitch />
+              </div>
             </section>
 
             <section class="card block">
@@ -595,7 +712,25 @@
   .block {
     padding: 16px;
   }
-      .hint-text {
+  /* A sentence under a card's heading, explaining what the card is for.
+     Not `.subtitle`: that one belongs to the page header, where it is an inline
+     span beside the h1 and carries `margin-left: 12px` to clear the title. Used
+     here it indented the paragraph away from the heading above it and the
+     component below, which lined up with neither. */
+  .card-lead {
+    margin: 0 0 12px;
+    font-size: var(--text-sm);
+    color: var(--text-secondary);
+    line-height: 1.5;
+  }
+  /* Cards in a single column, spaced by the container rather than by margins on
+     the cards — the same 16px rhythm `.overview` uses for its grid. */
+  .stack {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+  .hint-text {
     margin: 0;
     font-size: var(--text-sm);
     color: var(--text-secondary);

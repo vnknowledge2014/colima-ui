@@ -47,6 +47,7 @@ const ARTICLE_META: &[(&str, &str)] = &[
     ("install-docker-cli", "all"),
     ("install-kubectl", "all"),
     ("install-trivy", "all"),
+    ("image-hardening", "all"),
     ("common-errors", "all"),
     ("performance-tuning", "macos"),
     // Honeypot guides. Content only — there is no honeypot feature in the app,
@@ -58,6 +59,7 @@ const ARTICLE_META: &[(&str, &str)] = &[
     // Falco install guide. Worth shipping on its own: the two traps it covers
     // (Homebrew installs a different `falco`, and Falco can run with zero
     // rules loaded) cost more time than the install itself.
+    ("install-falco", "all"),
 ];
 
 /// `(slug, locale, body)` for every shipped article.
@@ -86,6 +88,10 @@ const ARTICLE_BODIES: &[(&str, &str, &str)] = &[
     ("install-trivy", "vi", include_str!("../../resources/kb/vi/install-trivy.md")),
     ("install-trivy", "ja", include_str!("../../resources/kb/ja/install-trivy.md")),
     ("install-trivy", "zh", include_str!("../../resources/kb/zh/install-trivy.md")),
+    ("image-hardening", "en", include_str!("../../resources/kb/en/image-hardening.md")),
+    ("image-hardening", "vi", include_str!("../../resources/kb/vi/image-hardening.md")),
+    ("image-hardening", "ja", include_str!("../../resources/kb/ja/image-hardening.md")),
+    ("image-hardening", "zh", include_str!("../../resources/kb/zh/image-hardening.md")),
     ("common-errors", "en", include_str!("../../resources/kb/en/common-errors.md")),
     ("common-errors", "vi", include_str!("../../resources/kb/vi/common-errors.md")),
     ("common-errors", "ja", include_str!("../../resources/kb/ja/common-errors.md")),
@@ -110,6 +116,10 @@ const ARTICLE_BODIES: &[(&str, &str, &str)] = &[
     ("honeypot-logs", "vi", include_str!("../../resources/kb/vi/honeypot-logs.md")),
     ("honeypot-logs", "ja", include_str!("../../resources/kb/ja/honeypot-logs.md")),
     ("honeypot-logs", "zh", include_str!("../../resources/kb/zh/honeypot-logs.md")),
+    ("install-falco", "en", include_str!("../../resources/kb/en/install-falco.md")),
+    ("install-falco", "vi", include_str!("../../resources/kb/vi/install-falco.md")),
+    ("install-falco", "ja", include_str!("../../resources/kb/ja/install-falco.md")),
+    ("install-falco", "zh", include_str!("../../resources/kb/zh/install-falco.md")),
 ];
 
 #[derive(Debug, Clone, Serialize)]

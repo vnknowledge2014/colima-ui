@@ -11,9 +11,18 @@
   import {
     subscribeMetrics,
     metricsApi,
+    alertsApi,
+    type AlertEvent,
+    type AlertRule,
+    type HistorySeries,
     type MetricSample,
     type MetricsBatch,
+    type WriterHealth,
   } from "../lib/api/metrics";
+  import ProGate from "../components/ProGate.svelte";
+  import HistoryChart from "../components/activity/HistoryChart.svelte";
+  import AlertRuleEditor from "../components/activity/AlertRuleEditor.svelte";
+  import AlertLog from "../components/activity/AlertLog.svelte";
   import { MetricsHistory, type SortKey } from "../lib/metricsHistory";
   import { getAppSetting, setAppSetting } from "../lib/settingsStore.svelte";
   import { systemApi, type EngineResources } from "../lib/api";
@@ -150,8 +159,67 @@
     return unit === 0 ? `${n} B` : `${value.toFixed(1)} ${units[unit]}`;
   }
 
-  type Tab = "live" | "actions";
+  // ===== History and alerts (Pro) =====
+
+  type Tab = "live" | "history" | "alerts" | "actions";
   let tab = $state<Tab>("live");
+
+  /** Ranges offered, and which stored table each one reads. */
+  const RANGES = [
+    { key: "1h", ms: 60 * 60 * 1000 },
+    { key: "24h", ms: 24 * 60 * 60 * 1000 },
+    { key: "7d", ms: 7 * 24 * 60 * 60 * 1000 },
+    { key: "30d", ms: 30 * 24 * 60 * 60 * 1000 },
+  ] as const;
+
+  let range = $state<(typeof RANGES)[number]["key"]>("1h");
+  let historyField = $state<"cpuPct" | "memPct" | "memBytes">("cpuPct");
+  let series = $state<HistorySeries | null>(null);
+  let historyLoading = $state(false);
+  let health = $state<WriterHealth | null>(null);
+  let alertRules = $state<AlertRule[]>([]);
+  let alertEvents = $state<AlertEvent[]>([]);
+
+  async function loadHistory() {
+    historyLoading = true;
+    try {
+      const to = Date.now();
+      const span = RANGES.find((r) => r.key === range)?.ms ?? RANGES[0].ms;
+      series = await metricsApi.history(to - span, to);
+      health = await metricsApi.health();
+    } catch (e) {
+      series = null;
+      globalToast("error", String(e));
+    } finally {
+      historyLoading = false;
+    }
+  }
+
+  async function loadAlerts() {
+    try {
+      alertRules = await alertsApi.listRules();
+      alertEvents = await alertsApi.recentEvents(50);
+    } catch (e) {
+      globalToast("error", String(e));
+    }
+  }
+
+  // Loaded when the tab is opened, not on mount: history is a query over a
+  // database the Free build does not even have.
+  //
+  // `loadHistory` reads `range` before its first await, so this also re-runs
+  // when the range changes — which is why the range buttons only set the value
+  // and do not fetch as well. Two requests racing to write `series` is how a
+  // chart ends up showing the range the user did not pick.
+  $effect(() => {
+    if (tab === "history") void loadHistory();
+    if (tab === "alerts") void loadAlerts();
+  });
+
+  /** Containers to offer in the rule editor, named. */
+  const alertTargets = $derived(
+    rows.map((r) => ({ id: r.containerId, name: r.name || r.containerId.slice(0, 12) }))
+  );
 </script>
 
 <div class="content-header" data-tauri-drag-region>
@@ -170,7 +238,7 @@
       bind:value={searchTerm}
     />
     <div class="tabs" role="tablist" aria-label={t("activity.views", { default: "Views" })}>
-      {#each [["live", t("activity.tab_live", { default: "Live" })], ["actions", t("activity.tab_actions", { default: "Actions" })]] as [key, label] (key)}
+      {#each [["live", t("activity.tab_live", { default: "Live" })], ["history", t("activity.tab_history", { default: "History" })], ["alerts", t("activity.tab_alerts", { default: "Alerts" })], ["actions", t("activity.tab_actions", { default: "Actions" })]] as [key, label] (key)}
         <button
           type="button"
           role="tab"
@@ -271,7 +339,92 @@
   {/if}
   {/if}
 
+  {#if tab === "history"}
+    <ProGate
+      id="metrics.history"
+      feature={t("activity.history_feature", { default: "Metrics history" })}
+      description={t("activity.history_feature_desc", {
+        default: "Keep samples on disk and look at last night, not just right now.",
+      })}
+    >
+      <div class="panel">
+        <div class="panel-controls">
+          <div class="ranges" role="group" aria-label={t("activity.range", { default: "Range" })}>
+            {#each RANGES as r (r.key)}
+              <button
+                type="button"
+                class="btn btn-ghost"
+                class:active={range === r.key}
+                onclick={() => (range = r.key)}
+              >
+                {r.key}
+              </button>
+            {/each}
+          </div>
+          <select class="input" bind:value={historyField}>
+            <option value="cpuPct">{t("activity.metric_cpu", { default: "CPU %" })}</option>
+            <option value="memPct">{t("activity.metric_mem_pct", { default: "Memory %" })}</option>
+            <option value="memBytes">{t("activity.metric_mem_bytes", { default: "Memory bytes" })}</option>
+          </select>
+          <button class="btn btn-ghost" onclick={loadHistory} disabled={historyLoading}>
+            {historyLoading
+              ? t("activity.loading", { default: "Loading…" })
+              : t("activity.reload", { default: "Reload" })}
+          </button>
+        </div>
+
+        {#if health && !health.writing}
+          <!-- Said plainly rather than shown as an empty chart: an entitlement
+               that lapsed looks exactly like a machine that was idle. -->
+          <p class="notice">
+            {t("activity.history_not_recording", {
+              default: "History is not being recorded on this install.",
+            })}
+          </p>
+        {:else if health && health.skippedBatches > 0}
+          <p class="notice">
+            {t("activity.history_paused", {
+              default:
+                "Recording paused while the subscription was inactive. What was already stored is untouched.",
+            })}
+          </p>
+        {:else if health && health.droppedBatches > 0}
+          <p class="notice">
+            {t("activity.history_dropped", {
+              default:
+                "{count} batches were dropped because the disk could not keep up — the gaps below are real.",
+              count: health.droppedBatches,
+            })}
+          </p>
+        {/if}
+
+        {#if series}
+          <HistoryChart {series} field={historyField} />
+        {/if}
+      </div>
+    </ProGate>
+  {/if}
+
+  {#if tab === "alerts"}
+    <ProGate
+      id="metrics.alerts"
+      feature={t("activity.alerts_feature", { default: "Alerts" })}
+      description={t("activity.alerts_feature_desc", {
+        default: "Be told when a container stays over a threshold, instead of finding out later.",
+      })}
+    >
+      <div class="panel">
+        <AlertRuleEditor rules={alertRules} containers={alertTargets} onChanged={loadAlerts} />
+        <h2 class="panel-heading">{t("activity.alert_log", { default: "Fired" })}</h2>
+        <AlertLog events={alertEvents} />
+      </div>
+    </ProGate>
+  {/if}
+
   {#if tab === "actions"}
+    <!-- Deliberately outside any ProGate. This is the machine's own record of
+         what was done to it, kept locally; a Free install keeps a shorter
+         window, but reading back what it kept is not a paid feature. -->
     <div class="panel">
       <ActionFeed />
     </div>
@@ -283,7 +436,8 @@
     display: inline-flex;
     gap: 2px;
   }
-  .tabs .active {
+  .tabs .active,
+  .ranges .active {
     background: var(--bg-secondary);
     color: var(--text-primary);
   }
@@ -294,6 +448,25 @@
     padding: 16px;
     border: 1px solid var(--border-primary);
     border-radius: 8px;
+  }
+  .panel-controls {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    flex-wrap: wrap;
+  }
+  .ranges {
+    display: inline-flex;
+    gap: 2px;
+  }
+  .panel-heading {
+    margin: 0;
+    font-size: var(--text-base);
+  }
+  .notice {
+    margin: 0;
+    font-size: var(--text-sm);
+    color: var(--text-secondary);
   }
 
   .activity-body {

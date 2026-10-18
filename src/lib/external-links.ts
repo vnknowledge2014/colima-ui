@@ -1,5 +1,14 @@
 import { isRunningInTauri } from "./env";
 
+/**
+ * Outbound links shown in the app.
+ *
+ * The pricing page does not exist yet, so PRICING_URL points at GitHub
+ * Discussions. It is declared here, and only here, so swapping in the real
+ * domain later is a one-line change.
+ */
+export const PRICING_URL = "https://github.com/vnknowledge2014/colima-ui/discussions";
+
 /** Repository the bug reporter files against. */
 export const REPO_URL = "https://github.com/vnknowledge2014/colima-ui";
 
@@ -15,6 +24,81 @@ export const REPO_URL = "https://github.com/vnknowledge2014/colima-ui";
 export function newIssueUrl(title: string, body: string): string {
   const params = new URLSearchParams({ title, body });
   return `${REPO_URL}/issues/new?${params}`;
+}
+
+/**
+ * Polar configuration. All public — a checkout link and an org slug are not
+ * secrets. `POLAR_ACCESS_TOKEN` is a secret and lives only in the entitlement
+ * oracle, never here.
+ *
+ * Empty until the owner creates the seat-based products. While empty,
+ * `isBillingConfigured()` is false and the UI says so rather than offering
+ * buttons that lead nowhere.
+ */
+export const POLAR_ORG_SLUG = "";
+
+export type PaidTier = "pro" | "pro_teams";
+
+/**
+ * A hosted Polar checkout link. Swap sandbox for production by replacing this
+ * one line — the host differs (`sandbox-api` vs `api`), nothing else does.
+ *
+ * # A checkout link cannot make anyone Pro — in either environment
+ *
+ * This is a property of Checkout Links, not of the sandbox. Their documented
+ * query parameters are `customer_email`, `customer_name`, `discount_code`,
+ * `amount`, `custom_field_data.{slug}` and `reference_id`. There is **no**
+ * `customer_external_id`, and unknown parameters are ignored silently rather
+ * than rejected.
+ *
+ * So a purchase made through any such link creates a Polar customer keyed to
+ * whatever email was typed. The entitlement oracle asks for
+ * `/customers/external/<supabase-user-id>/state`, gets a 404, and correctly
+ * reports Free. The money is real; the entitlement never arrives.
+ *
+ * Attributable purchases go through `POST /v1/checkouts/` with
+ * `external_customer_id`, created by the `checkout` Edge Function — see
+ * `src/lib/api/subscription.ts`. This constant is the fallback used only while
+ * that function is undeployed, and the app warns before opening it.
+ */
+export const CHECKOUT_LINK_URL =
+  "https://sandbox-api.polar.sh/v1/checkout-links/polar_cl_w6P5PxPjiyLRQIRE23nY90BXhCZmPWU4dhuG33gwawP/redirect";
+
+/**
+ * Whether the app can offer a purchase at all.
+ *
+ * Whether *attributable* checkout works depends on the `checkout` function being
+ * deployed, which cannot be known from here — so the app tries, and reports
+ * honestly when it cannot.
+ */
+export function isBillingConfigured(): boolean {
+  return !!CHECKOUT_LINK_URL || !!POLAR_ORG_SLUG;
+}
+
+/**
+ * The unattributed fallback: a checkout the buyer can complete but that no
+ * account will ever be credited for.
+ *
+ * Returns empty when there is nothing to fall back to, so callers can say
+ * "checkout unavailable" rather than opening the pricing page dressed up as a
+ * purchase.
+ */
+export function fallbackCheckoutUrl(): string {
+  return CHECKOUT_LINK_URL;
+}
+
+/**
+ * The Polar Customer Portal — where seats, invoices, payment method and
+ * cancellation all live.
+ *
+ * This is the unauthenticated entry point: the customer signs in with the email
+ * they purchased under and Polar sends a one-time code. A pre-authenticated link
+ * would need `customerSessions.create()`, which requires the org secret, so it
+ * could only come from the entitlement oracle — worth adding later, not needed
+ * for the portal to work.
+ */
+export function portalUrl(): string {
+  return POLAR_ORG_SLUG ? `https://polar.sh/${POLAR_ORG_SLUG}/portal` : PRICING_URL;
 }
 
 /**
@@ -45,7 +129,7 @@ export function isSafeExternalUrl(url: string): boolean {
  * this is the only list standing between a compromised feed and a link the user
  * is invited to click.
  */
-const ANNOUNCEMENT_LINK_HOSTS = ["github.com", "www.github.com"];
+const ANNOUNCEMENT_LINK_HOSTS = ["github.com", "www.github.com", "polar.sh"];
 
 /**
  * Whether an announcement's `linkUrl` may be offered as a link.

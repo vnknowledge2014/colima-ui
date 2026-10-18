@@ -82,6 +82,17 @@
   --color-danger: var(--accent-red);
   --color-error: var(--accent-red);
 
+  /* Shorthand aliases used by the pro security surfaces (detonation, Falco).
+   * Keep them defined so the CSS token checker does not flag fallbacks as
+   * missing tokens.
+   */
+  --accent: var(--accent-blue);
+  --border: var(--border-primary);
+  --danger: var(--color-danger);
+  --warning: var(--color-warning);
+  --surface-hover: rgba(255, 255, 255, 0.04);
+  --surface-sunken: rgba(0, 0, 0, 0.12);
+
   /* Glassmorphism */
   --glass-bg: rgba(22, 29, 46, 0.7);
   --glass-border: rgba(255, 255, 255, 0.07);

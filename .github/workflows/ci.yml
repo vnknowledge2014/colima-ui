@@ -2,16 +2,19 @@ name: CI
 
 on:
   push:
-    branches: [main, staging, dev]
+    branches: [main]
   pull_request:
-    branches: [main, staging, dev]
+    branches: [main]
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  # Cancel superseded PR runs only. Every push to main has to finish: with
+  # cancel-in-progress on, rapid merges cancelled each other and left main
+  # commits that never got a verdict.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   # ===== Lint & Type Check (fast — runs first) =====
@@ -129,3 +132,20 @@ jobs:
           name: frontend-dist
           path: dist/
           retention-days: 1
+
+  # ===== Aggregate gate =====
+  # Branch protection on main requires a check named "ci". No job carried that
+  # name, so the requirement could never be met and every merge needed --admin.
+  # This job reports one verdict for the whole matrix.
+  ci:
+    name: ci
+    if: always()
+    needs: [lint, rust-check, frontend-build]
+    runs-on: ubuntu-latest
+    steps:
+      - name: All required jobs succeeded
+        run: |
+          if [[ "${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') || contains(needs.*.result, 'skipped') }}" == "true" ]]; then
+            echo "One or more CI jobs did not succeed: ${{ join(needs.*.result, ', ') }}"
+            exit 1
+          fi

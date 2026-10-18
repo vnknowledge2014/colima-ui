@@ -1,0 +1,25 @@
+# Supabase project configuration.
+#
+# This project uses Supabase for **auth and one Edge Function only**. There are
+# deliberately no tables and no migrations: the team roster lives in Polar, which
+# models customers, members and seats natively. See
+# plans/260811-1930-subscription-teams-supabase-schema/phase-03-*.md for why that
+# phase was cancelled.
+#
+# No secrets belong in this file. Function secrets are set with
+# `supabase secrets set`, and locally through supabase/.env (git-ignored).
+
+project_id = "nakwwkderqjfsxajduwj"
+
+# Both functions are called with a user JWT, which each verifies itself via
+# `auth.getUser`. Supabase's built-in gateway check is left on as a first filter;
+# neither function trusts it alone for identity.
+
+[functions.entitlement]
+verify_jwt = true
+
+# Creates a Polar checkout session carrying `external_customer_id`. Static
+# checkout links cannot carry it, so without this a purchase can never be
+# attached to the account that made it.
+[functions.checkout]
+verify_jwt = true

@@ -13,9 +13,8 @@
  * an empty feed — the two must not look alike here.
  *
  * **A security advisory outranks a filter.** Every filter below can go wrong in
- * the direction of hiding something: an audience this build has no name for, a
- * version string that will not parse. Where that can happen, `critical` is let
- * through.
+ * the direction of hiding something: an entitlement read that failed, a version
+ * string that will not parse. Where that can happen, `critical` is let through.
  * One release note too many is a nuisance; one advisory too few is the failure
  * this channel exists to prevent.
  */
@@ -23,6 +22,7 @@
 import { announcementsApi, type Announcement, type AnnouncementFeed } from "./api/announcements";
 import { getAppSetting, setAppSetting } from "./settingsStore.svelte";
 import { getLanguage } from "./i18n.svelte";
+import { proState } from "./pro.svelte";
 import { pushNotification } from "../store/notifications.svelte";
 
 /** The feed shape this build understands. A newer one is ignored, not guessed at. */
@@ -135,6 +135,13 @@ export interface VisibilityContext {
   /** Milliseconds since the epoch, for `expiresAt`. */
   now: number;
   appVersion: string;
+  /**
+   * Whether this install is entitled. Only `paid === true` grants access to
+   * `audience: "pro"` content — `false` covers both "free" and "we could not
+   * find out", because the safe answer to an unreadable entitlement is to show
+   * the general-audience content and, separately, every `critical` entry.
+   */
+  paid: boolean;
 }
 
 export type Severity = "info" | "warning" | "critical";
@@ -144,13 +151,13 @@ export function normalizeSeverity(severity: string): Severity {
   return severity === "critical" || severity === "warning" ? severity : "info";
 }
 
-function matchesAudience(audience: string | null | undefined): boolean {
+function matchesAudience(audience: string | null | undefined, paid: boolean): boolean {
   if (!audience) return true;
-  if (audience === "free") return true;
-  // Anything else — including an audience this build does not know about.
-  // Showing it would put content in front of people it was not written for,
-  // which is the failure that matters here; the other direction is handled by
-  // the `critical` bypass.
+  if (audience === "pro") return paid;
+  if (audience === "free") return !paid;
+  // An audience this build does not know about. Showing it would put content in
+  // front of people it was not written for, which is the failure that matters
+  // here — the other direction is handled by the `critical` bypass.
   return false;
 }
 
@@ -180,8 +187,8 @@ function isExpired(a: Announcement, now: number): boolean {
  * Whether this install should be shown this announcement.
  *
  * `critical` skips the audience and version filters. Both depend on state that
- * can be read wrongly — an audience this build has no name for, a version bound
- * that does not parse — and a security advisory must not be hidden by either.
+ * can be read wrongly — an entitlement lookup that failed, a version bound that
+ * does not parse — and a security advisory must not be hidden by either.
  *
  * Expiry is not skipped: it is stated by the same author as the severity, so a
  * withdrawn advisory stays withdrawn.
@@ -189,7 +196,7 @@ function isExpired(a: Announcement, now: number): boolean {
 export function isVisible(a: Announcement, ctx: VisibilityContext): boolean {
   if (isExpired(a, ctx.now)) return false;
   if (normalizeSeverity(a.severity) === "critical") return true;
-  return matchesAudience(a.audience) && matchesVersion(a, ctx.appVersion);
+  return matchesAudience(a.audience, ctx.paid) && matchesVersion(a, ctx.appVersion);
 }
 
 /** What actually goes on screen: visible, and not already shown once. */
@@ -289,7 +296,7 @@ async function poll(): Promise<void> {
   const lang = getLanguage();
   const fresh = selectAnnouncements(
     feed,
-    { now: Date.now(), appVersion: APP_VERSION },
+    { now: Date.now(), appVersion: APP_VERSION, paid: proState.paid },
     readIds()
   );
 

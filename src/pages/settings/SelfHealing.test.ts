@@ -12,6 +12,10 @@ import type { HealRule } from "../../lib/api/self-heal";
  * control that stops every rule at once — is reachable without expanding
  * anything, and the summary still says how many rules can act on their own, so
  * folding hides detail rather than hiding state.
+ *
+ * Entitlement is mocked as paid throughout. The fold lives inside `ProGate`, and
+ * a locked gate renders its upsell instead of its children, so an unentitled
+ * install has no fold to test — it has an offer.
  */
 
 function rule(over: Partial<HealRule> = {}): HealRule {
@@ -51,6 +55,13 @@ vi.mock("../../lib/api/self-heal", () => ({
     saveRule: () => Promise.resolve(),
     setEnabled: () => Promise.resolve(),
   },
+}));
+
+vi.mock("../../lib/pro.svelte", () => ({
+  isPaid: () => true,
+  hasCapability: () => true,
+  isPaidButUnavailable: () => false,
+  proState: { paid: true, status: "paid" },
 }));
 
 beforeEach(() => {

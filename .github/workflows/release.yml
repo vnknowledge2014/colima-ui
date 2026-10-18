@@ -1,13 +1,14 @@
 name: Release
 
-# Triggered by version tags from main branch only
-# Flow: dev → staging (PR) → main (PR) → tag v* → Release
+# Triggered by version tags. main is the only long-lived branch, so every
+# channel is cut from it.
+# Flow: feature branch → PR → main → tag v* → Release
 on:
   push:
     tags:
-      - 'v*'           # Production release (from main)
-      - 'v*-rc.*'      # Release candidate (from staging)
-      - 'v*-beta.*'    # Beta release (from dev)
+      - 'v*'           # Production release (vX.Y.Z, from main)
+      - 'v*-rc.*'      # Release candidate (from main)
+      - 'v*-beta.*'    # Beta release (from main)
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
@@ -66,28 +67,16 @@ jobs:
       - name: Verify tag branch
         run: |
           CHANNEL="${{ steps.version.outputs.channel }}"
-          git fetch origin main staging dev 2>/dev/null || true
+          git fetch origin main
 
-          case "$CHANNEL" in
-            stable)
-              if git merge-base --is-ancestor "$GITHUB_SHA" origin/main 2>/dev/null; then
-                echo "✅ Production tag is on main branch"
-              else
-                echo "❌ Production tags (vX.Y.Z) must be on the main branch"
-                exit 1
-              fi
-              ;;
-            rc)
-              if git merge-base --is-ancestor "$GITHUB_SHA" origin/staging 2>/dev/null; then
-                echo "✅ RC tag is on staging branch"
-              else
-                echo "⚠️ RC tag may not be on staging — proceeding anyway"
-              fi
-              ;;
-            beta)
-              echo "✅ Beta tag — no branch restriction"
-              ;;
-          esac
+          # main is the only long-lived branch: stable, rc and beta tags alike
+          # must point at a commit that has landed there.
+          if git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "✅ $CHANNEL tag is on main"
+          else
+            echo "❌ Release tags ($CHANNEL) must point at a commit on main"
+            exit 1
+          fi
 
   # ===== Build for all platforms =====
   build:

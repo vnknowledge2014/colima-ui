@@ -16,5 +16,7 @@ export * from "./settings";
 export * from "./knowledgeBank";
 export * from "./colimaConfig";
 export * from "./sandbox";
+export * from "./telemetry";
+export * from "./subscription";
 export * from "./security";
 export * from "./activity";
