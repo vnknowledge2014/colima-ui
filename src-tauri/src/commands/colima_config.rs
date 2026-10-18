@@ -233,7 +233,7 @@ fn set_path(doc: &mut Value, dotted: &str, new_value: Value) {
             *cur = Value::Mapping(Default::default());
         }
         let map = cur.as_mapping_mut().expect("just ensured mapping");
-        let key = Value::String((*segment).to_string());
+        let key = (*segment).to_string();
         cur = map
             .entry(key)
             .or_insert_with(|| Value::Mapping(Default::default()));
@@ -244,7 +244,7 @@ fn set_path(doc: &mut Value, dotted: &str, new_value: Value) {
     cur.as_mapping_mut()
         .expect("just ensured mapping")
         .insert(
-            Value::String(segments[segments.len() - 1].to_string()),
+            segments[segments.len() - 1].to_string(),
             new_value,
         );
 }
