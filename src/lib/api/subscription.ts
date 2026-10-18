@@ -1,5 +1,5 @@
+import { SURREALDB_URL, surrealQuery } from "../surrealdb";
 import { call } from "./client";
-import { SUPABASE_URL } from "../supabase";
 
 /** Mirrors `SubscriptionState` in `src-tauri/src/subscription/mod.rs`. */
 export interface SubscriptionState {
@@ -49,33 +49,12 @@ export const subscriptionApi = {
       payload,
     ),
 
-  clear: () => call<SubscriptionState>("subscription_clear", undefined, "POST", "/api/subscription/clear"),
+  clear: () =>
+    call<SubscriptionState>("subscription_clear", undefined, "POST", "/api/subscription/clear"),
 };
 
 /**
- * Ask the entitlement oracle whether the signed-in user holds a claimed seat.
- *
- * The lookup needs `POLAR_ACCESS_TOKEN`, an organization secret, so it cannot
- * happen in this app — a Supabase Edge Function holds it and this call carries
- * the user's JWT as proof of who is asking.
- *
- * Returns `null` when the answer could not be obtained. **That is not "not
- * entitled"** — the caller must leave the cache alone on `null`, or a flat tyre
- * on the network becomes a downgrade for a paying customer.
- */
-/**
  * Ask the backend for a checkout URL bound to the signed-in account.
- *
- * A static Polar checkout link cannot carry the buyer's identity — its query
- * parameters do not include `customer_external_id`, and unknown parameters are
- * ignored silently. Only `POST /v1/checkouts/` accepts `external_customer_id`,
- * and that needs the organization token, so the session is created server-side.
- *
- * Without that binding a purchase is unattachable: Polar would know an email,
- * the app would ask about a Supabase user id, and the two would never meet.
- *
- * Returns `null` if a URL could not be obtained — the caller must say so rather
- * than opening a fallback link that would take money it cannot honour.
  */
 export async function createCheckout(
   accessToken: string,
@@ -83,7 +62,7 @@ export async function createCheckout(
   seats?: number,
 ): Promise<string | null> {
   try {
-    const res = await fetch(`${SUPABASE_URL}/functions/v1/checkout`, {
+    const res = await fetch(`${SURREALDB_URL}/functions/v1/checkout`, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${accessToken}`,
@@ -99,13 +78,41 @@ export async function createCheckout(
   }
 }
 
+/**
+ * Query SurrealDB (`subscription` table in `colima_ui`/`auth`) for the signed-in
+ * user's entitlement record, with fallback to an HTTP `/functions/v1/entitlement`
+ * oracle endpoint when present.
+ *
+ * Returns `null` when unreachable or when no subscription record exists yet, so
+ * the caller leaves the existing offline cache untouched.
+ */
 export async function fetchEntitlement(accessToken: string): Promise<EntitlementPayload | null> {
+  // 1. Primary path: query SurrealDB `subscription` table scoped by $auth.id
   try {
-    const res = await fetch(`${SUPABASE_URL}/functions/v1/entitlement`, {
+    const rows = await surrealQuery<EntitlementPayload[]>(
+      "SELECT user_id, entitled, tier, seats_total, seats_claimed, expires_at FROM subscription WHERE user_id = <string>$auth.id LIMIT 1;",
+      accessToken,
+    );
+    const record = rows[0]?.result?.[0];
+    if (record && typeof record.entitled === "boolean" && typeof record.user_id === "string") {
+      return {
+        user_id: record.user_id,
+        entitled: record.entitled,
+        tier: record.tier || "pro",
+        seats_total: record.seats_total ?? null,
+        seats_claimed: record.seats_claimed ?? null,
+        expires_at: record.expires_at ?? null,
+      };
+    }
+  } catch {
+    // Fall through to HTTP oracle fallback or offline no-op
+  }
+
+  // 2. Optional HTTP oracle fallback
+  try {
+    const res = await fetch(`${SURREALDB_URL}/functions/v1/entitlement`, {
       method: "POST",
       headers: {
-        // Identity comes from this token alone. The function must never read a
-        // user id out of the body, and this call deliberately sends none.
         Authorization: `Bearer ${accessToken}`,
         "Content-Type": "application/json",
       },
@@ -114,8 +121,6 @@ export async function fetchEntitlement(accessToken: string): Promise<Entitlement
     const body = (await res.json()) as EntitlementPayload;
     return typeof body?.entitled === "boolean" && typeof body?.user_id === "string" ? body : null;
   } catch {
-    // Offline, DNS failure, function not deployed yet. Indistinguishable here,
-    // and all mean the same thing: we learned nothing, so change nothing.
     return null;
   }
 }

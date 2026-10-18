@@ -45,7 +45,11 @@
   );
 
   let providerLabel = $derived(
-    user?.provider ? user.provider.charAt(0).toUpperCase() + user.provider.slice(1) : ""
+    user?.provider === "surrealdb"
+      ? "SurrealDB"
+      : user?.provider
+        ? user.provider.charAt(0).toUpperCase() + user.provider.slice(1)
+        : ""
   );
 
   async function doSignOut() {

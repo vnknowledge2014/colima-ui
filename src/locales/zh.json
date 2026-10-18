@@ -379,7 +379,17 @@
       "google": "使用 Google 继续",
       "github": "使用 GitHub 继续",
       "waiting": "请在浏览器中完成登录，然后返回这里。",
-      "skip": "跳过"
+      "skip": "跳过",
+      "mode_signin": "登录",
+      "mode_signup": "创建账户",
+      "name_label": "名称",
+      "name_placeholder": "您的名称",
+      "email_label": "电子邮箱",
+      "email_placeholder": "you@example.com",
+      "password_label": "密码",
+      "password_placeholder": "••••••••",
+      "submit_signin": "通过 SurrealDB 登录",
+      "submit_signup": "创建 SurrealDB 账户"
     },
     "unavailable": {
       "browser": "登录仅在 ColimaUI 桌面应用中可用——它需要系统浏览器和钥匙串。",

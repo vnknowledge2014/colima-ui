@@ -379,7 +379,17 @@
       "google": "Continue with Google",
       "github": "Continue with GitHub",
       "waiting": "Finish signing in in your browser, then come back here.",
-      "skip": "Skip"
+      "skip": "Skip",
+      "mode_signin": "Sign in",
+      "mode_signup": "Create account",
+      "name_label": "Name",
+      "name_placeholder": "Your name",
+      "email_label": "Email",
+      "email_placeholder": "you@example.com",
+      "password_label": "Password",
+      "password_placeholder": "••••••••",
+      "submit_signin": "Sign in with SurrealDB",
+      "submit_signup": "Create SurrealDB account"
     },
     "unavailable": {
       "browser": "Sign-in is only available in the ColimaUI desktop app — it needs the system browser and your keychain.",

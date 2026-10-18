@@ -179,11 +179,12 @@ fn now_ms() -> i64 {
 
 /// Short, collision-resistant, and safe inside a Colima profile name.
 fn new_session_id() -> String {
-    use rand::Rng;
-    let mut rng = rand::thread_rng();
-    (0..8)
-        .map(|_| {
-            let n: u8 = rng.gen_range(0..36);
+    let mut bytes = [0u8; 8];
+    rand::fill(&mut bytes);
+    bytes
+        .into_iter()
+        .map(|b| {
+            let n = b % 36;
             if n < 10 {
                 (b'0' + n) as char
             } else {

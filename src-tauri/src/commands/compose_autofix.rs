@@ -83,10 +83,7 @@ fn collect_key_paths(value: &serde_yml::Value, prefix: &str, out: &mut BTreeSet<
     match value {
         serde_yml::Value::Mapping(map) => {
             for (k, v) in map {
-                let key = match k {
-                    serde_yml::Value::String(s) => s.clone(),
-                    other => format!("{:?}", other),
-                };
+                let key = k.clone();
                 let path = if prefix.is_empty() {
                     key
                 } else {

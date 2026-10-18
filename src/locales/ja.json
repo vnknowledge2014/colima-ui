@@ -379,7 +379,17 @@
       "google": "Google で続ける",
       "github": "GitHub で続ける",
       "waiting": "ブラウザでサインインを完了してから、ここに戻ってください。",
-      "skip": "スキップ"
+      "skip": "スキップ",
+      "mode_signin": "サインイン",
+      "mode_signup": "アカウント作成",
+      "name_label": "名前",
+      "name_placeholder": "お名前",
+      "email_label": "メールアドレス",
+      "email_placeholder": "you@example.com",
+      "password_label": "パスワード",
+      "password_placeholder": "••••••••",
+      "submit_signin": "SurrealDBでサインイン",
+      "submit_signup": "SurrealDBアカウントを作成"
     },
     "unavailable": {
       "browser": "サインインは ColimaUI デスクトップアプリでのみ利用できます — システムブラウザとキーチェーンが必要です。",

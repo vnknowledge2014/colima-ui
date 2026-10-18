@@ -379,7 +379,17 @@
       "google": "Tiếp tục với Google",
       "github": "Tiếp tục với GitHub",
       "waiting": "Hoàn tất đăng nhập trên trình duyệt rồi quay lại đây.",
-      "skip": "Bỏ qua"
+      "skip": "Bỏ qua",
+      "mode_signin": "Đăng nhập",
+      "mode_signup": "Tạo tài khoản",
+      "name_label": "Tên hiển thị",
+      "name_placeholder": "Tên của bạn",
+      "email_label": "Email",
+      "email_placeholder": "ban@example.com",
+      "password_label": "Mật khẩu",
+      "password_placeholder": "••••••••",
+      "submit_signin": "Đăng nhập qua SurrealDB",
+      "submit_signup": "Tạo tài khoản SurrealDB"
     },
     "unavailable": {
       "browser": "Đăng nhập chỉ có trên ứng dụng desktop ColimaUI — cần trình duyệt hệ thống và keychain.",
