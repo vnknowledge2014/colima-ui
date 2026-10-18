@@ -54,9 +54,8 @@ const QUERY_TOKEN_PATHS: &[&str] = &["/api/events", "/api/k8s/pods/logs/stream"]
 pub fn get_api_token() -> String {
     API_TOKEN
         .get_or_init(|| {
-            use rand::RngCore;
             let mut bytes = [0u8; 32];
-            rand::rngs::OsRng.fill_bytes(&mut bytes);
+            rand::fill(&mut bytes);
             let hex: String = bytes.iter().map(|b| format!("{:02x}", b)).collect();
             format!("colima-{}", hex)
         })
