@@ -1,10 +1,10 @@
 -- =============================================================================
 -- ColimaUI — SurrealDB Auth & Entitlement Schema (SurrealDB v2 / v3)
 -- =============================================================================
--- Apply with:
---   curl -s -u root:omo-secret -H "Accept: application/json" \
+-- Apply with (credentials come from your environment, never from this file):
+--   curl -s -u "$SURREAL_USER:$SURREAL_PASS" -H "Accept: application/json" \
 --     -H "surreal-ns: colima_ui" -H "surreal-db: auth" \
---     -X POST http://127.0.0.1:18000/sql --data-binary @surrealdb/schema.surql
+--     -X POST "${SURREAL_URL:-http://127.0.0.1:18000}/sql" --data-binary @surrealdb/schema.surql
 -- =============================================================================
 
 DEFINE NAMESPACE IF NOT EXISTS colima_ui;
@@ -19,9 +19,15 @@ DEFINE TABLE IF NOT EXISTS user SCHEMAFULL
     FOR create NONE;
 
 DEFINE FIELD IF NOT EXISTS email ON user TYPE string ASSERT string::is_email($value);
-DEFINE FIELD IF NOT EXISTS name ON user TYPE string DEFAULT 'Account';
-DEFINE FIELD IF NOT EXISTS passhash ON user TYPE string;
-DEFINE FIELD IF NOT EXISTS avatar ON user TYPE string DEFAULT '';
+-- name/avatar come straight from the signup request, so bound them. OVERWRITE
+-- (not IF NOT EXISTS) so re-applying this file tightens an existing database.
+DEFINE FIELD OVERWRITE name ON user TYPE string DEFAULT 'Account'
+  ASSERT string::len($value) <= 100;
+-- The hash is only ever read by the SIGNIN query, which runs with the access
+-- method's own authority. Nobody — including the owner — needs to SELECT it.
+DEFINE FIELD OVERWRITE passhash ON user TYPE string PERMISSIONS FOR select NONE;
+DEFINE FIELD OVERWRITE avatar ON user TYPE string DEFAULT ''
+  ASSERT string::len($value) <= 2048;
 DEFINE FIELD IF NOT EXISTS provider ON user TYPE string DEFAULT 'surrealdb';
 DEFINE FIELD IF NOT EXISTS created_at ON user TYPE datetime DEFAULT time::now();
 
