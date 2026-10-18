@@ -1,15 +1,14 @@
-//! Secure storage for the Supabase auth session.
+//! Secure storage for the SurrealDB auth session.
 //!
 //! # Why this exists
 //!
-//! supabase-js persists its session in `localStorage` by default. In a webview
-//! that means the access token, the refresh token *and* the PKCE `code_verifier`
+//! Browser-style auth clients persist sessions in `localStorage` by default. In a webview
+//! that means the access token, the refresh token *and* any OAuth/PKCE state
 //! sit in plaintext in the app's data directory, readable by any process running
-//! as the user. The refresh token is long-lived, so that is a durable credential
-//! on disk.
+//! as the user.
 //!
-//! Instead the frontend hands supabase-js a custom storage adapter whose three
-//! operations land here. Everything supabase-js wants to persist — not only the
+//! Instead the frontend hands the SurrealDB auth client a custom storage adapter whose three
+//! operations land here. Everything the auth client wants to persist — not only the
 //! tokens — goes into the OS keychain under one service name.
 //!
 //! # Platform support
