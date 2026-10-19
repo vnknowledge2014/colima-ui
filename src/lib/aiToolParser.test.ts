@@ -54,6 +54,37 @@ describe('aiToolParser', () => {
     expect(parsed.hasDiagnose).toBe(true);
     expect(parsed.cleanText).toBe('Let me check:');
   });
+
+  it('should not swallow adjacent tags when a parameterless tag precedes a piped tag', () => {
+    const input = 'First [QUERY: getImages] and second [QUERY: getContainers | show all]';
+    const parsed = parseAiTools(input);
+
+    expect(parsed.queries.length).toBe(2);
+    expect(parsed.queries[0][1]).toBe('getImages');
+    expect(parsed.queries[0][2]).toBeUndefined();
+    expect(parsed.queries[1][1]).toBe('getContainers ');
+    expect(parsed.queries[1][2]).toBe('show all');
+    expect(parsed.cleanText).toBe('First  and second');
+  });
+
+  it('should preserve nested JSON arrays inside [EVENT_APPROVE] and [QUERY] payloads without truncating at inner ]', () => {
+    const input =
+      'Building image:\n[EVENT_APPROVE: cli-exec | {"command": "docker", "args": ["build", "-t", "myapp", "."]}]\n[EVENT_APPROVE: run-container | {"image": "nginx:latest", "ports": ["8080:80"]}]';
+    const parsed = parseAiTools(input);
+
+    expect(parsed.eventApprovals.length).toBe(2);
+    expect(parsed.eventApprovals[0][1].trim()).toBe('cli-exec');
+    expect(JSON.parse(parsed.eventApprovals[0][2])).toEqual({
+      command: 'docker',
+      args: ['build', '-t', 'myapp', '.'],
+    });
+    expect(parsed.eventApprovals[1][1].trim()).toBe('run-container');
+    expect(JSON.parse(parsed.eventApprovals[1][2])).toEqual({
+      image: 'nginx:latest',
+      ports: ['8080:80'],
+    });
+    expect(parsed.cleanText).toBe('Building image:');
+  });
 });
 
 describe('[SUGGEST:] follow-up chips', () => {

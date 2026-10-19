@@ -303,8 +303,10 @@ pub fn build_router() -> Router {
         // Knowledge Bank
         .route("/api/kb/query", post(api_kb_query))
         .route("/api/kb/feedback", post(api_kb_feedback))
+        .route("/api/kb/learn", post(api_kb_learn))
         .route("/api/kb/search", post(api_kb_search))
         .route("/api/kb/memories", get(api_kb_get_memories))
+        .route("/api/kb/memories/add", post(api_kb_add_memory))
         .route("/api/kb/memories/update", post(api_kb_update_memory))
         .route("/api/kb/memories/delete", post(api_kb_delete_memory))
         // Shell Sandbox

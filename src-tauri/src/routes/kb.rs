@@ -83,6 +83,24 @@ pub async fn api_kb_delete_memory(
     }
 }
 
+pub async fn api_kb_learn(
+    Json(body): Json<KbLearnRequest>,
+) -> (StatusCode, Json<ApiResponse<i64>>) {
+    match knowledge_bank::kb_learn(body.error_pattern, body.solution_text).await {
+        Ok(id) => ok(id),
+        Err(e) => err(e.to_string()),
+    }
+}
+
+pub async fn api_kb_add_memory(
+    Json(body): Json<AddMemoryRequest>,
+) -> (StatusCode, Json<ApiResponse<String>>) {
+    match knowledge_bank::add_memory(body.memory_type, body.content).await {
+        Ok(msg) => ok(msg),
+        Err(e) => err(e.to_string()),
+    }
+}
+
 
 pub async fn api_sandbox_execute(
     Json(body): Json<SandboxRequest>,

@@ -134,4 +134,58 @@ describe("agentCore helpers (DeepSeek-Harness & Harness2 patterns)", () => {
 
     vi.restoreAllMocks();
   });
+
+  it("runAgent persists [LEARN], [LEARN_REASONING], and [REMEMBER_PREFERENCE] via knowledgeBankApi without wasting an extra LLM round", async () => {
+    const { knowledgeBankApi } = await import("./api/knowledgeBank");
+    const learnSpy = vi.spyOn(knowledgeBankApi, "learn").mockResolvedValue(1);
+    const addMemorySpy = vi.spyOn(knowledgeBankApi, "addMemory").mockResolvedValue("Memory added");
+    vi.spyOn(knowledgeBankApi, "query").mockResolvedValue({ context_text: "" });
+    vi.spyOn(knowledgeBankApi, "searchMemory").mockResolvedValue([]);
+
+    let llmCalls = 0;
+    vi.spyOn(llmProviders, "chatStream").mockImplementation(
+      async (_prov, _model, _key, _hist, _endpoint, onChunk) => {
+        llmCalls += 1;
+        onChunk(
+          "Got it, I will remember that.\n[LEARN: vz disk lock | pkill limactl usernet]\n[LEARN_REASONING: high memory usage | reduce VM memory to 4GB]\n[REMEMBER_PREFERENCE: Always use dark terminal theme]",
+        );
+      },
+    );
+
+    const callbacks: AgentCallbacks = {
+      onStatus: () => {},
+      onMessage: () => {},
+      onMessageUpdate: () => {},
+      onMessageDelete: () => {},
+      onApprovalRequired: async () => true,
+      onNavigate: () => {},
+      onTimerSchedule: () => {},
+      onCronSchedule: () => {},
+      onScheduleCancel: () => {},
+    };
+
+    await runAgent(
+      "Remember my preference and those lessons",
+      { provider: "ollama-local", model: "qwen2.5", apiKey: "", endpoint: "http://127.0.0.1:11434" },
+      callbacks,
+      [],
+      "",
+      [],
+    );
+
+    // Side-effect memory tags must not trigger a second empty [Tool Results] LLM round
+    expect(llmCalls).toBe(1);
+    expect(learnSpy).toHaveBeenCalledWith("vz disk lock", "pkill limactl usernet");
+    expect(learnSpy).toHaveBeenCalledWith("high memory usage", "reduce VM memory to 4GB");
+    expect(addMemorySpy).toHaveBeenCalledWith(
+      "reasoning",
+      "high memory usage | reduce VM memory to 4GB",
+    );
+    expect(addMemorySpy).toHaveBeenCalledWith(
+      "preference",
+      "Always use dark terminal theme",
+    );
+
+    vi.restoreAllMocks();
+  });
 });

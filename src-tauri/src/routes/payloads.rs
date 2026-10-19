@@ -826,8 +826,20 @@ pub struct KbQueryRequest {
     pub error_text: String,
 }
 
+#[derive(Deserialize)]
+pub struct KbLearnRequest {
+    #[serde(alias = "errorPattern")]
+    pub error_pattern: String,
+    #[serde(alias = "solutionText")]
+    pub solution_text: String,
+}
 
-
+#[derive(Deserialize)]
+pub struct AddMemoryRequest {
+    #[serde(alias = "memoryType")]
+    pub memory_type: String,
+    pub content: String,
+}
 
 #[derive(Deserialize)]
 pub struct KbSearchRequest {
@@ -836,18 +848,11 @@ pub struct KbSearchRequest {
     pub limit: u32,
 }
 
-
-
-
-
 #[derive(Deserialize)]
 pub struct UpdateMemoryRequest {
     pub id: String,
     pub content: String,
 }
-
-
-
 
 #[derive(Deserialize)]
 pub struct DeleteMemoryRequest {

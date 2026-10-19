@@ -14,6 +14,10 @@ export const knowledgeBankApi = {
     call<{ context_text: string }>("kb_query", { errorText }, "POST", "/api/kb/query", undefined, { error_text: errorText }),
   feedback: (solutionId: number, isLike: boolean) =>
     call<string>("kb_feedback", { solutionId, isLike }, "POST", "/api/kb/feedback", undefined, { solutionId, isLike }),
+  learn: (errorPattern: string, solutionText: string) =>
+    call<number>("kb_learn", { errorPattern, solutionText }, "POST", "/api/kb/learn", undefined, { errorPattern, solutionText }),
+  addMemory: (memoryType: string, content: string) =>
+    call<string>("add_memory", { memoryType, content }, "POST", "/api/kb/memories/add", undefined, { memoryType, content }),
   searchMemory: (query: string, limit = 10) =>
     call<string[]>("search_memory", { query, limit }, "POST", "/api/kb/search", undefined, { query, limit }),
   getAllMemories: () =>
