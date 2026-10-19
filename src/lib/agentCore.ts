@@ -38,12 +38,36 @@ export function capToolOutput(
   return `${text.slice(0, headChars)}\n\n[... ${omitted} chars omitted (head+tail pruned) ...]\n\n${text.slice(text.length - tailChars)}`;
 }
 
+function canonicalizeJsonValue(val: unknown): unknown {
+  if (Array.isArray(val)) {
+    return val.map(canonicalizeJsonValue);
+  }
+  if (val !== null && typeof val === "object") {
+    const obj = val as Record<string, unknown>;
+    const sorted: Record<string, unknown> = {};
+    for (const k of Object.keys(obj).sort()) {
+      sorted[k] = canonicalizeJsonValue(obj[k]);
+    }
+    return sorted;
+  }
+  return val;
+}
+
 /**
  * Normalize a tool invocation key for cross-round repeat detection
  * (`repeat-tool-reminder` guard pattern from `deepseek-harness`).
  */
 export function normalizeToolCallKey(kind: string, target: string, payload = ""): string {
-  return `${kind.toUpperCase()}:${target.trim().replace(/\s+/g, " ")}:${payload.trim()}`;
+  let normalizedPayload = payload.trim();
+  if (normalizedPayload) {
+    try {
+      const parsed: unknown = JSON.parse(normalizedPayload);
+      normalizedPayload = JSON.stringify(canonicalizeJsonValue(parsed));
+    } catch {
+      normalizedPayload = normalizedPayload.replace(/\s+/g, " ");
+    }
+  }
+  return `${kind.toUpperCase()}:${target.trim().replace(/\s+/g, " ")}:${normalizedPayload}`;
 }
 
 /**
@@ -166,6 +190,7 @@ export async function runAgent(
 
       // 1. [QUERY: eventName | payload]
       for (const [, eventName, payload] of queries) {
+        if (aborted()) break;
         const evt = eventName.trim();
         const pld = payload ? payload.trim() : "";
         const callKey = normalizeToolCallKey("QUERY", evt, pld);
@@ -173,7 +198,6 @@ export async function runAgent(
           toolContext += `\n[SYSTEM REMINDER: You already executed [QUERY: ${evt}] with the same payload in an earlier round. Use the previous result above or try a different approach.]\n`;
           continue;
         }
-        seenToolCalls.add(callKey);
         const category = getCategory(evt);
         
         if (category !== "SAFE") {
@@ -185,6 +209,7 @@ export async function runAgent(
         try {
           const parsedPayload = pld ? JSON.parse(pld) : {};
           const result = await executeEvent(evt, parsedPayload);
+          seenToolCalls.add(callKey);
           toolContext += `\n### Query: ${evt}\n${capToolOutput(String(result))}\n`;
         } catch (e) {
           toolContext += `\n(Query failed: ${e})\n`;
@@ -193,6 +218,7 @@ export async function runAgent(
 
       // 2. [EVENT_APPROVE: eventName | payload]
       for (const [, eventName, payload] of eventApprovals.slice(0, 2)) {
+        if (aborted()) break;
         const evt = eventName.trim();
         const pld = payload ? payload.trim() : "";
         const category = getCategory(evt);
@@ -217,11 +243,14 @@ export async function runAgent(
           callbacks.onMessage({ id: approvalId, role: "system", content: `⚠️ Action Required:\nTrigger App Event: **${evt}**\n\`${pld}\`` });
           
           const approved = await callbacks.onApprovalRequired(approvalId, `[EVENT_APPROVE: ${evt} | ${pld}]`);
+          if (aborted()) break;
 
           if (approved) {
             callbacks.onMessage({ id: newId(), role: "system", content: `✅ Approved: \`${evt}\`. Executing...` });
             try {
               const result = await executeEvent(evt, parsedPayload);
+              // State-mutating action succeeded: invalidate cached read-only tool calls
+              seenToolCalls.clear();
               toolContext += `\n\n### Approved Event: \`${evt}\`\nResult: ${capToolOutput(String(result))}\n`;
               callbacks.onMessage({ id: newId(), role: "system", content: `🏁 Action Completed.` });
             } catch (e) {
@@ -235,7 +264,7 @@ export async function runAgent(
       }
 
       // 3. Old Tools handling
-      if (hasQueryState) {
+      if (hasQueryState && !aborted()) {
         callbacks.onStatus("🔍 Reading live system state...");
         callbacks.onMessage({ id: newId(), role: "system", content: "🔍 Reading live system state..." });
         try {
@@ -266,7 +295,7 @@ Built-in Presets: ${JSON.stringify(BUILT_IN_PRESETS)}
         }
       }
 
-      if (hasDiagnose) {
+      if (hasDiagnose && !aborted()) {
         callbacks.onStatus("🔬 Collecting diagnostics...");
         callbacks.onMessage({ id: newId(), role: "system", content: "🔬 Collecting diagnostics (logs, processes, locks)..." });
         try {
@@ -276,16 +305,17 @@ Built-in Presets: ${JSON.stringify(BUILT_IN_PRESETS)}
       }
 
       for (const [, cmd] of runs.slice(0, 3)) {
+        if (aborted()) break;
         const callKey = normalizeToolCallKey("RUN", cmd);
         if (seenToolCalls.has(callKey)) {
           toolContext += `\n[SYSTEM REMINDER: You already executed [RUN: ${cmd.trim()}] in an earlier round. Use the previous output above or try a different command.]\n`;
           continue;
         }
-        seenToolCalls.add(callKey);
         callbacks.onStatus(`🔧 Executing: ${cmd}`);
         callbacks.onMessage({ id: newId(), role: "system", content: `🔧 Executing: \`${cmd}\`` });
         try {
           const r = await sandboxApi.execute(cmd);
+          seenToolCalls.add(callKey);
           const out = capToolOutput(r.stdout || r.stderr || "(no output)");
           toolContext += `\n\n### Command: \`${cmd}\` (exit: ${r.exit_code})\n\`\`\`\n${out}\n\`\`\`\n`;
         } catch (e) {
@@ -298,9 +328,12 @@ Built-in Presets: ${JSON.stringify(BUILT_IN_PRESETS)}
               content: `⚠️ Action Required:\n\`${cmd}\``,
             });
             const approved = await callbacks.onApprovalRequired(approvalId, cmd);
+            if (aborted()) break;
             if (approved) {
               try {
                 const r = await sandboxApi.executeApproved(cmd);
+                // State-mutating command succeeded: invalidate cached read-only tool calls
+                seenToolCalls.clear();
                 const out = capToolOutput(r.stdout || r.stderr || "(no output)");
                 toolContext += `\n\n### Approved Command: \`${cmd}\` (exit: ${r.exit_code})\n\`\`\`\n${out}\n\`\`\`\n`;
                 callbacks.onMessage({
@@ -322,13 +355,17 @@ Built-in Presets: ${JSON.stringify(BUILT_IN_PRESETS)}
       }
 
       for (const [, cmd] of runApprovals.slice(0, 2)) {
+        if (aborted()) break;
         callbacks.onStatus(`⏳ Awaiting approval: ${cmd}`);
         const approvalId = newId();
         callbacks.onMessage({ id: approvalId, role: "system", content: `⚠️ Action Required:\n\`${cmd}\`` });
         const approved = await callbacks.onApprovalRequired(approvalId, cmd);
+        if (aborted()) break;
         if (approved) {
           try {
             const r = await sandboxApi.executeApproved(cmd);
+            // State-mutating command succeeded: invalidate cached read-only tool calls
+            seenToolCalls.clear();
             const out = capToolOutput(r.stdout || r.stderr || "(no output)");
             toolContext += `\n\n### Approved Command: \`${cmd}\` (exit: ${r.exit_code})\n\`\`\`\n${out}\n\`\`\`\n`;
             callbacks.onMessage({ id: newId(), role: "system", content: `✅ Approved & Executed: \`${cmd}\`` });
@@ -347,6 +384,7 @@ Built-in Presets: ${JSON.stringify(BUILT_IN_PRESETS)}
       ];
 
       for (const task of securityTasks) {
+        if (aborted()) break;
         callbacks.onStatus(`⏳ Awaiting approval: Security ${task.tool}`);
         const approvalId = newId();
         const warning = task.dangerous ? `\n\n🚨 **WARNING**: This generates code patches. Review carefully before applying.` : "";
@@ -354,6 +392,7 @@ Built-in Presets: ${JSON.stringify(BUILT_IN_PRESETS)}
         callbacks.onMessage({ id: approvalId, role: "system", content: `⚠️ Security Action Required:\n**${task.tool}**\n\`${cmdStr}\`${warning}` });
         
         const approved = await callbacks.onApprovalRequired(approvalId, `[EVENT_APPROVE: cli-exec | {"command":"${task.cmd}","args":${JSON.stringify(task.args)}}]`);
+        if (aborted()) break;
 
         if (approved) {
           callbacks.onMessage({ id: newId(), role: "system", content: `✅ Approved: Security ${task.tool}. Executing...` });
@@ -369,6 +408,8 @@ Built-in Presets: ${JSON.stringify(BUILT_IN_PRESETS)}
           callbacks.onMessage({ id: newId(), role: "system", content: `❌ Denied: Security ${task.tool}` });
         }
       }
+
+      if (aborted()) break;
 
       for (const [, expr, prompt] of schedCrons.slice(0, 1)) {
         const id = newId("cron");
@@ -398,6 +439,7 @@ Built-in Presets: ${JSON.stringify(BUILT_IN_PRESETS)}
       }
 
       for (const [, path] of readReferences.slice(0, 3)) {
+        if (aborted()) break;
         callbacks.onStatus(`📚 Reading reference: ${path}`);
         try {
           const refContent = await aiApi.readReference(path.trim());
@@ -408,12 +450,12 @@ Built-in Presets: ${JSON.stringify(BUILT_IN_PRESETS)}
         }
       }
 
+      if (aborted()) break;
+
       fullHistory.push(
         { role: "assistant", content: responseText },
         { role: "user", content: `[Tool Results]\n${toolContext}\n\nContinue reasoning.` }
       );
-      // Send the final responseText to the UI to save to its history DB
-      callbacks.onMessageUpdate(streamId, responseText);
     }
   } catch (e) {
     // An aborted fetch rejects — that is the user pressing Stop, not a failure
