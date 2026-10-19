@@ -169,7 +169,8 @@ export async function runAgent(
       const parsed = parseAiTools(responseText);
       const {
         cleanText, hasTools, queries, eventApprovals,
-        runs, runApprovals, hasDiagnose, hasQueryState,
+        runs, runApprovals, learns, learnReasoning, prefs,
+        hasDiagnose, hasQueryState,
         navigates, readReferences, secThreatModels, secVulnScans,
         secTriages, secPatchGens, schedCrons, schedTimers, schedCancels
       } = parsed;
@@ -450,7 +451,65 @@ Built-in Presets: ${JSON.stringify(BUILT_IN_PRESETS)}
         }
       }
 
+      for (const [, raw] of learns.slice(0, 3)) {
+        if (aborted()) break;
+        const trimmed = raw.trim();
+        if (!trimmed) continue;
+        try {
+          const pipeIdx = trimmed.indexOf("|");
+          if (pipeIdx !== -1) {
+            const pattern = trimmed.slice(0, pipeIdx).trim();
+            const solution = trimmed.slice(pipeIdx + 1).trim();
+            if (pattern && solution) {
+              await knowledgeBankApi.learn(pattern, solution);
+            } else {
+              await knowledgeBankApi.addMemory("learned", trimmed);
+            }
+          } else {
+            await knowledgeBankApi.addMemory("learned", trimmed);
+          }
+        } catch {
+          // Knowledge Bank persistence is best-effort
+        }
+      }
+
+      for (const [, raw] of learnReasoning.slice(0, 3)) {
+        if (aborted()) break;
+        const trimmed = raw.trim();
+        if (!trimmed) continue;
+        try {
+          await knowledgeBankApi.addMemory("reasoning", trimmed);
+          const pipeIdx = trimmed.indexOf("|");
+          if (pipeIdx !== -1) {
+            const problem = trimmed.slice(0, pipeIdx).trim();
+            const solution = trimmed.slice(pipeIdx + 1).trim();
+            if (problem && solution) {
+              await knowledgeBankApi.learn(problem, solution);
+            }
+          }
+        } catch {
+          // Knowledge Bank persistence is best-effort
+        }
+      }
+
+      for (const [, raw] of prefs.slice(0, 3)) {
+        if (aborted()) break;
+        const trimmed = raw.trim();
+        if (!trimmed) continue;
+        try {
+          await knowledgeBankApi.addMemory("preference", trimmed);
+        } catch {
+          // Knowledge Bank persistence is best-effort
+        }
+      }
+
       if (aborted()) break;
+
+      // Side-effect-only memory tags ([LEARN], [LEARN_REASONING], [REMEMBER_PREFERENCE])
+      // do not produce tool output requiring another LLM reasoning round.
+      if (!toolContext.trim()) {
+        break;
+      }
 
       fullHistory.push(
         { role: "assistant", content: responseText },
