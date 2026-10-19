@@ -29,6 +29,14 @@ export interface ComposeKBSolution {
   source: string;
 }
 
+/** Mirrors `ComposeTriage` in `compose_diagnose.rs`. */
+export interface ComposeTriage {
+  severity_score: number;
+  severity_label: string;
+  auto_fixable_prob: number;
+  confidence: number;
+}
+
 /** Mirrors `ComposeDiagnosis` in `compose_diagnose.rs`. */
 export interface ComposeDiagnosis {
   validation: ComposeValidation;
@@ -37,6 +45,7 @@ export interface ComposeDiagnosis {
   /** Already redacted backend-side. Shown to the user before anything is sent. */
   llm_payload_preview: string;
   needs_llm: boolean;
+  triage?: ComposeTriage;
 }
 
 /** Mirrors `Patch` in `compose_autofix.rs`. */

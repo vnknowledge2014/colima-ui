@@ -19,7 +19,41 @@ export interface AgentCallbacks {
   onScheduleCancel: (id: string) => void;
 }
 
-export const MAX_SEARCH_ROUNDS = 3;
+export const MAX_SEARCH_ROUNDS = 5;
+export const DEFAULT_TOOL_OUTPUT_MAX_CHARS = 5120;
+
+/**
+ * Head + tail tool output pruner (DeepSeek-Harness & Harness2 pattern).
+ * Preserves the first 80% (headers/context) and last 20% (final exit summary/errors)
+ * when a tool output exceeds `maxChars`.
+ */
+export function capToolOutput(
+  text: string,
+  maxChars: number = DEFAULT_TOOL_OUTPUT_MAX_CHARS,
+): string {
+  if (!text || text.length <= maxChars) return text;
+  const headChars = Math.floor(maxChars * 0.8);
+  const tailChars = Math.max(0, maxChars - headChars);
+  const omitted = text.length - headChars - tailChars;
+  return `${text.slice(0, headChars)}\n\n[... ${omitted} chars omitted (head+tail pruned) ...]\n\n${text.slice(text.length - tailChars)}`;
+}
+
+/**
+ * Normalize a tool invocation key for cross-round repeat detection
+ * (`repeat-tool-reminder` guard pattern from `deepseek-harness`).
+ */
+export function normalizeToolCallKey(kind: string, target: string, payload = ""): string {
+  return `${kind.toUpperCase()}:${target.trim().replace(/\s+/g, " ")}:${payload.trim()}`;
+}
+
+/**
+ * Detect whether a `sandboxApi.execute` error came from `shell_sandbox::classify`
+ * returning `Tier::NeedsApproval` (`"Command '<bin>' requires user approval"`).
+ */
+export function isApprovalRequiredError(err: unknown): boolean {
+  const msg = typeof err === "string" ? err : err instanceof Error ? err.message : String(err);
+  return msg.toLowerCase().includes("requires user approval");
+}
 
 export async function runAgent(
   userMessage: string,
@@ -81,6 +115,8 @@ export async function runAgent(
     { role: "user", content: userMessage },
   ];
 
+  const seenToolCalls = new Set<string>();
+
   try {
     for (let round = 0; round < MAX_SEARCH_ROUNDS; round++) {
       // Stopping mid-run must not start the next reasoning round — the agent
@@ -132,6 +168,12 @@ export async function runAgent(
       for (const [, eventName, payload] of queries) {
         const evt = eventName.trim();
         const pld = payload ? payload.trim() : "";
+        const callKey = normalizeToolCallKey("QUERY", evt, pld);
+        if (seenToolCalls.has(callKey)) {
+          toolContext += `\n[SYSTEM REMINDER: You already executed [QUERY: ${evt}] with the same payload in an earlier round. Use the previous result above or try a different approach.]\n`;
+          continue;
+        }
+        seenToolCalls.add(callKey);
         const category = getCategory(evt);
         
         if (category !== "SAFE") {
@@ -143,7 +185,7 @@ export async function runAgent(
         try {
           const parsedPayload = pld ? JSON.parse(pld) : {};
           const result = await executeEvent(evt, parsedPayload);
-          toolContext += `\n### Query: ${evt}\n${result}\n`;
+          toolContext += `\n### Query: ${evt}\n${capToolOutput(String(result))}\n`;
         } catch (e) {
           toolContext += `\n(Query failed: ${e})\n`;
         }
@@ -165,7 +207,7 @@ export async function runAgent(
           callbacks.onStatus(`✅ Auto-executing safe event ${evt}...`);
           try {
             const result = await executeEvent(evt, parsedPayload);
-            toolContext += `\n### Event: ${evt}\n${result}\n`;
+            toolContext += `\n### Event: ${evt}\n${capToolOutput(String(result))}\n`;
           } catch (e) {
             toolContext += `\n(Event failed: ${e})\n`;
           }
@@ -180,7 +222,7 @@ export async function runAgent(
             callbacks.onMessage({ id: newId(), role: "system", content: `✅ Approved: \`${evt}\`. Executing...` });
             try {
               const result = await executeEvent(evt, parsedPayload);
-              toolContext += `\n\n### Approved Event: \`${evt}\`\nResult: ${result}\n`;
+              toolContext += `\n\n### Approved Event: \`${evt}\`\nResult: ${capToolOutput(String(result))}\n`;
               callbacks.onMessage({ id: newId(), role: "system", content: `🏁 Action Completed.` });
             } catch (e) {
               toolContext += `\n(Event execution failed: ${e})\n`;
@@ -229,17 +271,54 @@ Built-in Presets: ${JSON.stringify(BUILT_IN_PRESETS)}
         callbacks.onMessage({ id: newId(), role: "system", content: "🔬 Collecting diagnostics (logs, processes, locks)..." });
         try {
           const diagReport = await knowledgeBankApi.collectDiagnosticLogs("default");
-          toolContext += `\n\n### Diagnostic Report\n${diagReport}\n`;
+          toolContext += `\n\n### Diagnostic Report\n${capToolOutput(diagReport)}\n`;
         } catch (e) { toolContext += `\n(Diagnostic failed: ${e})\n`; }
       }
 
       for (const [, cmd] of runs.slice(0, 3)) {
+        const callKey = normalizeToolCallKey("RUN", cmd);
+        if (seenToolCalls.has(callKey)) {
+          toolContext += `\n[SYSTEM REMINDER: You already executed [RUN: ${cmd.trim()}] in an earlier round. Use the previous output above or try a different command.]\n`;
+          continue;
+        }
+        seenToolCalls.add(callKey);
         callbacks.onStatus(`🔧 Executing: ${cmd}`);
         callbacks.onMessage({ id: newId(), role: "system", content: `🔧 Executing: \`${cmd}\`` });
         try {
           const r = await sandboxApi.execute(cmd);
-          toolContext += `\n\n### Command: \`${cmd}\` (exit: ${r.exit_code})\n\`\`\`\n${r.stdout || r.stderr || "(no output)"}\n\`\`\`\n`;
-        } catch (e) { toolContext += `\n(Command failed: ${e})\n`; }
+          const out = capToolOutput(r.stdout || r.stderr || "(no output)");
+          toolContext += `\n\n### Command: \`${cmd}\` (exit: ${r.exit_code})\n\`\`\`\n${out}\n\`\`\`\n`;
+        } catch (e) {
+          if (isApprovalRequiredError(e)) {
+            callbacks.onStatus(`⏳ Awaiting approval: ${cmd}`);
+            const approvalId = newId();
+            callbacks.onMessage({
+              id: approvalId,
+              role: "system",
+              content: `⚠️ Action Required:\n\`${cmd}\``,
+            });
+            const approved = await callbacks.onApprovalRequired(approvalId, cmd);
+            if (approved) {
+              try {
+                const r = await sandboxApi.executeApproved(cmd);
+                const out = capToolOutput(r.stdout || r.stderr || "(no output)");
+                toolContext += `\n\n### Approved Command: \`${cmd}\` (exit: ${r.exit_code})\n\`\`\`\n${out}\n\`\`\`\n`;
+                callbacks.onMessage({
+                  id: newId(),
+                  role: "system",
+                  content: `✅ Approved & Executed: \`${cmd}\``,
+                });
+              } catch (approvedErr) {
+                toolContext += `\n(Approved command failed: ${approvedErr})\n`;
+              }
+            } else {
+              toolContext += `\n\n### Command DENIED by user: \`${cmd}\`\n`;
+              callbacks.onMessage({ id: newId(), role: "system", content: `❌ Denied: \`${cmd}\`` });
+            }
+          } else {
+            toolContext += `\n(Command failed: ${e})\n`;
+          }
+        }
       }
 
       for (const [, cmd] of runApprovals.slice(0, 2)) {
@@ -250,7 +329,8 @@ Built-in Presets: ${JSON.stringify(BUILT_IN_PRESETS)}
         if (approved) {
           try {
             const r = await sandboxApi.executeApproved(cmd);
-            toolContext += `\n\n### Approved Command: \`${cmd}\` (exit: ${r.exit_code})\n\`\`\`\n${r.stdout || r.stderr || "(no output)"}\n\`\`\`\n`;
+            const out = capToolOutput(r.stdout || r.stderr || "(no output)");
+            toolContext += `\n\n### Approved Command: \`${cmd}\` (exit: ${r.exit_code})\n\`\`\`\n${out}\n\`\`\`\n`;
             callbacks.onMessage({ id: newId(), role: "system", content: `✅ Approved & Executed: \`${cmd}\`` });
           } catch (e) { toolContext += `\n(Approved command failed: ${e})\n`; }
         } else {

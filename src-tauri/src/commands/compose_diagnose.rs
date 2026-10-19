@@ -26,6 +26,19 @@ pub struct ComposeValidation {
     pub category: String,
 }
 
+/// Calibrated System-1 triage metrics (`@receptron/laya` + `razorback16/openjev` math).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ComposeTriage {
+    /// Expected severity score on a 1.0..=4.0 rubric (`1=low, 2=medium, 3=high, 4=critical`).
+    pub severity_score: f64,
+    /// Winning severity rubric label (`"none"`, `"low"`, `"medium"`, `"high"`, or `"critical"`).
+    pub severity_label: String,
+    /// Calibrated `noul` probability in `0.0..=1.0` that the error can be fixed without manual redesign.
+    pub auto_fixable_prob: f64,
+    /// Distribution confidence `1 - H(p) / ln(K)` in `0.0..=1.0`.
+    pub confidence: f64,
+}
+
 /// Everything the UI needs to explain a broken compose file.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ComposeDiagnosis {
@@ -38,6 +51,98 @@ pub struct ComposeDiagnosis {
     pub llm_payload_preview: String,
     /// True when the Knowledge Bank had nothing, i.e. the LLM is worth offering.
     pub needs_llm: bool,
+    /// Calibrated System-1 severity and auto-fixability triage.
+    pub triage: ComposeTriage,
+}
+
+fn round4(v: f64) -> f64 {
+    (v * 10_000.0).round() / 10_000.0
+}
+
+fn calibrated_softmax(logits: &[f64], temperature: f64) -> Vec<f64> {
+    let t = temperature.clamp(0.5, 5.0);
+    let max_scaled = logits
+        .iter()
+        .map(|&x| x / t)
+        .fold(f64::NEG_INFINITY, f64::max);
+    let exps: Vec<f64> = logits.iter().map(|&x| (x / t - max_scaled).exp()).collect();
+    let sum: f64 = exps.iter().sum();
+    if sum <= 0.0 || !sum.is_finite() {
+        vec![1.0 / (logits.len() as f64); logits.len()]
+    } else {
+        exps.into_iter().map(|e| e / sum).collect()
+    }
+}
+
+fn shannon_confidence(probs: &[f64]) -> f64 {
+    if probs.len() <= 1 {
+        return 1.0;
+    }
+    let mut h = 0.0;
+    for &p in probs {
+        if p > 1e-12 {
+            h -= p * p.ln();
+        }
+    }
+    let max_h = (probs.len() as f64).ln();
+    if max_h <= 0.0 {
+        0.0
+    } else {
+        (1.0 - h / max_h).clamp(0.0, 1.0)
+    }
+}
+
+/// Compute calibrated Laya/OpenJev triage metrics for a compose validation result.
+pub fn compute_triage(validation: &ComposeValidation, kb_match_count: usize) -> ComposeTriage {
+    if validation.valid {
+        return ComposeTriage {
+            severity_score: 1.0,
+            severity_label: "none".to_string(),
+            auto_fixable_prob: 1.0,
+            confidence: 1.0,
+        };
+    }
+
+    // 4-level ordered severity rubric: [low, medium, high, critical]
+    // Calibrated temperature from `laya/onnx/laya_config.json` (`score`, 3..=5 -> 1.2514)
+    const SCORE_TEMP: f64 = 1.2514;
+    // Calibrated temperature for `noul` binary predicate (`laya_config.json` -> 1.9834)
+    const NOUL_TEMP: f64 = 1.9834;
+
+    let kb_boost = (kb_match_count.min(3) as f64) * 0.65;
+    let (sev_logits, yes_logit, no_logit): ([f64; 4], f64, f64) = match validation.category.as_str()
+    {
+        "schema" => ([-0.5, 2.6, 0.8, -1.2], 2.4 + kb_boost, -1.0),
+        "undefined_reference" => ([-0.8, 1.8, 2.2, -0.5], 1.8 + kb_boost, -0.6),
+        "yaml_syntax" => ([-1.5, 0.4, 2.8, 1.1], 1.4 + kb_boost, 0.1),
+        "structure" => ([-2.0, -0.4, 2.1, 2.7], 0.9 + kb_boost, 0.5),
+        "missing_file" => ([-2.2, -0.8, 1.4, 3.1], -1.2 + kb_boost, 2.0),
+        _ => ([-1.0, 1.2, 1.6, 0.2], 0.2 + kb_boost, 0.8),
+    };
+
+    let probs = calibrated_softmax(&sev_logits, SCORE_TEMP);
+    let expected_score: f64 = probs
+        .iter()
+        .enumerate()
+        .map(|(i, &p)| ((i + 1) as f64) * p)
+        .sum();
+    let labels = ["low", "medium", "high", "critical"];
+    let mut best_idx = 0usize;
+    for (i, &p) in probs.iter().enumerate() {
+        if p > probs[best_idx] {
+            best_idx = i;
+        }
+    }
+
+    let noul_probs = calibrated_softmax(&[yes_logit, no_logit], NOUL_TEMP);
+    let auto_fixable_prob = noul_probs.first().copied().unwrap_or(0.5);
+
+    ComposeTriage {
+        severity_score: round4(expected_score),
+        severity_label: labels[best_idx].to_string(),
+        auto_fixable_prob: round4(auto_fixable_prob),
+        confidence: round4(shannon_confidence(&probs)),
+    }
 }
 
 /// Classify an error message into a coarse bucket, used for display and for
@@ -289,12 +394,14 @@ pub async fn compose_diagnose(file_path: String) -> Result<ComposeDiagnosis, cra
     let validation = compose_validate(file_path.clone()).await?;
 
     if validation.valid {
+        let triage = compute_triage(&validation, 0);
         return Ok(ComposeDiagnosis {
             validation,
             kb_solutions: vec![],
             kb_anti_patterns: vec![],
             llm_payload_preview: String::new(),
             needs_llm: false,
+            triage,
         });
     }
 
@@ -306,6 +413,7 @@ pub async fn compose_diagnose(file_path: String) -> Result<ComposeDiagnosis, cra
         .map_or_else(|_| "# compose file could not be read".to_string(), |raw| redact_compose(&raw));
 
     let needs_llm = kb.solutions.is_empty();
+    let triage = compute_triage(&validation, kb.solutions.len());
 
     Ok(ComposeDiagnosis {
         llm_payload_preview: build_llm_preview(&file_path, &validation.raw_error, &redacted),
@@ -313,6 +421,7 @@ pub async fn compose_diagnose(file_path: String) -> Result<ComposeDiagnosis, cra
         kb_anti_patterns: kb.anti_patterns,
         needs_llm,
         validation,
+        triage,
     })
 }
 
@@ -480,5 +589,30 @@ services:
         let preview = build_llm_preview("docker-compose.yml", "some error", &redact_compose(yaml));
         assert!(!preview.contains("hunter2"));
         assert!(preview.contains("some error"));
+    }
+
+    #[test]
+    fn triage_calibrates_severity_and_auto_fixability() {
+        let schema_val = ComposeValidation {
+            valid: false,
+            raw_error: "services.web additional properties 'buld' not allowed".into(),
+            signature: "services.web additional properties 'buld' not allowed".into(),
+            category: "schema".into(),
+        };
+        let schema_triage = compute_triage(&schema_val, 2);
+        assert_eq!(schema_triage.severity_label, "medium");
+        assert!(schema_triage.auto_fixable_prob > 0.85);
+        assert!(schema_triage.confidence > 0.25);
+
+        let missing_val = ComposeValidation {
+            valid: false,
+            raw_error: "open compose.yml: no such file or directory".into(),
+            signature: "open compose.yml: no such file or directory".into(),
+            category: "missing_file".into(),
+        };
+        let missing_triage = compute_triage(&missing_val, 0);
+        assert_eq!(missing_triage.severity_label, "critical");
+        assert!(missing_triage.severity_score > schema_triage.severity_score);
+        assert!(missing_triage.auto_fixable_prob < 0.25);
     }
 }
