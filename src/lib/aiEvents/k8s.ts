@@ -55,7 +55,7 @@ export const k8sRegistry: Record<string, EventHandler> = {
     }
   },
   "k8s-benchmark": {
-    category: "SAFE",
+    category: "NORMAL",
     description: "Run k8s cluster benchmark",
     handler: async (p) => JSON.stringify(await k8sApi.benchmark(p.url, p.concurrency, p.requests, p.method), null, 2)
   },

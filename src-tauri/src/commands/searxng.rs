@@ -214,6 +214,59 @@ fn urlencoding(s: &str) -> String {
 // Free API that returns clean markdown/text from any URL.
 // Reference: retrieve_page_information() in main.py
 
+fn validate_public_fetch_url(raw: &str) -> Result<(), String> {
+    let parsed = reqwest::Url::parse(raw.trim()).map_err(|e| format!("Invalid URL: {e}"))?;
+    match parsed.scheme() {
+        "http" | "https" => {}
+        other => return Err(format!("Unsupported URL scheme: {other}")),
+    }
+    let host = parsed
+        .host_str()
+        .ok_or_else(|| "URL is missing a host".to_string())?
+        .trim_matches(|c| c == '[' || c == ']')
+        .to_lowercase();
+    if host.is_empty()
+        || host == "localhost"
+        || host.ends_with(".localhost")
+        || host.ends_with(".local")
+        || host.ends_with(".internal")
+    {
+        return Err("Refusing to fetch private or loopback host".to_string());
+    }
+    if let Ok(ip) = host.parse::<std::net::IpAddr>() {
+        let is_non_public = match ip {
+            std::net::IpAddr::V4(v4) => {
+                v4.is_loopback()
+                    || v4.is_private()
+                    || v4.is_link_local()
+                    || v4.is_unspecified()
+                    || v4.is_broadcast()
+                    || (v4.octets()[0] == 100 && (v4.octets()[1] & 0b1100_0000) == 0b0100_0000)
+            }
+            std::net::IpAddr::V6(v6) => {
+                v6.is_loopback()
+                    || v6.is_unspecified()
+                    || (v6.segments()[0] & 0xfe00) == 0xfc00
+                    || (v6.segments()[0] & 0xffc0) == 0xfe80
+            }
+        };
+        if is_non_public {
+            return Err("Refusing to fetch private or loopback IP address".to_string());
+        }
+    }
+    Ok(())
+}
+
+fn truncate_at_line_or_char(text: &str, max_length: usize) -> String {
+    if text.len() <= max_length {
+        return text.to_string();
+    }
+    let end = text.floor_char_boundary(max_length);
+    let truncated = &text[..end];
+    let cut = truncated.rfind('\n').unwrap_or(end);
+    format!("{}\n\n[...truncated at {} chars]", &text[..cut], cut)
+}
+
 async fn jina_reader_fetch(url: &str, max_length: usize) -> Result<String, String> {
     let jina_url = format!("https://r.jina.ai/{}", url);
 
@@ -232,14 +285,7 @@ async fn jina_reader_fetch(url: &str, max_length: usize) -> Result<String, Strin
     let content = resp.text().await.map_err(|e| format!("Jina read error: {}", e))?;
     let content = content.trim().to_string();
 
-    // Truncate if needed (same as repo: 10000 char limit)
-    if content.len() > max_length {
-        let truncated = &content[..max_length];
-        let cut = truncated.rfind('\n').unwrap_or(max_length);
-        Ok(format!("{}\n\n[...truncated at {} chars]", &content[..cut], cut))
-    } else {
-        Ok(content)
-    }
+    Ok(truncate_at_line_or_char(&content, max_length))
 }
 
 // ===== Command 2: Fetch Page as Clean Markdown =====
@@ -249,6 +295,7 @@ async fn jina_reader_fetch(url: &str, max_length: usize) -> Result<String, Strin
 #[tauri::command]
 pub async fn fetch_page_as_markdown(     url: String,     max_length: Option<usize>,     mode: Option<String>, ) -> Result<String, crate::error::ColimaError> {
     async move {
+    validate_public_fetch_url(&url)?;
     let max_length = max_length.unwrap_or(8000);
     let mode = mode.unwrap_or_else(|| "full".to_string());
 
@@ -287,14 +334,7 @@ pub async fn fetch_page_as_markdown(     url: String,     max_length: Option<usi
     let result = post_process_markdown(&markdown, &title, &url, &mode);
 
     // 6. Truncate if needed
-    if result.len() > max_length {
-        let truncated = &result[..max_length];
-        // Find last newline to avoid cutting mid-line
-        let cut = truncated.rfind('\n').unwrap_or(max_length);
-        Ok(format!("{}\n\n[...truncated at {} chars]", &result[..cut], cut))
-    } else {
-        Ok(result)
-    }
+    Ok(truncate_at_line_or_char(&result, max_length))
     }
     .await.map_err(|e: String| crate::error::ColimaError::from(e))
 }

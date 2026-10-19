@@ -24,6 +24,7 @@ jobs:
     outputs:
       version: ${{ steps.version.outputs.version }}
       tag: ${{ steps.version.outputs.tag }}
+      prev_tag: ${{ steps.version.outputs.prev_tag }}
       prerelease: ${{ steps.version.outputs.prerelease }}
       channel: ${{ steps.version.outputs.channel }}
     steps:
@@ -36,8 +37,10 @@ jobs:
         run: |
           TAG="${GITHUB_REF#refs/tags/}"
           VERSION="${TAG#v}"
+          PREV_TAG=$(git describe --tags --abbrev=0 "${TAG}^" 2>/dev/null || echo "")
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "prev_tag=$PREV_TAG" >> "$GITHUB_OUTPUT"
 
           # Determine release channel
           if [[ "$VERSION" == *"-beta."* ]]; then
@@ -64,7 +67,9 @@ jobs:
           fi
           echo "✅ Valid semver: $VERSION"
 
-      - name: Verify tag branch
+      - name: Verify tag branch and CI status
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           CHANNEL="${{ steps.version.outputs.channel }}"
           git fetch origin main
@@ -77,6 +82,13 @@ jobs:
             echo "❌ Release tags ($CHANNEL) must point at a commit on main"
             exit 1
           fi
+
+          CI_CONCLUSION=$(gh api "repos/${{ github.repository }}/commits/${GITHUB_SHA}/check-runs" --jq '.check_runs[] | select(.name == "ci") | .conclusion' | head -n 1 || echo "")
+          if [[ "$CI_CONCLUSION" != "success" ]]; then
+            echo "❌ Commit $GITHUB_SHA does not have a passing 'ci' check-run (found: '${CI_CONCLUSION:-none}')"
+            exit 1
+          fi
+          echo "✅ Commit $GITHUB_SHA passed CI"
 
   # ===== Build for all platforms =====
   build:
@@ -136,21 +148,17 @@ jobs:
         working-directory: src-tauri
         run: |
           VERSION="${{ needs.prepare.outputs.version }}"
-          # Cargo doesn't support pre-release suffixes — strip them
-          CARGO_VERSION=$(echo "$VERSION" | sed 's/-.*//')
-          sed -i.bak "s/^version = \".*\"/version = \"$CARGO_VERSION\"/" Cargo.toml
+          sed -i.bak "s/^version = \".*\"/version = \"$VERSION\"/" Cargo.toml
           rm -f Cargo.toml.bak
 
       - name: Sync version to tauri.conf.json
         working-directory: src-tauri
         run: |
           VERSION="${{ needs.prepare.outputs.version }}"
-          # Tauri uses semver — strip pre-release for bundle version
-          TAURI_VERSION=$(echo "$VERSION" | sed 's/-.*//')
           node -e "
             const fs = require('fs');
             const conf = JSON.parse(fs.readFileSync('tauri.conf.json'));
-            conf.version = '$TAURI_VERSION';
+            conf.version = '$VERSION';
             fs.writeFileSync('tauri.conf.json', JSON.stringify(conf, null, 2) + '\n');
           "
 
@@ -160,6 +168,13 @@ jobs:
         uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VITE_SURREALDB_URL: ${{ vars.VITE_SURREALDB_URL || secrets.VITE_SURREALDB_URL }}
+          VITE_SURREALDB_NS: ${{ vars.VITE_SURREALDB_NS || secrets.VITE_SURREALDB_NS }}
+          VITE_SURREALDB_DB: ${{ vars.VITE_SURREALDB_DB || secrets.VITE_SURREALDB_DB }}
+          VITE_SURREALDB_ACCESS: ${{ vars.VITE_SURREALDB_ACCESS || secrets.VITE_SURREALDB_ACCESS }}
+          VITE_OAUTH_ENABLED: ${{ vars.VITE_OAUTH_ENABLED || secrets.VITE_OAUTH_ENABLED }}
+          VITE_BILLING_FUNCTIONS_URL: ${{ vars.VITE_BILLING_FUNCTIONS_URL || secrets.VITE_BILLING_FUNCTIONS_URL }}
+          VITE_POLAR_CHECKOUT_URL: ${{ vars.VITE_POLAR_CHECKOUT_URL || secrets.VITE_POLAR_CHECKOUT_URL }}
           # Without these the bundles ship unsigned, `latest.json` carries no
           # valid signature, and every client's update check fails signature
           # verification — silently, on the user's side. The matching public key
@@ -204,7 +219,7 @@ jobs:
             After launching the app, access the web UI at `http://127.0.0.1:11420`
 
             ---
-            *Full changelog: https://github.com/${{ github.repository }}/compare/...${{ needs.prepare.outputs.tag }}*
+            *Full changelog: https://github.com/${{ github.repository }}/releases/tag/${{ needs.prepare.outputs.tag }}*
           releaseDraft: false
           prerelease: ${{ needs.prepare.outputs.prerelease }}
           args: ${{ matrix.target && format('--target {0}', matrix.target) || '' }} --bundles ${{ matrix.bundles }}

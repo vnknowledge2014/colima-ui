@@ -105,6 +105,29 @@ pub struct EntitlementPayload {
     pub expires_at: Option<String>,
 }
 
+static ACTIVE_USER_ID: std::sync::LazyLock<std::sync::Mutex<Option<String>>> =
+    std::sync::LazyLock::new(|| std::sync::Mutex::new(None));
+
+/// Currently signed-in user id as last reported by the frontend, or `None` when
+/// signed out / before any session check has run.
+pub fn active_user_id() -> Option<String> {
+    ACTIVE_USER_ID.lock().ok().and_then(|g| g.clone())
+}
+
+fn set_active_user_id(user_id: Option<&str>) {
+    let next = user_id.map(str::to_string);
+    let changed = if let Ok(mut guard) = ACTIVE_USER_ID.lock() {
+        let diff = *guard != next;
+        *guard = next;
+        diff
+    } else {
+        false
+    };
+    if changed {
+        crate::commands::metrics_store::invalidate_entitlement_cache();
+    }
+}
+
 // ===== Tauri commands =====
 
 /// Current entitlement, judged offline from the cache.
@@ -114,6 +137,7 @@ pub struct EntitlementPayload {
 /// out.
 #[tauri::command]
 pub async fn subscription_state(user_id: Option<String>) -> SubscriptionState {
+    set_active_user_id(user_id.as_deref());
     SubscriptionState::from_cache(cache::load().as_ref(), user_id.as_deref())
 }
 
@@ -126,6 +150,7 @@ pub async fn subscription_state(user_id: Option<String>) -> SubscriptionState {
 pub async fn subscription_store(
     payload: EntitlementPayload,
 ) -> Result<SubscriptionState, crate::error::ColimaError> {
+    set_active_user_id(Some(payload.user_id.as_str()));
     let record = CachedSubscription {
         user_id: payload.user_id.clone(),
         entitled: payload.entitled,

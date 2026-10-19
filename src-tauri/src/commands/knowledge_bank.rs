@@ -19,9 +19,19 @@ pub fn get_db() -> &'static Mutex<Connection> {
 pub fn init_knowledge_bank() {
     let dir = crate::path_util::app_data_dir();
     let _ = std::fs::create_dir_all(&dir);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700));
+    }
     let db_path = dir.join("knowledge.db");
 
     let conn = Connection::open(&db_path).expect("Failed to open knowledge.db");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&db_path, std::fs::Permissions::from_mode(0o600));
+    }
 
     // Create tables
     conn.execute_batch(

@@ -241,6 +241,11 @@ pub async fn compose_autofix_propose(
 ) -> Result<AutofixProposal, crate::error::ColimaError> {
     use crate::commands::compose_autofix_fixers as fixers;
 
+    #[cfg(not(test))]
+    super::security_policy::require_entitled()?;
+    super::compose_diagnose::ensure_compose_path(&file_path)
+        .map_err(crate::error::ColimaError::from)?;
+
     let original = std::fs::read_to_string(&file_path)
         .map_err(|e| crate::error::ColimaError::from(format!("Cannot read compose file: {}", e)))?;
 
@@ -329,9 +334,12 @@ impl ScratchFile {
         })?;
         // The name must still end in .yml: the product's own path guard rejects
         // anything else, and a dotfile keeps it out of the user's way.
+        let mut nonce = [0u8; 4];
+        rand::fill(&mut nonce);
         let name = format!(
-            ".colima-ui-autofix-{}.yml",
-            std::process::id()
+            ".colima-ui-autofix-{}-{:08x}.yml",
+            std::process::id(),
+            u32::from_le_bytes(nonce),
         );
         Ok(Self {
             path: dir.join(name),
@@ -343,6 +351,13 @@ impl ScratchFile {
     }
 
     fn write(&self, contents: &str) -> Result<(), crate::error::ColimaError> {
+        if let Ok(meta) = std::fs::symlink_metadata(&self.path) {
+            if meta.file_type().is_symlink() {
+                return Err(crate::error::ColimaError::from(
+                    "Refusing to write validation scratch file through a symlink".to_string(),
+                ));
+            }
+        }
         std::fs::write(&self.path, contents).map_err(|e| {
             crate::error::ColimaError::from(format!("Cannot write validation scratch file: {}", e))
         })

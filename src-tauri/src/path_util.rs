@@ -67,7 +67,15 @@ pub fn app_data_dir() -> PathBuf {
         .ok()
         .filter(|h| !h.is_empty())
         .unwrap_or_else(|| "/tmp".to_string());
-    PathBuf::from(home).join(".colima-ui")
+    let dir = PathBuf::from(home).join(".colima-ui");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if dir.exists() {
+            let _ = std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700));
+        }
+    }
+    dir
 }
 
 /// Ensure common binary paths are in the PATH environment variable.

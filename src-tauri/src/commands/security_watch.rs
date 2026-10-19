@@ -138,10 +138,10 @@ pub fn start() {
     if !is_enabled() {
         return;
     }
+    SHOULD_RUN.store(true, Ordering::SeqCst);
     if RUNNING.swap(true, Ordering::SeqCst) {
         return;
     }
-    SHOULD_RUN.store(true, Ordering::Relaxed);
 
     std::thread::Builder::new()
         .name("security-watch".into())
@@ -162,7 +162,7 @@ pub fn start() {
                 let mut slept = std::time::Duration::ZERO;
                 let mut stop = None;
                 while slept < sleep_for {
-                    if !SHOULD_RUN.load(Ordering::Relaxed) || !is_enabled() {
+                    if !SHOULD_RUN.load(Ordering::SeqCst) || !is_enabled() {
                         stop = Some("switched off");
                         break;
                     }
@@ -182,6 +182,9 @@ pub fn start() {
                 run_round();
             }
             RUNNING.store(false, Ordering::SeqCst);
+            if SHOULD_RUN.load(Ordering::SeqCst) && is_enabled() {
+                start();
+            }
         })
         .ok();
 }

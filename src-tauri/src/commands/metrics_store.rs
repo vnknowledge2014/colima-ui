@@ -335,8 +335,9 @@ pub fn is_writing() -> bool {
 /// notice was broken. No user id is passed — the backend has no session, and
 /// signing out does not revoke a subscription that is still paid for.
 pub fn entitled_now() -> bool {
+    let uid = crate::subscription::active_user_id();
     crate::subscription::cache::load()
-        .is_some_and(|c| c.is_entitled_for(None, chrono::Utc::now()))
+        .is_some_and(|c| c.is_entitled_for(uid.as_deref(), chrono::Utc::now()))
 }
 
 /// How long an entitlement answer is reused on the hot path.

@@ -26,13 +26,8 @@ run() {
   "$@"
 }
 
-# One runner choice for the whole hook. The Rust gate used to hardcode `pnpm`
-# while the JS gates fell back to npm, so on a machine without pnpm the hook
-# died with "pnpm: command not found" after every JS gate had already passed.
+# Standardized on npm (matching CI and package-lock.json).
 PM="npm run"
-if command -v pnpm >/dev/null 2>&1 && [ -f pnpm-lock.yaml ]; then
-  PM="pnpm"
-fi
 
 if [ -f package.json ]; then
   run $PM lint

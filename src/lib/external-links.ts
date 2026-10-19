@@ -61,8 +61,20 @@ export type PaidTier = "pro" | "pro_teams";
  * `src/lib/api/subscription.ts`. This constant is the fallback used only while
  * that function is undeployed, and the app warns before opening it.
  */
-export const CHECKOUT_LINK_URL =
-  "https://sandbox-api.polar.sh/v1/checkout-links/polar_cl_w6P5PxPjiyLRQIRE23nY90BXhCZmPWU4dhuG33gwawP/redirect";
+function readPolarCheckoutUrl(): string {
+  try {
+    const env = (import.meta as unknown as { env?: { VITE_POLAR_CHECKOUT_URL?: string } }).env;
+    const val = env?.VITE_POLAR_CHECKOUT_URL;
+    if (typeof val === "string" && val.trim() !== "") {
+      return val.trim();
+    }
+  } catch {
+    // Ignore in environments without import.meta.env
+  }
+  return "";
+}
+
+export const CHECKOUT_LINK_URL = readPolarCheckoutUrl();
 
 /**
  * Whether the app can offer a purchase at all.
@@ -164,20 +176,21 @@ export function isAllowedAnnouncementLink(url: string | undefined): boolean {
  * that already passes a value from the network (announcement links, which are
  * filtered again by host before a link is even drawn).
  */
-export async function openExternal(url: string): Promise<void> {
+export async function openExternal(url: string): Promise<boolean> {
   if (!isSafeExternalUrl(url)) {
     console.warn("Refused to open a non-https URL");
-    return;
+    return false;
   }
   if (isRunningInTauri()) {
     try {
       const { openUrl } = await import("@tauri-apps/plugin-opener");
       await openUrl(url);
-      return;
+      return true;
     } catch {
       // Plugin unavailable — fall through to the browser path rather than
       // leaving the click with no visible effect.
     }
   }
   window.open(url, "_blank", "noopener,noreferrer");
+  return true;
 }
