@@ -74,7 +74,12 @@ export async function startOAuth(provider: OAuthProvider): Promise<void> {
     throw new Error(error?.message ?? "Could not start sign-in");
   }
 
-  await openExternal(data.url);
+  const opened = await openExternal(data.url);
+  if (!opened) {
+    pendingState = null;
+    await keychainOptional("account_session_delete", { key: STATE_KEY });
+    throw new Error("Could not open system browser for sign-in");
+  }
 }
 
 /**

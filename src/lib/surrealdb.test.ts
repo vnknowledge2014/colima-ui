@@ -13,11 +13,12 @@ import {
   SESSION_STORAGE_KEY,
   clearMemoryStorage,
   getSurrealAuth,
+  isJwtExpired,
   keychainStorage,
 } from "./surrealdb";
 
 vi.mock("./external-links", () => ({
-  openExternal: vi.fn().mockResolvedValue(undefined),
+  openExternal: vi.fn().mockResolvedValue(true),
 }));
 
 vi.mock("./pro.svelte", () => ({
@@ -122,11 +123,44 @@ describe("SurrealDB Auth, Keychain Fallback & Entitlement", () => {
     expect(res.data.session?.user.id).toBe("user:offline");
   });
 
+  it("evicts expired or 401-rejected sessions during getSession", async () => {
+    const expiredPayload = btoa(JSON.stringify({ ID: "user:expired", exp: 1700000000 }));
+    const expiredJwt = `eyJhbGciOiJIUzI1NiJ9.${expiredPayload}.sig`;
+    expect(isJwtExpired(expiredJwt, 1800000000000)).toBe(true);
+
+    await keychainStorage.setItem(
+      SESSION_STORAGE_KEY,
+      JSON.stringify({
+        access_token: expiredJwt,
+        user: { id: "user:expired", email: "exp@example.com" },
+      }),
+    );
+
+    const client = getSurrealAuth()!;
+    const res1 = await client.auth.getSession();
+    expect(res1.data.session).toBeNull();
+    expect(await keychainStorage.getItem(SESSION_STORAGE_KEY)).toBeNull();
+
+    // Non-expired token rejected by server with HTTP 401 must also be evicted
+    await keychainStorage.setItem(
+      SESSION_STORAGE_KEY,
+      JSON.stringify({
+        access_token: "revoked-jwt",
+        user: { id: "user:revoked", email: "rev@example.com" },
+      }),
+    );
+    globalThis.fetch = vi.fn(async () => new Response("Unauthorized", { status: 401 })) as typeof fetch;
+    const res2 = await client.auth.getSession();
+    expect(res2.data.session).toBeNull();
+    expect(await keychainStorage.getItem(SESSION_STORAGE_KEY)).toBeNull();
+  });
+
   it("completes PKCE OAuth round-trip using in-memory verifier fallback and surfaces state errors", async () => {
     let openedUrl = "";
     const { openExternal } = await import("./external-links");
     vi.mocked(openExternal).mockImplementation(async (u: string) => {
       openedUrl = u;
+      return true;
     });
 
     globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
@@ -158,7 +192,10 @@ describe("SurrealDB Auth, Keychain Fallback & Entitlement", () => {
 
     await startOAuth("github");
     expect(openedUrl).toContain("/oauth/authorize?");
-    const redirectTo = new URL(openedUrl).searchParams.get("redirect_to")!;
+    const authorizeParams = new URL(openedUrl).searchParams;
+    expect(authorizeParams.get("code_challenge_method")).toBe("S256");
+    expect(authorizeParams.get("code_challenge")).toBeTruthy();
+    const redirectTo = authorizeParams.get("redirect_to")!;
     const state = new URL(redirectTo).searchParams.get("state")!;
     expect(state).toHaveLength(32);
 

@@ -18,13 +18,14 @@ export async function loadAllSettings() {
 
     let didMigrate = false;
     for (const key of keysToMigrate) {
-      if (backendSettings[key] === undefined) {
-        const localVal = localStorage.getItem(key);
-        if (localVal !== null) {
+      const localVal = localStorage.getItem(key);
+      if (localVal !== null) {
+        if (backendSettings[key] === undefined) {
           backendSettings[key] = localVal;
           await settingsApi.set(key, localVal);
           didMigrate = true;
         }
+        localStorage.removeItem(key);
       }
     }
 

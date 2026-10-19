@@ -143,18 +143,23 @@ export async function refreshEntitlement(): Promise<void> {
   if (!supabase) return;
 
   let token: string | undefined;
+  let userId: string | undefined;
   try {
     const { data } = await supabase.auth.getSession();
     token = data.session?.access_token;
+    userId = data.session?.user?.id;
   } catch {
     return;
   }
-  if (!token) return;
+  if (!token || !userId) return;
 
   const payload = await fetchEntitlement(token);
-  if (!payload) return;
+  if (!payload || payload.user_id !== userId) return;
 
   try {
+    const { data } = await supabase.auth.getSession();
+    if (data.session?.user?.id !== userId) return;
+
     const s = await subscriptionApi.store(payload);
     proState.subscription = s ?? null;
     setPaid(!!s?.entitled);

@@ -290,17 +290,18 @@ Built-in Presets: ${JSON.stringify(BUILT_IN_PRESETS)}
         }
       }
 
-      for (const [, expr, prompt] of schedCrons) {
+      for (const [, expr, prompt] of schedCrons.slice(0, 1)) {
         const id = newId("cron");
         callbacks.onCronSchedule(id, expr, prompt);
         toolContext += `\n(Scheduled cron job: ${id} with expr ${expr})\n`;
       }
 
-      for (const [, seconds, prompt] of schedTimers) {
+      for (const [, seconds, prompt] of schedTimers.slice(0, 2)) {
         const id = newId("timer");
-        const ms = parseInt(seconds) * 1000;
+        const parsedSecs = Math.min(Math.max(parseInt(seconds, 10) || 1, 1), 86400);
+        const ms = parsedSecs * 1000;
         callbacks.onTimerSchedule(id, ms, prompt);
-        toolContext += `\n(Scheduled timer: ${id} for ${seconds}s)\n`;
+        toolContext += `\n(Scheduled timer: ${id} for ${parsedSecs}s)\n`;
       }
 
       for (const [, id] of schedCancels) {

@@ -511,6 +511,9 @@ pub async fn run_benchmark(
     } else {
         method.to_uppercase()
     };
+    if method != "GET" && method != "HEAD" {
+        return Err("Only GET and HEAD methods are permitted for benchmarking".to_string());
+    }
 
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(30))
@@ -543,9 +546,7 @@ pub async fn run_benchmark(
         handles.push(tokio::spawn(async move {
             let req_start = std::time::Instant::now();
             let result = match m.as_str() {
-                "POST" => c.post(&u).send().await,
-                "PUT" => c.put(&u).send().await,
-                "DELETE" => c.delete(&u).send().await,
+                "HEAD" => c.head(&u).send().await,
                 _ => c.get(&u).send().await,
             };
             let elapsed = req_start.elapsed().as_millis();

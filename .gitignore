@@ -29,6 +29,13 @@ dist-ssr
 src-tauri/.tauri-updater-dev.key
 src-tauri/.tauri-updater-dev.key.pub
 
+# Environment and key files — never committed
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
 # Supabase function secrets and local runtime state — never committed.
 supabase/.env
 supabase/.branches

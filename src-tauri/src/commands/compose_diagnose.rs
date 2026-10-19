@@ -190,7 +190,7 @@ pub fn redact_compose(yaml: &str) -> String {
 /// already owns the filesystem. In browser/server mode it would otherwise be a
 /// general-purpose file read for any authenticated client, so the path is
 /// constrained to YAML files here.
-fn ensure_compose_path(file_path: &str) -> Result<(), String> {
+pub(crate) fn ensure_compose_path(file_path: &str) -> Result<(), String> {
     if file_path.trim().is_empty() {
         return Err("No compose file specified".to_string());
     }
@@ -200,6 +200,11 @@ fn ensure_compose_path(file_path: &str) -> Result<(), String> {
     let lower = file_path.to_lowercase();
     if !(lower.ends_with(".yml") || lower.ends_with(".yaml")) {
         return Err("Compose file must be a .yml or .yaml file".to_string());
+    }
+    if let Ok(meta) = std::fs::symlink_metadata(file_path) {
+        if meta.file_type().is_symlink() {
+            return Err("Refusing to operate on a symlinked compose file".to_string());
+        }
     }
     Ok(())
 }

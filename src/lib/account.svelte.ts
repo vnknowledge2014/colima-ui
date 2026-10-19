@@ -187,13 +187,17 @@ export function cancelPendingSignIn(): void {
  * Sign out.
  */
 export async function signOut(): Promise<void> {
-  accountState.user = null;
   accountState.ephemeral = false;
   accountState.error = "";
   try {
     await getSurrealAuth()?.auth.signOut();
   } catch {
-    // Already signed out locally.
+    // Fall through to ensure local state is cleared.
+  } finally {
+    if (accountState.user !== null) {
+      accountState.user = null;
+      void loadEntitlement(undefined);
+    }
   }
 }
 

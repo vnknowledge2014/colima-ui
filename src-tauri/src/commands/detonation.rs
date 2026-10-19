@@ -236,6 +236,26 @@ fn validate_image_ref(image: &str) -> Result<(), String> {
 /// the sample access to the host — no bind mount, no privileged flag, no
 /// network. A future edit that adds one has to get past a test that reads this
 /// exact output.
+/// The argv for `colima start`, including `--mount none` so the host's `$HOME`
+/// is never shared into the detonation VM.
+fn build_colima_start_args(profile: &str) -> Vec<&str> {
+    vec![
+        "start",
+        "-p",
+        profile,
+        "--cpu",
+        INSTANCE_CPUS,
+        "--memory",
+        INSTANCE_MEMORY_GB,
+        "--disk",
+        INSTANCE_DISK_GB,
+        "--runtime",
+        "docker",
+        "--mount",
+        "none",
+    ]
+}
+
 fn build_run_args<'a>(ctx: &'a str, image: &'a str, cmd_override: &'a [String]) -> Vec<&'a str> {
     let mut args: Vec<&str> = vec![
         "--context",
@@ -246,6 +266,13 @@ fn build_run_args<'a>(ctx: &'a str, image: &'a str, cmd_override: &'a [String]) 
         CONTAINER_NAME,
         "--network",
         "none",
+        "--cap-drop",
+        "ALL",
+        "--security-opt",
+        "no-new-privileges",
+        "--read-only",
+        "--tmpfs",
+        "/tmp:rw,noexec,nosuid,size=64m",
         "--memory",
         "512m",
         "--pids-limit",
@@ -673,22 +700,7 @@ fn run_session_blocking(id: &str, config: DetonationConfig) {
     let previous_context = current_docker_context();
     push_event(id, EventKind::Lifecycle, format!("Creating isolated instance {profile}"));
 
-    let created = run_cmd(
-        "colima",
-        &[
-            "start",
-            "-p",
-            &profile,
-            "--cpu",
-            INSTANCE_CPUS,
-            "--memory",
-            INSTANCE_MEMORY_GB,
-            "--disk",
-            INSTANCE_DISK_GB,
-            "--runtime",
-            "docker",
-        ],
-    );
+    let created = run_cmd("colima", &build_colima_start_args(&profile));
     restore_docker_context(previous_context.as_deref());
 
     if let Err(e) = created {
@@ -858,7 +870,11 @@ pub fn start(config: DetonationConfig) -> Result<String, String> {
         Ok(mut sessions) => {
             // Re-checked under the lock: `has_active_session` above took and
             // released it, so two callers could otherwise both pass the check.
-            if sessions.values().any(|s| !is_terminal(s.view.status)) {
+            let now = now_ms();
+            if sessions
+                .values()
+                .any(|s| !is_terminal(s.view.status) && !is_wedged(&s.view, now))
+            {
                 return Err("A detonation session is already running".to_string());
             }
             prune_sessions(&mut sessions);
@@ -1022,7 +1038,19 @@ work                        Stopped    aarch64    4       8GiB      60GiB";
     fn the_run_command_never_mounts_a_host_path_and_never_has_a_network() {
         // Asserts on what the production builder emits, so a `-v` added to
         // `build_run_args` later fails here rather than shipping.
-        let ctx = docker_context_for(&profile_for("ab12cd34"));
+        let profile = profile_for("ab12cd34");
+        let start_args = build_colima_start_args(&profile);
+        let mount = start_args
+            .iter()
+            .position(|a| *a == "--mount")
+            .expect("colima start must pass --mount");
+        assert_eq!(
+            start_args[mount + 1],
+            "none",
+            "detonation VM must never mount host $HOME"
+        );
+
+        let ctx = docker_context_for(&profile);
         let args = build_run_args(&ctx, "alpine:latest", &[]);
 
         for forbidden in ["-v", "--volume", "--mount", "--privileged", "--net=host"] {
@@ -1033,6 +1061,9 @@ work                        Stopped    aarch64    4       8GiB      60GiB";
         }
         let net = args.iter().position(|a| *a == "--network").expect("network flag");
         assert_eq!(args[net + 1], "none", "v1 runs with no network at all");
+        let cap = args.iter().position(|a| *a == "--cap-drop").expect("cap-drop flag");
+        assert_eq!(args[cap + 1], "ALL", "must drop all capabilities");
+        assert!(args.contains(&"--read-only"), "root filesystem must be read-only");
         assert!(args.contains(&"--pids-limit"), "a fork bomb must not take the VM down");
     }
 

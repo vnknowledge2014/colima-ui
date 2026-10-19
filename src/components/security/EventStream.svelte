@@ -74,8 +74,11 @@
     }
   }
 
+  let destroyed = false;
+
   onMount(async () => {
     await refresh();
+    if (destroyed) return;
     // Refreshes while stopped too, slowly. The banner above this list is often
     // telling the user to go and configure something; if the page only looked
     // again while reading, following those instructions would appear to have
@@ -88,6 +91,7 @@
   });
 
   onDestroy(() => {
+    destroyed = true;
     if (poll !== null) clearInterval(poll);
   });
 

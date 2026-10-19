@@ -1,5 +1,14 @@
 <script module lang="ts">
-  const activeSchedules = new Map<string, number>();
+  const MAX_ACTIVE_SCHEDULES = 3;
+  const activeSchedules = new Map<string, ReturnType<typeof setTimeout>>();
+
+  function clearActiveSchedules() {
+    for (const timer of activeSchedules.values()) {
+      clearTimeout(timer);
+      clearInterval(timer);
+    }
+    activeSchedules.clear();
+  }
 </script>
 
 <script lang="ts">
@@ -24,7 +33,7 @@
   import { closeNotificationPanel } from "../store/notifications.svelte";
   import { aiApi } from "../lib/api";
   import { onError } from "../lib/globalToast";
-  import { setAppSetting, getAppSetting } from "../lib/settingsStore.svelte";
+  import { appState, setAppSetting, getAppSetting } from "../lib/settingsStore.svelte";
   import { renderMarkdown } from "../lib/markdown";
   import { parseAiTools } from "../lib/aiToolParser";
   import { newId } from "../lib/ids";
@@ -50,7 +59,12 @@
   let isDragging = false;
 
   $effect(() => {
-    setAppSetting("ai_panel_width", panelWidth.toString());
+    if (appState.isSettingsLoaded && !isDragging) {
+      const saved = parseInt(getAppSetting("ai_panel_width", "400"), 10);
+      if (!Number.isNaN(saved) && saved > 300 && saved < 800) {
+        panelWidth = saved;
+      }
+    }
   });
 
   function handleMouseDown(e: MouseEvent) {
@@ -70,6 +84,7 @@
       document.body.style.cursor = "default";
       document.removeEventListener("mousemove", handleMouseMove);
       document.removeEventListener("mouseup", handleMouseUp);
+      void setAppSetting("ai_panel_width", panelWidth.toString());
     };
 
     document.addEventListener("mousemove", handleMouseMove);
@@ -280,6 +295,7 @@
         uiState.currentPage = page;
       },
       onTimerSchedule: (id, ms, prompt) => {
+        if (activeSchedules.size >= MAX_ACTIVE_SCHEDULES) return;
         const timer = setTimeout(() => {
           pushAiMessage({ id: newId(), role: "system", content: `⏰ Timer triggered: ${prompt}` });
           handleSend(`[SYSTEM TIMER TICK]: ${prompt}`);
@@ -289,6 +305,7 @@
       },
       // The cron expression is unused: the schedule below is a fixed 60s tick.
       onCronSchedule: (id, _expr, prompt) => {
+        if (activeSchedules.size >= MAX_ACTIVE_SCHEDULES) return;
         const timer = setInterval(() => {
           pushAiMessage({ id: newId(), role: "system", content: `⏰ Cron triggered: ${prompt}` });
           handleSend(`[SYSTEM CRON TICK]: ${prompt}`);
@@ -349,10 +366,12 @@
   }
 
   function handleClear() {
+    clearActiveSchedules();
     clearAiHistory();
   }
 
   async function handleNewChat() {
+    clearActiveSchedules();
     handleStop();
     await createConversation();
     showHistory = false;
@@ -364,6 +383,7 @@
       showHistory = false;
       return;
     }
+    clearActiveSchedules();
     handleStop();
     await switchConversation(id);
     showHistory = false;

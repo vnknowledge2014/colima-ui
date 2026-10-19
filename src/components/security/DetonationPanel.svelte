@@ -102,13 +102,15 @@
    * Stop button anywhere in the UI — the exact "visible and unreachable" state
    * the ungated stop control exists to prevent.
    */
+  let destroyed = false;
+
   onMount(async () => {
     try {
       const all = await detonationApi.list();
-      // The await above can outlast a click on Run. Adopting then would replace
-      // the session that click created and cancel its polling, leaving a live VM
-      // with no Stop button — the failure this adoption exists to prevent.
-      if (session !== null) return;
+      // The await above can outlast a click on Run or an unmount. Adopting then
+      // would replace the session that click created or leak an interval after
+      // unmount.
+      if (destroyed || session !== null) return;
 
       const live = all.find((s) => !isTerminal(s.status));
       if (live) {
@@ -123,7 +125,10 @@
     }
   });
 
-  onDestroy(stopPolling);
+  onDestroy(() => {
+    destroyed = true;
+    stopPolling();
+  });
 </script>
 
 <!-- Above the controls, always rendered, never dismissible. -->

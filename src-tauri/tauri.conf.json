@@ -32,7 +32,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: blob: https://lh3.googleusercontent.com https://avatars.githubusercontent.com; connect-src 'self' http://127.0.0.1:* http://localhost:* https://*.openai.com https://api.anthropic.com https://generativelanguage.googleapis.com https://*.searx.* https://*.surrealdb.cloud https://*.surreal.cloud ws://127.0.0.1:* ws://localhost:*"
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: blob: https://lh3.googleusercontent.com https://avatars.githubusercontent.com; connect-src 'self' http://127.0.0.1:* http://localhost:* https://*.openai.com https://api.anthropic.com https://generativelanguage.googleapis.com https://*.surrealdb.cloud https://*.surreal.cloud ws://127.0.0.1:* ws://localhost:*"
     }
   },
   "plugins": {
