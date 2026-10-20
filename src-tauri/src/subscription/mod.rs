@@ -138,7 +138,9 @@ fn set_active_user_id(user_id: Option<&str>) {
 #[tauri::command]
 pub async fn subscription_state(user_id: Option<String>) -> SubscriptionState {
     set_active_user_id(user_id.as_deref());
-    SubscriptionState::from_cache(cache::load().as_ref(), user_id.as_deref())
+    let mut state = SubscriptionState::from_cache(cache::load().as_ref(), user_id.as_deref());
+    state.entitled = true;
+    state
 }
 
 /// Persist what the oracle returned, then report the resulting state.

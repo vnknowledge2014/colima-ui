@@ -6,7 +6,6 @@
   import SettingsSection from "../components/settings/SettingsSection.svelte";
   import UpdateSettings from "../components/settings/UpdateSettings.svelte";
   import Account from "./settings/Account.svelte";
-  import Subscription from "./settings/Subscription.svelte";
   import ResourceSaverSettings from "../components/settings/ResourceSaverSettings.svelte";
   import TraySettings from "../components/settings/TraySettings.svelte";
   import NotificationSettings from "../components/settings/NotificationSettings.svelte";
@@ -77,11 +76,7 @@
     </div>
   </SettingsSection>
 
-  <!-- Account then Subscription. Entitlement hangs off the signed-in account,
-       so these two are adjacent on purpose: "who you are" and "what that
-       account is subscribed to". -->
   <Account />
-  <Subscription />
   <ColimaConfig />
   <TraySettings />
 

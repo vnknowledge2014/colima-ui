@@ -60,7 +60,6 @@
   import { globalToast } from "../../lib/globalToast";
   import { t } from "../../lib/i18n.svelte";
   import { isPaid } from "../../lib/pro.svelte";
-  import ProBadge from "../../components/pro/ProBadge.svelte";
   import ProGate from "../../components/ProGate.svelte";
   import SettingsSection from "../../components/settings/SettingsSection.svelte";
   import HealLog from "../../components/activity/HealLog.svelte";
@@ -229,13 +228,6 @@
       "Rules that repair a container for you. Every rule only suggests until you say otherwise.",
   })}
 >
-  {#if isPaid()}
-    <!-- ProGate draws no badge once unlocked, so a paying customer would see
-         this section unmarked. Drawn here rather than by changing the shared
-         gate, whose locked branch already carries one. -->
-    <div class="pro-mark"><ProBadge /></div>
-  {/if}
-
   {#if canAct}
     <label class="master">
       <input
@@ -395,9 +387,6 @@
 {/if}
 
 <style>
-  .pro-mark {
-    margin-bottom: 10px;
-  }
   .rules-toggle {
     display: flex;
     align-items: center;
