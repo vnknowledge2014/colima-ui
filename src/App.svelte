@@ -32,7 +32,6 @@
   import AiChatPanel from "./components/AiChatPanel.svelte";
   import NotificationPanel from "./components/notifications/NotificationPanel.svelte";
   import ConfirmDialog from "./components/ConfirmDialog.svelte";
-  import UpgradeDialog from "./components/UpgradeDialog.svelte";
   import ConsentDialog from "./components/ConsentDialog.svelte";
   import { loadProStatus, loadEntitlement, refreshEntitlement } from "./lib/pro.svelte";
   import SignInPanel from "./components/account/SignInPanel.svelte";
@@ -274,7 +273,6 @@
   {/if}
 
   <ConfirmDialog />
-  <UpgradeDialog />
   <ConsentDialog />
   <SignInPanel />
 </div>

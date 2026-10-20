@@ -31,9 +31,8 @@
   // the row is omitted entirely instead of offering a dead action.
   let offerSignIn = $derived(accountStatus() === "ready");
 
-  /** "pro" | "pro_teams" | null — the tier of the signed-in account, when paid. */
   let tier = $derived(
-    user && proState.paid ? (proState.subscription?.tier ?? "pro") : null
+    user ? (proState.subscription?.tier ?? null) : null
   );
 
   let avatarFailed = $state(false);

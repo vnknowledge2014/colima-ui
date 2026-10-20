@@ -24,9 +24,8 @@
   let busy = $state(false);
   let avatarFailed = $state(false);
 
-  /** "pro" | "pro_teams" | null — the tier of the signed-in account, when paid. */
   let tier = $derived(
-    user && proState.paid ? (proState.subscription?.tier ?? "pro") : null
+    user ? (proState.subscription?.tier ?? null) : null
   );
 
   /** Where a user goes to change the identity this app displays. */

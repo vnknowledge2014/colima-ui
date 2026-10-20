@@ -76,12 +76,8 @@
         {t('account.signin.title', { default: 'Sign in to ColimaUI' })}
       </div>
 
-      <p style="font-size: var(--text-sm); color: var(--text-secondary); line-height: 1.6; margin: 0 0 8px;">
+      <p style="font-size: var(--text-sm); color: var(--text-secondary); line-height: 1.6; margin: 0 0 16px;">
         {t('account.signin.subtitle', { default: 'Signing in is optional — it only puts your name on this app. Your first sign-in creates the account.' })}
-      </p>
-
-      <p style="font-size: var(--text-xs); color: var(--text-muted); line-height: 1.6; margin: 0 0 16px;">
-        {t('account.signin.no_unlock', { default: 'Signing in is how Pro reaches you. Your subscription follows your account, and keeps working offline.' })}
       </p>
 
       {#if status === "ready"}
