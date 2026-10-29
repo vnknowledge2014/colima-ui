@@ -359,49 +359,12 @@
       "no_data": "尚无记录事件。"
     }
   },
-  "account": {
-    "title": "账户",
-    "sign_in": "登录",
-    "sign_out": "退出登录",
-    "signed_out": "已退出登录。",
-    "manage": "管理账户",
-    "signed_in_with": "通过 {provider} 登录",
-    "signed_out_desc": "您尚未登录。账户只是在应用中显示您的名字——所有功能不登录也能使用。",
-    "readonly_note": "姓名和头像来自登录服务商。在那里修改后这里会同步。",
-    "ephemeral_note": "此系统无法安全保存会话，下次启动需要重新登录。",
-    "badge": {
-      "signin": "登录"
-    },
-    "signin": {
-      "title": "登录 ColimaUI",
-      "subtitle": "登录是可选的——只是在应用中显示您的名字。首次登录即创建账户。",
-      "no_unlock": "登录是获取 Pro 的方式。订阅与您的账户绑定，离线时仍然有效。",
-      "google": "使用 Google 继续",
-      "github": "使用 GitHub 继续",
-      "waiting": "请在浏览器中完成登录，然后返回这里。",
-      "skip": "跳过",
-      "mode_signin": "登录",
-      "mode_signup": "创建账户",
-      "name_label": "名称",
-      "name_placeholder": "您的名称",
-      "email_label": "电子邮箱",
-      "email_placeholder": "you@example.com",
-      "password_label": "密码",
-      "password_placeholder": "••••••••",
-      "submit_signin": "通过 SurrealDB 登录",
-      "submit_signup": "创建 SurrealDB 账户"
-    },
-    "unavailable": {
-      "browser": "登录仅在 ColimaUI 桌面应用中可用——它需要系统浏览器和钥匙串。",
-      "unconfigured": "此版本尚未配置账户功能。"
-    }
-  },
   "subscription": {
     "title": "订阅",
     "active": "生效中",
     "seats": "已认领 {claimed}/{total} 个席位",
     "renews": "{date} 续订",
-    "offline_note": "Pro 离线时照常可用，退出登录后也保持有效。",
+    "offline_note": "Pro 离线时照常可用。",
     "manage": "管理订阅",
     "manage_team": "管理团队与席位",
     "billing": "账单与发票",
@@ -411,10 +374,8 @@
     "lapsed_on": "您的订阅已于 {date} 结束。",
     "resubscribe": "查看方案",
     "see_plans": "查看方案",
-    "signin_first": "系统会先请您登录。",
     "free_desc": "您正在使用免费版——完整应用，包括商业用途。Pro 增加可选的 AI 修复功能。",
-    "checkout_unavailable": "当前无法结账。没有产生任何扣款。",
-    "checkout_unlinked": "本次购买不会关联到您的账户，也不会解锁 Pro。"
+    "checkout_unavailable": "当前无法结账。没有产生任何扣款。"
   },
   "plans": {
     "not_configured": "付费方案尚未开放。目前应用中的一切仍然免费。",

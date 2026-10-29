@@ -4,7 +4,6 @@ mod api_server;
 pub mod commands;
 pub mod pro;
 pub mod subscription;
-pub mod account_session;
 pub mod telemetry;
 pub mod crash;
 mod docker_state;
@@ -92,10 +91,6 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
-        // Receives colimaui://auth-callback?... after the OAuth consent screen.
-        // The URL is untrusted transport: PKCE + a `state` check on the webview
-        // side are what make the callback safe (see src/lib/account-oauth.ts).
-        .plugin(tauri_plugin_deep_link::init())
         .manage(PollerState::default())
         // One manager for the whole app: terminal tabs are Tauri commands, and
         // they all have to reach the same set of live ptys.
@@ -322,13 +317,6 @@ pub fn run() {
             subscription::subscription_state,
             subscription::subscription_store,
             subscription::subscription_clear,
-            // Account identity (Supabase session storage). Deliberately separate
-            // from `subscription::*` above: the session says who you are, the
-            // subscription cache says what you have paid for.
-            account_session::account_session_available,
-            account_session::account_session_get,
-            account_session::account_session_set,
-            account_session::account_session_delete,
             // Kubernetes commands
             kubernetes::k8s_check,
             kubernetes::k8s_namespaces,

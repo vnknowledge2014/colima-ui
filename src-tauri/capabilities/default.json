@@ -9,7 +9,6 @@
     "core:default",
     "opener:default",
     "updater:default",
-    "deep-link:default",
     "dialog:allow-open",
     "dialog:allow-save",
     "notification:allow-is-permission-granted",

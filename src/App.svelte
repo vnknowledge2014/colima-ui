@@ -34,8 +34,6 @@
   import ConfirmDialog from "./components/ConfirmDialog.svelte";
   import ConsentDialog from "./components/ConsentDialog.svelte";
   import { loadProStatus, loadEntitlement, refreshEntitlement } from "./lib/pro.svelte";
-  import SignInPanel from "./components/account/SignInPanel.svelte";
-  import { loadSession, checkSessionPersistence, accountState } from "./lib/account.svelte";
   import { installCrashReporter } from "./lib/crashReporter";
   
   import Sidebar from "./components/Sidebar.svelte";
@@ -129,24 +127,10 @@
     (async () => {
       await loadAllSettings();
       cleanupPoller = startDataPoller();
-      // Sidecar → what can run. Independent of who is signed in.
       loadProStatus();
-
-      // Identity first, then entitlement: the cached subscription is keyed by
-      // user id, so the answer depends on knowing who is signed in. Signed out
-      // is a valid answer too — Pro survives sign-out until the cache expires.
-      await loadSession();
-      checkSessionPersistence();
-
-      // Cache-only, so startup never waits on the network...
-      await loadEntitlement(accountState.user?.id);
-      // ...then re-check in the background. A failed refresh changes nothing.
+      await loadEntitlement();
       refreshEntitlement();
 
-      // Last, and inside the same chain: the first poll needs settings loaded
-      // (the off switch and the set of ids already shown live there) and reads
-      // entitlement to filter by audience. Starting it earlier would ask both
-      // questions before either had an answer.
       if (!announcementsTornDown) cleanupAnnouncements = startAnnouncements();
     })();
   });
@@ -274,7 +258,6 @@
 
   <ConfirmDialog />
   <ConsentDialog />
-  <SignInPanel />
 </div>
 
 <!-- ToastContainer is rendered OUTSIDE .app-layout to avoid stacking context

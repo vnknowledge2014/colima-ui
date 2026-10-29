@@ -359,49 +359,12 @@
       "no_data": "No events recorded."
     }
   },
-  "account": {
-    "title": "Account",
-    "sign_in": "Sign in",
-    "sign_out": "Sign out",
-    "signed_out": "Signed out.",
-    "manage": "Manage account",
-    "signed_in_with": "Signed in with {provider}",
-    "signed_out_desc": "You are not signed in. An account only puts your name on this app — every feature works without one.",
-    "readonly_note": "Your name and picture come from your sign-in provider. Change them there and they update here.",
-    "ephemeral_note": "This session cannot be saved securely on this system, so you will need to sign in again next launch.",
-    "badge": {
-      "signin": "Sign in"
-    },
-    "signin": {
-      "title": "Sign in to ColimaUI",
-      "subtitle": "Signing in is optional — it only puts your name on this app. Your first sign-in creates the account.",
-      "no_unlock": "Signing in is how Pro reaches you. Your subscription follows your account, and keeps working offline.",
-      "google": "Continue with Google",
-      "github": "Continue with GitHub",
-      "waiting": "Finish signing in in your browser, then come back here.",
-      "skip": "Skip",
-      "mode_signin": "Sign in",
-      "mode_signup": "Create account",
-      "name_label": "Name",
-      "name_placeholder": "Your name",
-      "email_label": "Email",
-      "email_placeholder": "you@example.com",
-      "password_label": "Password",
-      "password_placeholder": "••••••••",
-      "submit_signin": "Sign in with SurrealDB",
-      "submit_signup": "Create SurrealDB account"
-    },
-    "unavailable": {
-      "browser": "Sign-in is only available in the ColimaUI desktop app — it needs the system browser and your keychain.",
-      "unconfigured": "Accounts are not configured in this build yet."
-    }
-  },
   "subscription": {
     "title": "Subscription",
     "active": "ACTIVE",
     "seats": "{claimed} of {total} seats claimed",
     "renews": "Renews {date}",
-    "offline_note": "Pro keeps working offline, and stays active if you sign out.",
+    "offline_note": "Pro keeps working offline.",
     "manage": "Manage subscription",
     "manage_team": "Manage team & seats",
     "billing": "Billing & invoices",
@@ -411,10 +374,8 @@
     "lapsed_on": "Your subscription ended on {date}.",
     "resubscribe": "See plans",
     "see_plans": "See plans",
-    "signin_first": "You will be asked to sign in first.",
     "free_desc": "You are on the free plan — the whole app, including commercial use. Pro adds optional AI-powered fixes.",
-    "checkout_unavailable": "Checkout is unavailable right now. Nothing was charged.",
-    "checkout_unlinked": "This purchase will not be linked to your account and will not unlock Pro."
+    "checkout_unavailable": "Checkout is unavailable right now. Nothing was charged."
   },
   "plans": {
     "not_configured": "Paid plans are not available yet. Everything in the app today stays free.",

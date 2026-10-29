@@ -36,7 +36,7 @@
       <div class="pro-locked-preview__desc">{description}</div>
     {/if}
     <!-- No ↗ here. Throughout this app that arrow means "this leaves the app",
-         and it is honoured everywhere else it appears (SetupWizard, Account,
+         and it is honoured everywhere else it appears (SetupWizard,
          Subscription, and the pricing button in UpgradeDialog, which really
          does open a browser). This button opens the upgrade dialog in place, so
          the arrow was promising a trip the click never takes. -->

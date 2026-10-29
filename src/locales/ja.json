@@ -359,49 +359,12 @@
       "no_data": "記録されたイベントはありません。"
     }
   },
-  "account": {
-    "title": "アカウント",
-    "sign_in": "サインイン",
-    "sign_out": "サインアウト",
-    "signed_out": "サインアウトしました。",
-    "manage": "アカウントを管理",
-    "signed_in_with": "{provider} でサインイン",
-    "signed_out_desc": "サインインしていません。アカウントはこのアプリに名前を表示するだけで、すべての機能はサインインなしで使えます。",
-    "readonly_note": "名前と画像はサインイン先のサービスから取得しています。変更はそちらで行うとここにも反映されます。",
-    "ephemeral_note": "このシステムではセッションを安全に保存できないため、次回起動時に再度サインインが必要です。",
-    "badge": {
-      "signin": "サインイン"
-    },
-    "signin": {
-      "title": "ColimaUI にサインイン",
-      "subtitle": "サインインは任意です — 名前を表示するだけです。最初のサインインがそのまま登録になります。",
-      "no_unlock": "サインインが Pro を受け取る方法です。サブスクリプションはアカウントに紐づき、オフラインでも有効です。",
-      "google": "Google で続ける",
-      "github": "GitHub で続ける",
-      "waiting": "ブラウザでサインインを完了してから、ここに戻ってください。",
-      "skip": "スキップ",
-      "mode_signin": "サインイン",
-      "mode_signup": "アカウント作成",
-      "name_label": "名前",
-      "name_placeholder": "お名前",
-      "email_label": "メールアドレス",
-      "email_placeholder": "you@example.com",
-      "password_label": "パスワード",
-      "password_placeholder": "••••••••",
-      "submit_signin": "SurrealDBでサインイン",
-      "submit_signup": "SurrealDBアカウントを作成"
-    },
-    "unavailable": {
-      "browser": "サインインは ColimaUI デスクトップアプリでのみ利用できます — システムブラウザとキーチェーンが必要です。",
-      "unconfigured": "このビルドではアカウントが未設定です。"
-    }
-  },
   "subscription": {
     "title": "サブスクリプション",
     "active": "有効",
     "seats": "{total} 席中 {claimed} 席が利用中",
     "renews": "{date} に更新",
-    "offline_note": "Pro はオフラインでも動作し、サインアウトしても有効なままです。",
+    "offline_note": "Pro はオフラインでも動作します。",
     "manage": "サブスクリプションを管理",
     "manage_team": "チームと席を管理",
     "billing": "請求と明細",
@@ -411,10 +374,8 @@
     "lapsed_on": "サブスクリプションは {date} に終了しました。",
     "resubscribe": "プランを見る",
     "see_plans": "プランを見る",
-    "signin_first": "先にサインインを求められます。",
     "free_desc": "現在は無料プランです — 商用利用を含め、アプリのすべてを使えます。Pro は任意の AI 修正機能を追加します。",
-    "checkout_unavailable": "現在チェックアウトを利用できません。請求は発生していません。",
-    "checkout_unlinked": "この購入はアカウントに紐づかず、Pro も有効になりません。"
+    "checkout_unavailable": "現在チェックアウトを利用できません。請求は発生していません。"
   },
   "plans": {
     "not_configured": "有料プランはまだ提供していません。今のアプリの機能はすべて無料のままです。",

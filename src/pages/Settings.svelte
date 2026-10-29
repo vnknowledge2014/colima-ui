@@ -5,7 +5,6 @@
   import PrivacySettings from "../components/settings/PrivacySettings.svelte";
   import SettingsSection from "../components/settings/SettingsSection.svelte";
   import UpdateSettings from "../components/settings/UpdateSettings.svelte";
-  import Account from "./settings/Account.svelte";
   import ResourceSaverSettings from "../components/settings/ResourceSaverSettings.svelte";
   import TraySettings from "../components/settings/TraySettings.svelte";
   import NotificationSettings from "../components/settings/NotificationSettings.svelte";
@@ -76,7 +75,6 @@
     </div>
   </SettingsSection>
 
-  <Account />
   <ColimaConfig />
   <TraySettings />
 
