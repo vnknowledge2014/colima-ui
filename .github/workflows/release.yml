@@ -168,12 +168,6 @@ jobs:
         uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          VITE_SURREALDB_URL: ${{ vars.VITE_SURREALDB_URL || secrets.VITE_SURREALDB_URL }}
-          VITE_SURREALDB_NS: ${{ vars.VITE_SURREALDB_NS || secrets.VITE_SURREALDB_NS }}
-          VITE_SURREALDB_DB: ${{ vars.VITE_SURREALDB_DB || secrets.VITE_SURREALDB_DB }}
-          VITE_SURREALDB_ACCESS: ${{ vars.VITE_SURREALDB_ACCESS || secrets.VITE_SURREALDB_ACCESS }}
-          VITE_OAUTH_ENABLED: ${{ vars.VITE_OAUTH_ENABLED || secrets.VITE_OAUTH_ENABLED }}
-          VITE_BILLING_FUNCTIONS_URL: ${{ vars.VITE_BILLING_FUNCTIONS_URL || secrets.VITE_BILLING_FUNCTIONS_URL }}
           VITE_POLAR_CHECKOUT_URL: ${{ vars.VITE_POLAR_CHECKOUT_URL || secrets.VITE_POLAR_CHECKOUT_URL }}
           # Without these the bundles ship unsigned, `latest.json` carries no
           # valid signature, and every client's update check fails signature

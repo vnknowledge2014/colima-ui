@@ -1,59 +1,27 @@
-# Setup Runbook — Supabase Auth + Polar Billing
+# Setup Runbook — Polar Billing (Historical Reference)
 
-Follow this top-to-bottom **once**, and the app has the full loop: sign in →
-pick a plan → pay → Pro/Teams badge appears on your account.
+> **Note:** All Pro features are unlocked by default in the free open-source edition (`07a2dbc`), and the in-app Sign-in / Account stack has been removed. This runbook is retained only as historical reference for the optional Polar billing functions.
 
 Deep-dive docs are linked per step — this file is the ordered checklist, not a
 replacement for them:
 
 | Deep-dive | Covers |
 |---|---|
-| [supabase-provider-setup.md](./supabase-provider-setup.md) | Console click-by-click: Google/GitHub OAuth, redirect allow-list |
 | [polar-billing-setup.md](./polar-billing-setup.md) | Console click-by-click: Polar products, benefits, token, test purchase |
-| [account-supabase-oauth.md](./account-supabase-oauth.md) | Architecture: how sign-in and entitlement connect |
-
-**Time:** ~1.5 h the first time (mostly console clicking), ~15 min for a re-run.
 
 ---
 
 ## Phase 0 — Prerequisites
 
-- [ ] `supabase` CLI installed (v2+)
+- [ ] `supabase` CLI installed (v2+) if deploying legacy Edge Functions
   ```bash
   # Homebrew, or: npm install -g supabase
   brew install supabase/tap/supabase
   ```
 - [ ] Accounts ready:
-  - [ ] [Supabase](https://supabase.com) project (free tier is enough)
   - [ ] [Polar](https://polar.sh) account — start in the **sandbox**
         ([sandbox.polar.sh](https://sandbox.polar.sh/start), separate org)
-  - [ ] Google Cloud Console project (for Google sign-in)
-  - [ ] GitHub account (for GitHub sign-in)
 - [ ] Repo cloned + `npm install` done
-
----
-
-## Phase 1 — Supabase project + OAuth providers
-
-**Deep-dive:** [supabase-provider-setup.md](./supabase-provider-setup.md)
-
-- [ ] Create the Supabase project; note the **project ref** (random string in
-      `https://<project-ref>.supabase.co`)
-- [ ] Copy the **Project URL** (Integrations → Data API) and the **anon key**
-      (Settings → API Keys, `sb_publishable_…`)
-- [ ] Fill both in `src/lib/supabase.ts`:
-      ```ts
-      export const SUPABASE_URL = "https://<project-ref>.supabase.co";
-      export const SUPABASE_ANON_KEY = "sb_publishable_…";
-      ```
-- [ ] Enable **Google** provider (OAuth consent screen + credentials →
-      Supabase **Auth → Sign In / Providers**)
-- [ ] Enable **GitHub** provider (OAuth app → same place)
-- [ ] Allow-list the return URL in **Auth → URL Configuration**:
-      `colimaui://auth-callback`
-
-> The anon key is **public** — it is an identifier, not a credential. The
-> Postgres password and `service_role` key never enter this project.
 
 ---
 
@@ -132,37 +100,23 @@ This is where a purchase becomes Pro. The two functions
 
 ---
 
-## Phase 5 — Verify end-to-end (debug bundle)
+## Phase 5 — Verify Polar checkout link (debug bundle)
 
 **Deep-dive:** [polar-billing-setup.md](./polar-billing-setup.md) step 8
-
-Sign-in needs a registered `.app`, so `tauri dev` is not enough:
 
 - [ ] Build the debug bundle and launch:
       ```bash
       npx tauri build --debug
       open src-tauri/target/debug/bundle/macos/ColimaUI.app
       ```
-- [ ] **Settings → Account → Sign in** (Google or GitHub). Checkout carries your
-      Supabase user id as Polar's external customer id, so sign-in must come first.
-- [ ] **Settings → Subscription → See plans →** pick a tier
 - [ ] Pay with Stripe test card `4242 4242 4242 4242`, any expiry/CVC
 - [ ] **Stay on Polar's confirmation page** until it finishes (that is where your
       seat is claimed)
-- [ ] Back in the app: **Settings → Subscription → Refresh**
-
-**Pass criteria (all three):**
-
-1. Subscription page shows **Pro / Pro Teams + ACTIVE**
-2. The sidebar user icon shows the matching badge — **PRO** (purple) or
-   **TEAMS** (blue) — and **Settings → Account** shows it next to your name
-3. In Polar, the customer created by the purchase has your **Supabase user id as
-   its external ID** — otherwise the purchase can never grant entitlement
 
 **Failure cheatsheet:** see the table in
-[polar-billing-setup.md](./polar-billing-setup.md) — the top causes are: plain
-Checkout Link used (no external id), seat not claimed (success URL), token/env
-mismatch, or a pending (not claimed) team seat.
+[polar-billing-setup.md](./polar-billing-setup.md) — the top causes are: seat
+not claimed (success URL), token/env mismatch, or a pending (not claimed) team
+seat.
 
 ---
 

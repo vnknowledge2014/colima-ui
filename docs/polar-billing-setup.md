@@ -1,13 +1,9 @@
 # Polar Billing Setup — Pro & Pro Teams seats
 
 Step-by-step console guide for selling **Pro** and **Pro Teams** through Polar,
-the merchant of record. Entitlement only — see
-[account-supabase-oauth.md](./account-supabase-oauth.md) for how a purchase turns
-into Pro in the app, and [pricing-rationale.md](./pricing-rationale.md) for why
-the tiers are priced this way.
-
-There are **no license keys.** Pro is a seat subscription resolved for the
-signed-in account.
+the merchant of record. Note: all Pro features are unlocked by default in the
+free open-source edition; see [pricing-rationale.md](./pricing-rationale.md) for
+historical tier rationale.
 
 **Time:** ~45 minutes, including a sandbox test purchase. **Cost:** free until
 you sell something (Polar takes a cut per transaction).

@@ -359,49 +359,12 @@
       "no_data": "Chưa ghi nhận sự kiện nào."
     }
   },
-  "account": {
-    "title": "Tài khoản",
-    "sign_in": "Đăng nhập",
-    "sign_out": "Đăng xuất",
-    "signed_out": "Đã đăng xuất.",
-    "manage": "Quản lý tài khoản",
-    "signed_in_with": "Đăng nhập bằng {provider}",
-    "signed_out_desc": "Bạn chưa đăng nhập. Tài khoản chỉ hiển thị tên bạn trong ứng dụng — mọi tính năng vẫn hoạt động khi không đăng nhập.",
-    "readonly_note": "Tên và ảnh đại diện lấy từ nhà cung cấp đăng nhập. Đổi ở đó thì ở đây cũng đổi theo.",
-    "ephemeral_note": "Phiên đăng nhập không lưu an toàn được trên hệ thống này, nên lần mở tới bạn cần đăng nhập lại.",
-    "badge": {
-      "signin": "Đăng nhập"
-    },
-    "signin": {
-      "title": "Đăng nhập ColimaUI",
-      "subtitle": "Đăng nhập là tuỳ chọn — chỉ để hiển thị tên bạn. Lần đăng nhập đầu tiên chính là tạo tài khoản.",
-      "no_unlock": "Đăng nhập là cách Pro đến với bạn. Gói đăng ký gắn với tài khoản và vẫn chạy khi offline.",
-      "google": "Tiếp tục với Google",
-      "github": "Tiếp tục với GitHub",
-      "waiting": "Hoàn tất đăng nhập trên trình duyệt rồi quay lại đây.",
-      "skip": "Bỏ qua",
-      "mode_signin": "Đăng nhập",
-      "mode_signup": "Tạo tài khoản",
-      "name_label": "Tên hiển thị",
-      "name_placeholder": "Tên của bạn",
-      "email_label": "Email",
-      "email_placeholder": "ban@example.com",
-      "password_label": "Mật khẩu",
-      "password_placeholder": "••••••••",
-      "submit_signin": "Đăng nhập qua SurrealDB",
-      "submit_signup": "Tạo tài khoản SurrealDB"
-    },
-    "unavailable": {
-      "browser": "Đăng nhập chỉ có trên ứng dụng desktop ColimaUI — cần trình duyệt hệ thống và keychain.",
-      "unconfigured": "Bản dựng này chưa cấu hình tài khoản."
-    }
-  },
   "subscription": {
     "title": "Gói đăng ký",
     "active": "ĐANG HOẠT ĐỘNG",
     "seats": "Đã nhận {claimed}/{total} chỗ",
     "renews": "Gia hạn ngày {date}",
-    "offline_note": "Pro vẫn chạy khi offline, và vẫn hoạt động nếu bạn đăng xuất.",
+    "offline_note": "Pro vẫn chạy khi offline.",
     "manage": "Quản lý gói đăng ký",
     "manage_team": "Quản lý nhóm & chỗ ngồi",
     "billing": "Thanh toán & hoá đơn",
@@ -411,10 +374,8 @@
     "lapsed_on": "Gói đăng ký đã kết thúc ngày {date}.",
     "resubscribe": "Xem các gói",
     "see_plans": "Xem các gói",
-    "signin_first": "Bạn sẽ được yêu cầu đăng nhập trước.",
     "free_desc": "Bạn đang dùng gói miễn phí — toàn bộ ứng dụng, kể cả dùng cho mục đích thương mại. Pro bổ sung tính năng sửa lỗi bằng AI (tuỳ chọn).",
-    "checkout_unavailable": "Hiện chưa thanh toán được. Chưa có khoản nào bị trừ.",
-    "checkout_unlinked": "Giao dịch này sẽ không gắn với tài khoản của bạn và sẽ không mở khoá Pro."
+    "checkout_unavailable": "Hiện chưa thanh toán được. Chưa có khoản nào bị trừ."
   },
   "plans": {
     "not_configured": "Các gói trả phí chưa mở bán. Mọi thứ trong ứng dụng hiện tại vẫn miễn phí.",

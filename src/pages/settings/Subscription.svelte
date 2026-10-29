@@ -1,6 +1,5 @@
 <script lang="ts">
   import { proState, refreshEntitlement } from "../../lib/pro.svelte";
-  import { accountState } from "../../lib/account.svelte";
   import { showUpgrade } from "../../store/upgrade.svelte";
   import { openExternal, portalUrl, isBillingConfigured } from "../../lib/external-links";
   import { t } from "../../lib/i18n.svelte";
@@ -20,7 +19,6 @@
    */
   let sub = $derived(proState.subscription);
   let paid = $derived(proState.paid);
-  let signedIn = $derived(accountState.user !== null);
   let configured = $derived(isBillingConfigured());
   let refreshing = $state(false);
 
@@ -77,7 +75,7 @@
     <!-- The offline promise, stated where the expiry date is visible, so the
          date does not read as a deadline the user has to be online for. -->
     <p style="font-size: var(--text-xs); color: var(--text-muted); line-height: 1.6; margin: 12px 0 0;">
-      {t('subscription.offline_note', { default: 'Pro keeps working offline, and stays active if you sign out.' })}
+      {t('subscription.offline_note', { default: 'Pro keeps working offline.' })}
     </p>
 
     <div style="display: flex; gap: 12px; margin-top: 16px; flex-wrap: wrap;">
@@ -125,13 +123,6 @@
         <button class="btn btn-primary" onclick={() => showUpgrade(t('subscription.title', { default: 'Subscription' }))}>
           {t('subscription.see_plans', { default: 'See plans' })}
         </button>
-        {#if !signedIn}
-          <!-- Said before the click, not after: checkout carries the account id,
-               so buying signed out would leave the purchase unattachable. -->
-          <span style="font-size: var(--text-xs); color: var(--text-muted); align-self: center;">
-            {t('subscription.signin_first', { default: 'You will be asked to sign in first.' })}
-          </span>
-        {/if}
       </div>
     {/if}
   {/if}

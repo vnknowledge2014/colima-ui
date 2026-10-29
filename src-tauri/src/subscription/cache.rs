@@ -8,15 +8,13 @@
 //!
 //! # Why a file and not the keychain
 //!
-//! The session tokens live in the macOS Keychain (`account_session.rs`), and it
-//! is tempting to put this beside them. It would be wrong: that module has a
-//! backend only on macOS, so a Linux user's entitlement would never persist and
-//! every offline launch would be Free.
+//! OS keychains vary across desktop platforms, so storing the entitlement claim
+//! in a cross-platform file ensures offline launches work identically on macOS
+//! and Linux.
 //!
-//! The two are different kinds of thing. A token is a *credential* — stealing it
-//! is account takeover. This is a *claim* — forging it grants Pro to the forger
-//! and nobody else, which is the "polite fence, not DRM" position the project
-//! already took for license keys.
+//! A cached entitlement is a *claim* rather than a credential — forging it
+//! affects only the local machine, matching the "polite fence, not DRM"
+//! position the project already took for license keys.
 
 use std::io::Write;
 use std::path::PathBuf;
@@ -26,11 +24,11 @@ use serde::{Deserialize, Serialize};
 
 /// The persisted entitlement, as returned by the entitlement oracle.
 ///
-/// `user_id` is what makes sign-out safe: entitlement survives signing out, but
-/// a *different* user signing in must not inherit it. See [`is_entitled_for`].
+/// `user_id` scopes the record to a specific customer identifier; see
+/// [`Self::is_entitled_for`].
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct CachedSubscription {
-    /// The Supabase user this entitlement belongs to.
+    /// The external user identifier this entitlement belongs to.
     pub user_id: String,
     /// What the oracle last said. Not re-derived here; this file only judges expiry.
     pub entitled: bool,

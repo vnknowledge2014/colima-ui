@@ -26,8 +26,3 @@ updates:
     groups:
       cargo-minor:
         update-types: ["minor", "patch"]
-    ignore:
-      # Breaks the Linux build against rust-ini 0.21.3 (see the pin in
-      # src-tauri/Cargo.toml). Later releases are still proposed.
-      - dependency-name: tauri-plugin-deep-link
-        versions: ["2.6.2"]

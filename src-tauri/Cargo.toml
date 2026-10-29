@@ -42,15 +42,6 @@ regex-lite = "0.1"
 chrono = { version = "0.4", features = ["serde"] }
 tauri-plugin-http = "2.8.2"
 tauri-plugin-updater = "2"
-# OAuth return path: the provider redirects to colimaui://auth-callback and the
-# OS hands the URL back to the running app.
-#
-# Pinned: 2.6.2 does not compile on Linux. Its Linux-only code builds a
-# `rust_ini::ParseOption` by struct literal, and rust-ini 0.21.3 added two
-# fields to it (E0063). Lift the pin once a deep-link release fixes that, and
-# confirm with the Linux CI job rather than a macOS build, which never compiles
-# the affected code.
-tauri-plugin-deep-link = "=2.6.1"
 rand = "0.10"
 sha2 = "0.11.0"
 # Real pseudo-terminal. Replaces the `script(1)` wrapper, which only bought
@@ -60,12 +51,6 @@ async-trait = "0.1"
 clap = { version = "4", features = ["derive"], optional = true }
 tauri-plugin-dialog = "2"
 tauri-plugin-notification = "2.6.0"
-
-# The auth session (tokens + PKCE verifier) lives in the macOS Keychain, never
-# on disk. Only macOS has a backend here; elsewhere the session is in-memory and
-# the user re-signs-in each launch (see account_session.rs).
-[target.'cfg(target_os = "macos")'.dependencies]
-security-framework = "3"
 
 # `tower::ServiceExt::oneshot` drives the router in-process, so the tests in
 # `api_server` can assert which routes are reachable without a credential.
