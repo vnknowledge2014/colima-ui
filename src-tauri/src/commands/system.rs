@@ -551,53 +551,62 @@ pub fn start_resource_saver_daemon(state: Arc<RwLock<ResourceSaverState>>) {
     tauri::async_runtime::spawn(async move {
         loop {
             tokio::time::sleep(tokio::time::Duration::from_secs(60)).await;
-            
-            let mut s = state.write().await;
-            if !s.enabled { continue; }
-            
-            let resolved = crate::path_util::resolve_binary("docker");
-            let mut cmd = std::process::Command::new(&resolved);
-            cmd.args(["stats", "--no-stream", "--format", "{{.CPUPerc}}"]);
-            crate::path_util::apply_path_to_cmd(&mut cmd);
-            
-            let mut is_idle = true;
-            if let Ok(output) = cmd.output() {
-                if !output.status.success() {
-                    // If docker command returns non-zero, do NOT treat the system as idle
-                    is_idle = false;
-                } else {
+
+            let (enabled, threshold) = {
+                let s = state.read().await;
+                (s.enabled, s.idle_minutes_threshold)
+            };
+            if !enabled {
+                continue;
+            }
+
+            let stats_res = crate::commands::runtime::run(
+                vec![
+                    "stats".into(),
+                    "--no-stream".into(),
+                    "--format".into(),
+                    "{{.CPUPerc}}".into(),
+                ],
+                crate::commands::runtime::DEFAULT_TIMEOUT,
+            )
+            .await;
+
+            let is_idle = match stats_res {
+                Ok(output) if output.status.success() => {
                     let stdout = String::from_utf8_lossy(&output.stdout);
                     let mut total_cpu = 0.0;
                     for line in stdout.lines() {
-                        let clean = line.replace("%", "").trim().to_string();
+                        let clean = line.replace('%', "").trim().to_string();
                         if let Ok(val) = clean.parse::<f64>() {
                             total_cpu += val;
                         }
                     }
-                    // If total CPU > 1%, it's not idle
-                    if total_cpu > 1.0 {
-                        is_idle = false;
+                    total_cpu <= 1.0
+                }
+                _ => false,
+            };
+
+            let should_stop = {
+                let mut s = state.write().await;
+                if !s.enabled {
+                    false
+                } else if is_idle {
+                    s.idle_minutes_count += 1;
+                    if s.idle_minutes_count >= threshold {
+                        s.idle_minutes_count = 0;
+                        true
+                    } else {
+                        false
                     }
+                } else {
+                    s.idle_minutes_count = 0;
+                    false
                 }
-            } else {
-                // If docker fails, assume not idle to be safe, or assume colima is already off
-                is_idle = false; 
-            }
-            
-            if is_idle {
-                s.idle_minutes_count += 1;
-                if s.idle_minutes_count >= s.idle_minutes_threshold {
-                    // Trigger auto-pause
-                    crate::docker_state::notify_instance_stopping("default");
-                    let colima = crate::path_util::resolve_binary("colima");
-                    let mut stop_cmd = std::process::Command::new(&colima);
-                    stop_cmd.arg("stop");
-                    crate::path_util::apply_path_to_cmd(&mut stop_cmd);
-                    let _ = stop_cmd.spawn();
-                    s.idle_minutes_count = 0; // reset after action
-                }
-            } else {
-                s.idle_minutes_count = 0;
+            };
+
+            if should_stop {
+                let (_, profile, _) = crate::commands::runtime::detect_runtime();
+                let _ = crate::commands::colima::stop_instance_cli(profile, false).await;
             }
         }
     });

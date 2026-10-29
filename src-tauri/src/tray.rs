@@ -59,7 +59,11 @@ fn snapshot_of(instances: &[ColimaInstance]) -> Vec<(String, String)> {
 }
 
 pub fn aggregate_state(instances: &[ColimaInstance], pending: &HashSet<String>) -> TrayState {
-    if !pending.is_empty() {
+    if !pending.is_empty()
+        || instances
+            .iter()
+            .any(|i| i.status.eq_ignore_ascii_case("starting"))
+    {
         return TrayState::Pending;
     }
     if instances
@@ -244,26 +248,36 @@ fn build_menu(
     } else {
         for instance in instances {
             let running = instance.status.eq_ignore_ascii_case("running");
+            let starting = instance.status.eq_ignore_ascii_case("starting");
+            let unhealthy = instance.status.eq_ignore_ascii_case("unhealthy");
             let busy = pending.contains(&instance.name);
 
             let label = if busy {
                 format!("{} — working…", instance.name)
+            } else if starting {
+                format!("{} — starting…", instance.name)
+            } else if unhealthy {
+                format!("{} — unhealthy", instance.name)
             } else if running {
                 format!("{} — running", instance.name)
             } else {
                 format!("{} — stopped", instance.name)
             };
 
-            let id = if running {
+            let id = if running || unhealthy {
                 format!("instance:stop:{}", instance.name)
             } else {
                 format!("instance:start:{}", instance.name)
             };
 
-            // Disabled while an operation is in flight: this is what stops a
-            // second click on a stale menu from firing a second command.
+            // Disabled while an operation is in flight or VM is booting: stops a
+            // second click on a stale menu from firing a duplicate command.
             items.push(Box::new(MenuItem::with_id(
-                app, id, label, !busy, None::<&str>,
+                app,
+                id,
+                label,
+                !(busy || starting),
+                None::<&str>,
             )?));
         }
     }
@@ -590,6 +604,15 @@ mod tests {
         // An operation in flight outranks the last poll result.
         assert_eq!(aggregate_state(&running, &busy), TrayState::Pending);
         assert_eq!(aggregate_state(&stopped, &busy), TrayState::Pending);
+        // Booting instance (Starting) also maps to Pending without needing PENDING set.
+        assert_eq!(
+            aggregate_state(&[instance("dev", "Starting")], &empty),
+            TrayState::Pending
+        );
+        assert_eq!(
+            aggregate_state(&[instance("dev", "Unhealthy")], &empty),
+            TrayState::Stopped
+        );
     }
 
     #[test]

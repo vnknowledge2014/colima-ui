@@ -19,6 +19,7 @@ pub fn init_global_docker_state(state: Arc<RwLock<DockerState>>, app: AppHandle)
 /// and broadcasts connection-lost and empty state events over both SSE and Tauri IPC.
 pub fn notify_instance_stopping(profile: &str) {
     crate::path_util::invalidate_probe_cache();
+    crate::commands::system_capabilities::invalidate();
 
     if let Some(state) = GLOBAL_DOCKER_STATE.get() {
         match state.try_write() {
@@ -56,6 +57,7 @@ pub fn notify_instance_stopping(profile: &str) {
 /// Invalidates socket probe cache and unsets the suppressed flag so the watcher can reconnect.
 pub fn notify_instance_started(_profile: &str) {
     crate::path_util::invalidate_probe_cache();
+    crate::commands::system_capabilities::invalidate();
 
     if let Some(state) = GLOBAL_DOCKER_STATE.get() {
         match state.try_write() {
@@ -71,6 +73,14 @@ pub fn notify_instance_started(_profile: &str) {
             }
         }
     }
+}
+
+/// Returns true if an instance stop/delete operation is actively suppressing reconnection.
+pub fn is_suppressed() -> bool {
+    GLOBAL_DOCKER_STATE
+        .get()
+        .and_then(|s| s.try_read().ok().map(|g| g.suppressed))
+        .unwrap_or(false)
 }
 
 /// Connect to Docker via the Colima socket.
