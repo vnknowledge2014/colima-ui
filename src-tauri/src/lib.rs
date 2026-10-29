@@ -6,7 +6,7 @@ pub mod pro;
 pub mod subscription;
 pub mod telemetry;
 pub mod crash;
-mod docker_state;
+pub mod docker_state;
 pub mod docker_events;
 pub mod instance_reader;
 pub mod path_util;
@@ -129,6 +129,7 @@ pub fn run() {
             use tauri::Manager;
             use tokio::sync::RwLock;
             let docker_state = Arc::new(RwLock::new(docker_state::DockerState::new()));
+            docker_state::init_global_docker_state(docker_state.clone(), app.handle().clone());
             app.manage(docker_state.clone());
 
             // Start Docker state watcher
@@ -298,6 +299,7 @@ pub fn run() {
             compose::compose_down,
             compose::compose_restart,
             compose::compose_stop,
+            compose::compose_start,
             compose::compose_logs,
             compose::compose_ps,
             compose_diagnose::compose_validate,

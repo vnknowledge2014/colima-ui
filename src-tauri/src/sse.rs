@@ -203,14 +203,20 @@ pub async fn sse_docker_watcher() {
 /// A fresh client per refresh, rather than one held for the life of the watcher:
 /// the socket path changes when colima is recreated, so a cached client outlives
 /// the socket it points at. This runs at most once per debounce window.
-async fn fetch_current_docker_state() -> Option<serde_json::Value> {
+pub async fn fetch_current_docker_state() -> Option<serde_json::Value> {
     let docker = crate::docker_state::connect_bollard()?;
     fetch_docker_state(&docker).await
 }
 
 /// Fetch current Docker containers + images and return as JSON.
-async fn fetch_docker_state(docker: &bollard::Docker) -> Option<serde_json::Value> {
+pub(crate) async fn fetch_docker_state(docker: &bollard::Docker) -> Option<serde_json::Value> {
     use bollard::query_parameters::{ListContainersOptions, ListImagesOptions};
+
+    // Verify daemon is actively responsive before querying
+    tokio::time::timeout(std::time::Duration::from_secs(2), docker.ping())
+        .await
+        .ok()?
+        .ok()?;
 
     let containers = docker
         .list_containers(Some(ListContainersOptions {
@@ -218,7 +224,7 @@ async fn fetch_docker_state(docker: &bollard::Docker) -> Option<serde_json::Valu
             ..Default::default()
         }))
         .await
-        .unwrap_or_default();
+        .ok()?;
 
     let images = docker
         .list_images(Some(ListImagesOptions {
@@ -226,36 +232,10 @@ async fn fetch_docker_state(docker: &bollard::Docker) -> Option<serde_json::Valu
             ..Default::default()
         }))
         .await
-        .unwrap_or_default();
+        .ok()?;
 
-    // Reuse the single mapper rather than keeping a second copy here. The
-    // two had already drifted — this one emitted a lowercase "id" — and a
-    // divergence like that means a feature works in one mode and silently
-    // not the other.
     let mapped_containers = crate::docker_state::map_containers(&containers);
-
-    let mut mapped_images = Vec::new();
-    for i in images {
-        let tags = i.repo_tags.clone();
-        let (repo, tag) = if !tags.is_empty() && tags[0] != "<none>:<none>" {
-            let parts: Vec<&str> = tags[0].split(':').collect();
-            if parts.len() == 2 {
-                (parts[0].to_string(), parts[1].to_string())
-            } else {
-                (tags[0].clone(), "latest".to_string())
-            }
-        } else {
-            ("<none>".to_string(), "<none>".to_string())
-        };
-
-        mapped_images.push(serde_json::json!({
-            "id": i.id.replace("sha256:", ""),
-            "Repository": repo,
-            "Tag": tag,
-            "Size": i.size.to_string(),
-            "CreatedAt": i.created.to_string(),
-        }));
-    }
+    let mapped_images = crate::docker_state::map_images(&images);
 
     Some(serde_json::json!({
         "containers": mapped_containers,
@@ -354,5 +334,14 @@ mod subscriber_tests {
             assert_eq!(subscriber_count(&t[0]), 1, "guard still held");
         }
         assert_eq!(subscriber_count(&t[0]), 0, "guard dropped with the stream");
+    }
+
+    #[tokio::test]
+    async fn fetch_current_docker_state_shape_or_none() {
+        let state = fetch_current_docker_state().await;
+        if let Some(val) = state {
+            assert!(val.get("containers").is_some());
+            assert!(val.get("images").is_some());
+        }
     }
 }

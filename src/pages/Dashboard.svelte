@@ -502,7 +502,7 @@
               <tr>
                 <td style="font-weight: 500;">{inst.name}</td>
                 <td>
-                  <span class="badge {inst.status === 'Running' ? 'badge-running' : 'badge-stopped'}">
+                  <span class="badge {inst.status === 'Running' ? 'badge-running' : inst.status === 'Starting' ? 'badge-starting' : inst.status === 'Unhealthy' ? 'badge-unhealthy' : 'badge-stopped'}">
                     <span class="badge-dot" style="animation: none;"></span>
                     <span>{inst.status}</span>
                   </span>

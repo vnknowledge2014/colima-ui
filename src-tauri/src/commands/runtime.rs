@@ -12,18 +12,10 @@ pub fn detect_runtime() -> (String, String, Option<String>) {
         profile_name = profile;
     }
 
-    // Determine runtime from colima status output
-    let status_output = Command::new(crate::path_util::resolve_binary("colima"))
-        .args(["status", "-p", &profile_name])
-        .output();
-
-    if let Ok(output) = status_output {
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        if stdout.contains("runtime: podman") {
-            runtime_name = "podman".to_string();
-        } else if stdout.contains("runtime: containerd") {
-            runtime_name = "containerd".to_string();
-        }
+    // Determine runtime from profile config directly without spawning colima status subprocess
+    let profile_runtime = crate::instance_reader::read_profile_runtime(&profile_name);
+    if !profile_runtime.is_empty() {
+        runtime_name = profile_runtime;
     }
 
     (runtime_name, profile_name, host_sock)
@@ -78,26 +70,24 @@ pub async fn run(
     args: Vec<String>,
     timeout: std::time::Duration,
 ) -> Result<std::process::Output, String> {
-    let result = tokio::time::timeout(
-        timeout,
-        tokio::task::spawn_blocking(move || {
-            get_runtime_cmd()
-                .args(args.iter().map(|s| s.as_str()).collect::<Vec<&str>>())
-                .output()
-                .map_err(|e| format!("Failed to run docker command: {}", e))
-        }),
-    )
-    .await;
+    let mut cmd = tokio::process::Command::from(get_runtime_cmd());
+    cmd.args(args);
+    cmd.kill_on_drop(true);
+
+    let result = tokio::time::timeout(timeout, cmd.output()).await;
 
     match result {
-        Ok(join_result) => join_result.map_err(|e| format!("Task join error: {}", e))?,
+        Ok(Ok(output)) => Ok(output),
+        Ok(Err(e)) => Err(format!("Failed to run docker command: {}", e)),
         Err(_) => Err("Docker command timed out (daemon may be unresponsive)".to_string()),
     }
 }
 
-/// The wait the four merged copies used. Kept as the single default so the
-/// consolidation changes no behaviour.
-pub const DEFAULT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+/// Tiered timeout for quick operations (15 seconds).
+pub const DEFAULT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
+
+/// Tiered timeout for long-running operations like Compose operations and container runs (180 seconds).
+pub const LONG_OP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(180);
 
 /// Returns the active runtime name (e.g., "docker", "podman", "containerd").
 #[tauri::command]
@@ -132,10 +122,11 @@ mod tests {
         );
     }
 
-    /// The consolidation must not have changed the wait the four copies used.
+    /// Verifies tiered timeout constants.
     #[test]
-    fn the_default_timeout_is_the_one_the_merged_copies_had() {
-        assert_eq!(DEFAULT_TIMEOUT, std::time::Duration::from_secs(10));
+    fn tiered_timeouts_have_expected_durations() {
+        assert_eq!(DEFAULT_TIMEOUT, std::time::Duration::from_secs(15));
+        assert_eq!(LONG_OP_TIMEOUT, std::time::Duration::from_secs(180));
     }
 
     /// The merged path still reaches a real runtime.

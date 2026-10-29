@@ -202,6 +202,162 @@ pub fn resolve_binary(name: &str) -> String {
 /// detection skips can never drift apart.
 pub const DETONATION_PROFILE_PREFIX: &str = "colimaui-detonate-";
 
+/// Cache TTL for socket health probes to prevent hot-path I/O overhead.
+pub const PROBE_CACHE_TTL: std::time::Duration = std::time::Duration::from_secs(2);
+/// Timeout for Unix socket HTTP probing.
+pub const PROBE_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(300);
+
+static PROBE_CACHE: std::sync::LazyLock<
+    std::sync::Mutex<std::collections::HashMap<PathBuf, (bool, std::time::Instant)>>,
+> = std::sync::LazyLock::new(|| std::sync::Mutex::new(std::collections::HashMap::new()));
+
+/// Clears the 2-second socket probe cache.
+pub fn invalidate_probe_cache() {
+    let mut cache = PROBE_CACHE.lock().unwrap_or_else(|e| e.into_inner());
+    cache.clear();
+}
+
+#[cfg(test)]
+pub(crate) static TEST_PROBE_GUARD: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+#[cfg(test)]
+pub(crate) fn test_probe_exclusive() -> std::sync::MutexGuard<'static, ()> {
+    TEST_PROBE_GUARD.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// Probes a Docker Unix domain socket by performing an HTTP `GET /_ping` handshake.
+///
+/// Returns `true` if the socket responds with HTTP 200 OK.
+/// Returns `false` on connection error, immediate EOF (handling Lima SSH port forwarder
+/// when the daemon inside the VM is dead or booting), read timeout, or non-200 status.
+#[cfg(unix)]
+pub fn probe_docker_socket(sock: &std::path::Path, timeout: std::time::Duration) -> bool {
+    use std::io::{Read, Write};
+    use std::os::unix::net::UnixStream;
+
+    let Ok(mut stream) = UnixStream::connect(sock) else {
+        return false;
+    };
+    let _ = stream.set_read_timeout(Some(timeout));
+    let _ = stream.set_write_timeout(Some(timeout));
+    if stream
+        .write_all(b"GET /_ping HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
+        .is_err()
+    {
+        return false;
+    }
+    let mut buf = [0u8; 256];
+    let Ok(n) = stream.read(&mut buf) else {
+        return false;
+    };
+    if n == 0 {
+        return false;
+    }
+    let head = std::str::from_utf8(&buf[..n]).unwrap_or("");
+    let mut parts = head.lines().next().unwrap_or("").split_whitespace();
+    let version_ok = parts.next().is_some_and(|v| v.starts_with("HTTP/1."));
+    version_ok && parts.next() == Some("200")
+}
+
+#[cfg(not(unix))]
+pub fn probe_docker_socket(_sock: &std::path::Path, _timeout: std::time::Duration) -> bool {
+    false
+}
+
+/// Probes a Docker Unix domain socket with a 2-second TTL cache to prevent hot-path I/O overhead.
+pub fn probe_docker_socket_cached(sock: &std::path::Path) -> bool {
+    let now = std::time::Instant::now();
+    {
+        let cache = PROBE_CACHE.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(&(healthy, timestamp)) = cache.get(sock) {
+            if now.duration_since(timestamp) < PROBE_CACHE_TTL {
+                return healthy;
+            }
+        }
+    }
+
+    let healthy = probe_docker_socket(sock, PROBE_TIMEOUT);
+
+    {
+        let mut cache = PROBE_CACHE.lock().unwrap_or_else(|e| e.into_inner());
+        cache.insert(sock.to_path_buf(), (healthy, std::time::Instant::now()));
+    }
+
+    healthy
+}
+
+#[cfg(unix)]
+fn is_pid_alive(pid: libc::pid_t) -> bool {
+    if pid <= 0 {
+        return false;
+    }
+    let res = unsafe { libc::kill(pid, 0) };
+    if res == 0 {
+        return true;
+    }
+    std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
+}
+
+/// Check if a Lima instance is alive by testing `ha.sock` connection and inspecting `ha.pid`.
+///
+/// On Unix, tests `ha.sock` via `UnixStream::connect`. If `ha.sock` exists and accepts connections,
+/// the hostagent is alive. If `ha.sock` exists but connection fails (e.g. ECONNREFUSED), the
+/// hostagent is dead. If `ha.sock` does not exist yet (during early boot), checks `ha.pid`
+/// via `libc::kill(pid, 0)`.
+#[cfg(unix)]
+pub fn is_lima_instance_alive(lima_dir: &std::path::Path) -> bool {
+    let ha_sock = lima_dir.join("ha.sock");
+    if ha_sock.exists() {
+        return std::os::unix::net::UnixStream::connect(&ha_sock).is_ok();
+    }
+
+    let ha_pid = lima_dir.join("ha.pid");
+    if let Ok(content) = std::fs::read_to_string(&ha_pid) {
+        if let Ok(pid) = content.trim().parse::<libc::pid_t>() {
+            return is_pid_alive(pid);
+        }
+    }
+
+    false
+}
+
+#[cfg(not(unix))]
+pub fn is_lima_instance_alive(_lima_dir: &std::path::Path) -> bool {
+    false
+}
+
+fn get_docker_current_context() -> Option<String> {
+    let config_path = if let Ok(docker_config) = std::env::var("DOCKER_CONFIG") {
+        PathBuf::from(docker_config).join("config.json")
+    } else if let Ok(home) = std::env::var("HOME") {
+        PathBuf::from(home).join(".docker").join("config.json")
+    } else {
+        return None;
+    };
+
+    if !config_path.exists() {
+        return None;
+    }
+
+    let content = std::fs::read_to_string(config_path).ok()?;
+    let parsed: serde_json::Value = serde_json::from_str(&content).ok()?;
+    parsed
+        .get("currentContext")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
+}
+
+fn profile_from_docker_context(context: &str) -> Option<String> {
+    if context == "colima" {
+        Some("default".to_string())
+    } else {
+        context
+            .strip_prefix("colima-")
+            .filter(|p| !p.is_empty())
+            .map(|p| p.to_string())
+    }
+}
+
 /// Detect the Docker socket from a running Colima instance.
 /// Returns something like "unix:///Users/mike/.colima/default/docker.sock".
 ///
@@ -211,8 +367,16 @@ pub const DETONATION_PROFILE_PREFIX: &str = "colimaui-detonate-";
 /// 3. Bollard's connect_with_defaults() only checks /var/run/docker.sock
 pub fn detect_docker_host() -> Option<(String, String)> {
     if let Ok(host) = std::env::var("DOCKER_HOST") {
-        if !host.is_empty() {
-            return Some((host, "default".to_string()));
+        let trimmed = host.trim();
+        if !trimmed.is_empty() {
+            if trimmed.starts_with("unix://") {
+                let sock_path = std::path::Path::new(trimmed.trim_start_matches("unix://"));
+                if probe_docker_socket_cached(sock_path) {
+                    return Some((trimmed.to_string(), "default".to_string()));
+                }
+            } else {
+                return Some((trimmed.to_string(), "default".to_string()));
+            }
         }
     }
 
@@ -224,8 +388,12 @@ pub fn detect_docker_host() -> Option<(String, String)> {
         return None;
     }
 
-    // Scan profiles for a running instance (has ha.sock in _lima dir)
+    let active_profile =
+        get_docker_current_context().and_then(|ctx| profile_from_docker_context(&ctx));
+
+    // Scan profiles for a running instance
     if let Ok(entries) = std::fs::read_dir(colima_path) {
+        let mut profiles = Vec::new();
         for entry in entries.flatten() {
             let name = entry.file_name().to_string_lossy().to_string();
             if name.starts_with('_') || name.starts_with('.') || !entry.path().is_dir() {
@@ -239,7 +407,25 @@ pub fn detect_docker_host() -> Option<(String, String)> {
             if name.starts_with(DETONATION_PROFILE_PREFIX) {
                 continue;
             }
+            profiles.push(name);
+        }
 
+        // Deterministic sort: active context profile first, then "default", then alphabetical
+        profiles.sort_by(|a, b| {
+            let a_is_active = active_profile.as_deref() == Some(a.as_str());
+            let b_is_active = active_profile.as_deref() == Some(b.as_str());
+            if a_is_active != b_is_active {
+                return b_is_active.cmp(&a_is_active);
+            }
+            let a_is_default = a == "default";
+            let b_is_default = b == "default";
+            if a_is_default != b_is_default {
+                return b_is_default.cmp(&a_is_default);
+            }
+            a.cmp(b)
+        });
+
+        for name in profiles {
             // Map profile to lima instance name
             let lima_name = if name == "default" {
                 "colima".to_string()
@@ -247,13 +433,10 @@ pub fn detect_docker_host() -> Option<(String, String)> {
                 format!("colima-{}", name)
             };
             let lima_dir = colima_path.join("_lima").join(&lima_name);
+            let sock = colima_path.join(&name).join("docker.sock");
 
-            if lima_dir.join("ha.sock").exists() || lima_dir.join("ha.pid").exists() {
-                // Found running instance — return its docker socket
-                let sock = colima_path.join(&name).join("docker.sock");
-                if sock.exists() {
-                    return Some((format!("unix://{}", sock.display()), name.clone()));
-                }
+            if is_lima_instance_alive(&lima_dir) && probe_docker_socket_cached(&sock) {
+                return Some((format!("unix://{}", sock.display()), name));
             }
         }
     }
@@ -274,10 +457,226 @@ pub fn detect_docker_host() -> Option<(String, String)> {
                     .components()
                     .any(|c| c.as_os_str().to_string_lossy().starts_with(DETONATION_PROFILE_PREFIX))
             });
-        if !points_at_detonation {
+        if !points_at_detonation && probe_docker_socket_cached(&fallback) {
             return Some((format!("unix://{}", fallback.display()), "default".to_string()));
         }
     }
 
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    fn temp_socket_path(test_name: &str) -> PathBuf {
+        static COUNTER: AtomicU64 = AtomicU64::new(0);
+        let id = COUNTER.fetch_add(1, Ordering::Relaxed);
+        let path = PathBuf::from(format!("/tmp/cui-{}-{}-{}.sock", test_name, std::process::id(), id));
+        let _ = std::fs::remove_file(&path);
+        path
+    }
+
+    struct SocketCleanup(PathBuf);
+    impl Drop for SocketCleanup {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_file(&self.0);
+        }
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn test_probe_docker_socket_immediate_eof() {
+        let sock_path = temp_socket_path("eof");
+        let _guard = SocketCleanup(sock_path.clone());
+        let listener = std::os::unix::net::UnixListener::bind(&sock_path).unwrap();
+
+        let handle = std::thread::spawn(move || {
+            if let Ok((mut stream, _)) = listener.accept() {
+                use std::io::Read;
+                let mut buf = [0u8; 128];
+                let _ = stream.read(&mut buf);
+                // Immediately close without writing response (EOF)
+            }
+        });
+
+        let healthy = probe_docker_socket(&sock_path, std::time::Duration::from_millis(300));
+        assert!(!healthy, "Immediate EOF must be detected as unhealthy");
+        let _ = handle.join();
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn test_probe_docker_socket_timeout() {
+        let sock_path = temp_socket_path("timeout");
+        let _guard = SocketCleanup(sock_path.clone());
+        let listener = std::os::unix::net::UnixListener::bind(&sock_path).unwrap();
+
+        let handle = std::thread::spawn(move || {
+            if let Ok((_stream, _)) = listener.accept() {
+                // Sleep longer than probe timeout
+                std::thread::sleep(std::time::Duration::from_millis(200));
+            }
+        });
+
+        let healthy = probe_docker_socket(&sock_path, std::time::Duration::from_millis(50));
+        assert!(!healthy, "Read timeout must be detected as unhealthy");
+        let _ = handle.join();
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn test_probe_docker_socket_200_ok() {
+        let sock_path = temp_socket_path("ok");
+        let _guard = SocketCleanup(sock_path.clone());
+        let listener = std::os::unix::net::UnixListener::bind(&sock_path).unwrap();
+
+        let handle = std::thread::spawn(move || {
+            if let Ok((mut stream, _)) = listener.accept() {
+                use std::io::{Read, Write};
+                let mut buf = [0u8; 128];
+                let _ = stream.read(&mut buf);
+                let resp = b"HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: 2\r\n\r\nOK";
+                let _ = stream.write_all(resp);
+            }
+        });
+
+        let healthy = probe_docker_socket(&sock_path, std::time::Duration::from_millis(300));
+        assert!(healthy, "HTTP 200 OK must report healthy");
+        let _ = handle.join();
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn test_probe_docker_socket_orphaned_file() {
+        let sock_path = temp_socket_path("orphan");
+        let _guard = SocketCleanup(sock_path.clone());
+        let listener = std::os::unix::net::UnixListener::bind(&sock_path).unwrap();
+        // Drop listener immediately: socket file remains in filesystem, but nobody is listening
+        drop(listener);
+
+        assert!(sock_path.exists());
+        let healthy = probe_docker_socket(&sock_path, std::time::Duration::from_millis(300));
+        assert!(!healthy, "Orphaned socket without listener must report unhealthy");
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn test_probe_docker_socket_nonexistent() {
+        let sock_path = PathBuf::from("/tmp/cui-does-not-exist-123456789.sock");
+        let healthy = probe_docker_socket(&sock_path, std::time::Duration::from_millis(300));
+        assert!(!healthy, "Nonexistent socket must report unhealthy");
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn test_probe_docker_socket_cached_ttl_and_invalidation() {
+        let _guard = test_probe_exclusive();
+        invalidate_probe_cache();
+
+        let sock_path = temp_socket_path("cache");
+        let _clean = SocketCleanup(sock_path.clone());
+        let listener = std::os::unix::net::UnixListener::bind(&sock_path).unwrap();
+
+        let handle = std::thread::spawn(move || {
+            if let Ok((mut stream, _)) = listener.accept() {
+                use std::io::{Read, Write};
+                let mut buf = [0u8; 128];
+                let _ = stream.read(&mut buf);
+                let resp = b"HTTP/1.1 200 OK\r\n\r\nOK";
+                let _ = stream.write_all(resp);
+            }
+        });
+
+        // 1. Initial probe succeeds and caches (true, Instant::now())
+        let healthy = probe_docker_socket_cached(&sock_path);
+        assert!(healthy, "Initial probe should be true");
+        let _ = handle.join();
+
+        // 2. Remove socket file now. Since cache TTL is 2s, cached probe should still return true!
+        let _ = std::fs::remove_file(&sock_path);
+        assert!(!sock_path.exists());
+        let cached_healthy = probe_docker_socket_cached(&sock_path);
+        assert!(cached_healthy, "Cached probe must return true within TTL");
+
+        // 3. Invalidate cache: subsequent probe hits filesystem, sees socket is gone -> returns false
+        invalidate_probe_cache();
+        let after_invalidation = probe_docker_socket_cached(&sock_path);
+        assert!(!after_invalidation, "Probe must return false after cache invalidation");
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn test_probe_docker_socket_http_500_with_200_in_headers() {
+        let sock_path = temp_socket_path("adv-500");
+        let _clean = SocketCleanup(sock_path.clone());
+        let listener = std::os::unix::net::UnixListener::bind(&sock_path).unwrap();
+
+        let handle = std::thread::spawn(move || {
+            if let Ok((mut stream, _)) = listener.accept() {
+                use std::io::{Read, Write};
+                let mut buf = [0u8; 128];
+                let _ = stream.read(&mut buf);
+                let resp = b"HTTP/1.1 500 Internal Server Error\r\nContent-Length: 200 \r\n\r\n";
+                let _ = stream.write_all(resp);
+            }
+        });
+
+        let healthy = probe_docker_socket(&sock_path, std::time::Duration::from_millis(300));
+        assert!(!healthy, "HTTP 500 with Content-Length 200 must return false");
+        let _ = handle.join();
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn test_is_lima_instance_alive_pid_and_sock() {
+        static DIR_COUNTER: AtomicU64 = AtomicU64::new(0);
+        let id = DIR_COUNTER.fetch_add(1, Ordering::Relaxed);
+        let base_dir = PathBuf::from(format!("/tmp/cui-lima-test-{}-{}", std::process::id(), id));
+        let _ = std::fs::create_dir_all(&base_dir);
+
+        struct DirCleanup(PathBuf);
+        impl Drop for DirCleanup {
+            fn drop(&mut self) {
+                let _ = std::fs::remove_dir_all(&self.0);
+            }
+        }
+        let _guard = DirCleanup(base_dir.clone());
+
+        // Case 1: Empty dir
+        assert!(!is_lima_instance_alive(&base_dir));
+
+        // Case 2: Dead PID in ha.pid, no ha.sock
+        let pid_file = base_dir.join("ha.pid");
+        std::fs::write(&pid_file, "99999999\n").unwrap();
+        assert!(!is_lima_instance_alive(&base_dir));
+
+        // Case 3: Live PID (current process ID) in ha.pid, no ha.sock
+        let current_pid = std::process::id();
+        std::fs::write(&pid_file, format!("{}\n", current_pid)).unwrap();
+        assert!(is_lima_instance_alive(&base_dir));
+
+        // Case 4: Stale ha.sock exists (file exists, no listener).
+        let sock_path = base_dir.join("ha.sock");
+        let listener = std::os::unix::net::UnixListener::bind(&sock_path).unwrap();
+        drop(listener);
+        std::thread::sleep(std::time::Duration::from_millis(15));
+        assert!(sock_path.exists());
+        assert!(!is_lima_instance_alive(&base_dir));
+
+        // Case 5: Active ha.sock (listener listening)
+        let _ = std::fs::remove_file(&sock_path);
+        let active_listener = std::os::unix::net::UnixListener::bind(&sock_path).unwrap();
+        assert!(is_lima_instance_alive(&base_dir));
+        drop(active_listener);
+    }
+
+    #[test]
+    fn test_profile_from_docker_context() {
+        assert_eq!(profile_from_docker_context("colima"), Some("default".to_string()));
+        assert_eq!(profile_from_docker_context("colima-dev"), Some("dev".to_string()));
+        assert_eq!(profile_from_docker_context("colima-"), None);
+        assert_eq!(profile_from_docker_context("desktop-linux"), None);
+    }
 }

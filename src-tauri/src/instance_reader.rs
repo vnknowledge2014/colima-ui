@@ -66,9 +66,69 @@ fn lima_instance_name(profile: &str) -> String {
     }
 }
 
-/// Check if a lima instance is running by looking for ha.sock or ha.pid.
-fn is_instance_running(lima_dir: &Path) -> bool {
-    lima_dir.join("ha.sock").exists() || lima_dir.join("ha.pid").exists()
+/// Read the configured runtime from `~/.colima/<profile>/colima.yaml` directly without spawning `colima status`.
+pub fn read_profile_runtime(profile: &str) -> String {
+    read_profile_runtime_in(&colima_home(), profile)
+}
+
+/// Helper that reads profile runtime from a specified colima home directory (used in tests and internal callers).
+pub fn read_profile_runtime_in(colima_home: &Path, profile: &str) -> String {
+    if !crate::validation::is_valid_profile_name(profile) {
+        return "docker".to_string();
+    }
+    let config_path = colima_home.join(profile).join("colima.yaml");
+    if let Some(runtime) = std::fs::read_to_string(&config_path)
+        .ok()
+        .and_then(|content| serde_yml::from_str::<ColimaConfig>(&content).ok())
+        .map(|cfg| cfg.runtime)
+        .filter(|r| !r.is_empty())
+    {
+        return runtime;
+    }
+    "docker".to_string()
+}
+
+/// Resolve the accurate 4-tier status of a Colima instance:
+/// - `"Stopped"`: Lima process is not alive
+/// - `"Running"`: Lima process is alive, and either runtime is non-docker or Docker socket responds with HTTP 200 OK
+/// - `"Starting"`: Lima process is alive, Docker socket not yet responding, and instance uptime < 90s
+/// - `"Unhealthy"`: Lima process is alive, Docker socket not responding, and instance uptime >= 90s
+pub fn resolve_instance_status(
+    colima_home: &Path,
+    profile: &str,
+    lima_dir: &Path,
+    runtime: &str,
+) -> &'static str {
+    if !crate::path_util::is_lima_instance_alive(lima_dir) {
+        return "Stopped";
+    }
+
+    let is_docker = runtime.is_empty() || runtime == "docker";
+    if is_docker {
+        let sock = colima_home.join(profile).join("docker.sock");
+        let healthy = crate::path_util::probe_docker_socket_cached(&sock)
+            || (profile == "default"
+                && crate::path_util::probe_docker_socket_cached(&colima_home.join("docker.sock")));
+        if healthy {
+            return "Running";
+        }
+
+        // Socket is not healthy. Determine if Starting (< 90s) or Unhealthy (>= 90s)
+        let uptime_secs = std::fs::metadata(lima_dir.join("ha.pid"))
+            .or_else(|_| std::fs::metadata(lima_dir.join("ha.sock")))
+            .and_then(|m| m.modified())
+            .ok()
+            .and_then(|t| t.elapsed().ok())
+            .map_or(0, |d| d.as_secs());
+
+        if uptime_secs < 90 {
+            "Starting"
+        } else {
+            "Unhealthy"
+        }
+    } else {
+        "Running"
+    }
 }
 
 /// Resource fields of the lima instance colima generates from colima.yaml.
@@ -134,7 +194,13 @@ fn read_instance(colima_home: &Path, profile: &str) -> Option<ColimaInstance> {
         ColimaConfig::default()
     };
 
-    let running = is_instance_running(&lima_dir);
+    let runtime = if config.runtime.is_empty() {
+        "docker".to_string()
+    } else {
+        config.runtime
+    };
+
+    let status = resolve_instance_status(colima_home, profile, &lima_dir, &runtime);
 
     // Determine the display name (matches colima list output)
     // Colima lowercases profile names internally, so normalize to lowercase
@@ -170,11 +236,7 @@ fn read_instance(colima_home: &Path, profile: &str) -> Option<ColimaInstance> {
 
     Some(ColimaInstance {
         name,
-        status: if running {
-            "Running".to_string()
-        } else {
-            "Stopped".to_string()
-        },
+        status: status.to_string(),
         arch: if config.arch.is_empty() {
             std::env::consts::ARCH.to_string()
         } else {
@@ -186,11 +248,7 @@ fn read_instance(colima_home: &Path, profile: &str) -> Option<ColimaInstance> {
         cpus,
         memory: memory_bytes,
         disk: disk_bytes,
-        runtime: if config.runtime.is_empty() && running {
-            "docker".to_string()
-        } else {
-            config.runtime
-        },
+        runtime,
         address: String::new(),
         kubernetes: config.kubernetes.enabled,
     })
@@ -274,11 +332,11 @@ pub fn list_instances_fast() -> Vec<ColimaInstance> {
         }
     }
 
-    // Sort: running first, then alphabetical
+    // Sort: active/starting/unhealthy instances above stopped instances, then by profile name
     instances.sort_by(|a, b| {
-        let a_running = a.status == "Running";
-        let b_running = b.status == "Running";
-        b_running.cmp(&a_running).then(a.name.cmp(&b.name))
+        let a_active = a.status != "Stopped";
+        let b_active = b.status != "Stopped";
+        b_active.cmp(&a_active).then(a.name.cmp(&b.name))
     });
 
     instances
@@ -308,7 +366,7 @@ pub fn running_containerd_profiles() -> Vec<String> {
             }
             let lima_name = lima_instance_name(&name);
             let lima_dir = home.join("_lima").join(&lima_name);
-            if !lima_dir.join("ha.sock").exists() && !lima_dir.join("ha.pid").exists() {
+            if !crate::path_util::is_lima_instance_alive(&lima_dir) {
                 continue;
             }
             if let Some(inst) = read_instance(&home, &name) {
@@ -319,4 +377,184 @@ pub fn running_containerd_profiles() -> Vec<String> {
         }
     }
     profiles
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    fn temp_test_dir(name: &str) -> PathBuf {
+        static COUNTER: AtomicU64 = AtomicU64::new(0);
+        let id = COUNTER.fetch_add(1, Ordering::Relaxed);
+        let dir = PathBuf::from(format!("/tmp/cui-ir-test-{}-{}-{}", name, std::process::id(), id));
+        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::create_dir_all(&dir);
+        dir
+    }
+
+    struct DirCleanup(PathBuf);
+    impl Drop for DirCleanup {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[test]
+    fn test_read_profile_runtime() {
+        let home = temp_test_dir("runtime");
+        let _guard = DirCleanup(home.clone());
+
+        // Profile 1: runtime containerd
+        let prof1_dir = home.join("containerd_prof");
+        std::fs::create_dir_all(&prof1_dir).unwrap();
+        std::fs::write(prof1_dir.join("colima.yaml"), "cpu: 2\nruntime: containerd\n").unwrap();
+
+        // Profile 2: default docker when empty or missing
+        let prof2_dir = home.join("docker_prof");
+        std::fs::create_dir_all(&prof2_dir).unwrap();
+        std::fs::write(prof2_dir.join("colima.yaml"), "cpu: 4\n").unwrap();
+
+        assert_eq!(read_profile_runtime_in(&home, "containerd_prof"), "containerd");
+        assert_eq!(read_profile_runtime_in(&home, "docker_prof"), "docker");
+        assert_eq!(read_profile_runtime_in(&home, "nonexistent"), "docker");
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn test_resolve_instance_status_transitions() {
+        let _guard = crate::path_util::test_probe_exclusive();
+        crate::path_util::invalidate_probe_cache();
+
+        let home = temp_test_dir("status");
+        let _dir_guard = DirCleanup(home.clone());
+
+        let profile = "testprof";
+        let profile_dir = home.join(profile);
+        std::fs::create_dir_all(&profile_dir).unwrap();
+
+        let lima_dir = home.join("_lima").join("colima-testprof");
+        std::fs::create_dir_all(&lima_dir).unwrap();
+
+        // 1. Stopped: no ha.pid or ha.sock
+        let status = resolve_instance_status(&home, profile, &lima_dir, "docker");
+        assert_eq!(status, "Stopped");
+
+        // 2. Starting: ha.pid with live PID, recent mtime (< 90s), but socket not responding
+        let ha_pid = lima_dir.join("ha.pid");
+        std::fs::write(&ha_pid, format!("{}\n", std::process::id())).unwrap();
+        crate::path_util::invalidate_probe_cache();
+        let status = resolve_instance_status(&home, profile, &lima_dir, "docker");
+        assert_eq!(status, "Starting");
+
+        // 3. Unhealthy: ha.pid with live PID, mtime >= 90s ago, socket not responding
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let old_time = (now - 120) as libc::time_t;
+        let c_path = std::ffi::CString::new(ha_pid.to_str().unwrap()).unwrap();
+        let times = [
+            libc::timeval { tv_sec: old_time, tv_usec: 0 },
+            libc::timeval { tv_sec: old_time, tv_usec: 0 },
+        ];
+        unsafe {
+            libc::utimes(c_path.as_ptr(), times.as_ptr());
+        }
+
+        crate::path_util::invalidate_probe_cache();
+        let status = resolve_instance_status(&home, profile, &lima_dir, "docker");
+        assert_eq!(status, "Unhealthy");
+
+        // 4. Running: Docker socket responds 200 OK.
+        // Use distinct profile (testprof_running) so socket paths do not collide.
+        let run_profile = "testprof_running";
+        let run_profile_dir = home.join(run_profile);
+        std::fs::create_dir_all(&run_profile_dir).unwrap();
+
+        let run_lima_dir = home.join("_lima").join("colima-testprof_running");
+        std::fs::create_dir_all(&run_lima_dir).unwrap();
+        let run_ha_pid = run_lima_dir.join("ha.pid");
+        std::fs::write(&run_ha_pid, format!("{}\n", std::process::id())).unwrap();
+
+        let sock_path = run_profile_dir.join("docker.sock");
+        let listener = std::os::unix::net::UnixListener::bind(&sock_path).unwrap();
+        let handle = std::thread::spawn(move || {
+            if let Ok((mut stream, _)) = listener.accept() {
+                use std::io::{Read, Write};
+                let mut buf = [0u8; 128];
+                let _ = stream.read(&mut buf);
+                let resp = b"HTTP/1.1 200 OK\r\n\r\nOK";
+                let _ = stream.write_all(resp);
+            }
+        });
+
+        crate::path_util::invalidate_probe_cache();
+        let status = resolve_instance_status(&home, run_profile, &run_lima_dir, "docker");
+        assert_eq!(status, "Running");
+        let _ = handle.join();
+
+        // 5. Non-docker runtime (e.g. containerd) returns Running when Lima is alive
+        let status_containerd = resolve_instance_status(&home, profile, &lima_dir, "containerd");
+        assert_eq!(status_containerd, "Running");
+    }
+
+    #[test]
+    fn test_list_instances_sort_order() {
+        let mut instances = [
+            ColimaInstance {
+                name: "zebra".to_string(),
+                status: "Stopped".to_string(),
+                arch: "aarch64".to_string(),
+                cpus: 2,
+                memory: 1024,
+                disk: 1024,
+                runtime: "docker".to_string(),
+                address: String::new(),
+                kubernetes: false,
+            },
+            ColimaInstance {
+                name: "alpha".to_string(),
+                status: "Stopped".to_string(),
+                arch: "aarch64".to_string(),
+                cpus: 2,
+                memory: 1024,
+                disk: 1024,
+                runtime: "docker".to_string(),
+                address: String::new(),
+                kubernetes: false,
+            },
+            ColimaInstance {
+                name: "beta".to_string(),
+                status: "Starting".to_string(),
+                arch: "aarch64".to_string(),
+                cpus: 2,
+                memory: 1024,
+                disk: 1024,
+                runtime: "docker".to_string(),
+                address: String::new(),
+                kubernetes: false,
+            },
+            ColimaInstance {
+                name: "gamma".to_string(),
+                status: "Running".to_string(),
+                arch: "aarch64".to_string(),
+                cpus: 2,
+                memory: 1024,
+                disk: 1024,
+                runtime: "docker".to_string(),
+                address: String::new(),
+                kubernetes: false,
+            },
+        ];
+
+        instances.sort_by(|a, b| {
+            let a_active = a.status != "Stopped";
+            let b_active = b.status != "Stopped";
+            b_active.cmp(&a_active).then(a.name.cmp(&b.name))
+        });
+
+        let names: Vec<&str> = instances.iter().map(|i| i.name.as_str()).collect();
+        assert_eq!(names, vec!["beta", "gamma", "alpha", "zebra"]);
+    }
 }

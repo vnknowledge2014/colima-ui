@@ -150,6 +150,22 @@
   border: 1px solid rgba(90, 98, 117, 0.2);
 }
 
+.badge-unhealthy {
+  background: rgba(248, 113, 113, 0.12);
+  color: var(--accent-red);
+  border: 1px solid rgba(248, 113, 113, 0.25);
+}
+
+.pill-starting {
+  background: rgba(251, 191, 36, 0.12);
+  color: var(--status-starting);
+}
+
+.pill-unhealthy {
+  background: rgba(248, 113, 113, 0.12);
+  color: var(--accent-red);
+}
+
 /* Pro accent — the single source of the "purple = Pro" signal. Standardized on
    the --accent-purple token so a theme change is one edit; replaces earlier
    hardcoded rgba(188,140,255,…). See the Pro UI design system report. */
@@ -180,6 +196,11 @@
 
 .badge-running .badge-dot {
   animation: pulse-dot 2s ease-in-out infinite;
+  box-shadow: 0 0 4px currentColor;
+}
+
+.badge-unhealthy .badge-dot {
+  animation: pulse-dot 1.5s ease-in-out infinite;
   box-shadow: 0 0 4px currentColor;
 }
 

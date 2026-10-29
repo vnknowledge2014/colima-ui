@@ -7,6 +7,7 @@
   import { handleInstanceStarted, handleInstanceStopping, getCurrentPresetForInstance, BUILT_IN_PRESETS } from "../lib/presetStateManager";
   import { getAppSetting } from "../lib/settingsStore.svelte";
   import { setVisibleInterval } from "../lib/visibleInterval";
+  import { normalizeMemoryToGiB, normalizeDiskToGiB } from "../lib/normalizers";
 
   interface InstancePreset {
     id: string; label: string; cpus: number; memory: number; disk: number;
@@ -204,8 +205,8 @@ Format: {"minimal": {"cpus": N, "memory": N, "disk": N}, ...}`;
         profile,
         runtime: inst?.runtime || "docker",
         cpus: inst?.cpus || 2,
-        memory: inst?.memory || 2,
-        disk: inst?.disk || 60,
+        memory: normalizeMemoryToGiB(inst?.memory),
+        disk: normalizeDiskToGiB(inst?.disk),
         vm_type: "",
         kubernetes: inst?.kubernetes || false,
         kubernetes_version: "",
@@ -257,7 +258,7 @@ Format: {"minimal": {"cpus": N, "memory": N, "disk": N}, ...}`;
     };
   }
 
-  let runningColima = $derived(dashboardState.colimaInstances.filter(i => i.status === "Running").length);
+  let runningColima = $derived(dashboardState.colimaInstances.filter(i => (i.status || "").toLowerCase() === "running").length);
   let totalItems = $derived(dashboardState.colimaInstances.length + kindClusters.length);
 
   interface CustomPreset {
@@ -321,11 +322,11 @@ Format: {"minimal": {"cpus": N, "memory": N, "disk": N}, ...}`;
       </div>
       <div class="overview-card">
         <div class="overview-label" style="color: var(--accent-green);">Running</div>
-        <div class="overview-value">{dashboardState.colimaInstances.filter(i => i.status === "Running").length}</div>
+        <div class="overview-value">{dashboardState.colimaInstances.filter(i => (i.status || "").toLowerCase() === "running").length}</div>
       </div>
       <div class="overview-card">
         <div class="overview-label" style="color: var(--text-muted);">Stopped</div>
-        <div class="overview-value">{dashboardState.colimaInstances.filter(i => i.status !== "Running").length}</div>
+        <div class="overview-value">{dashboardState.colimaInstances.filter(i => (i.status || "").toLowerCase() !== "running").length}</div>
       </div>
       <div class="overview-card">
         <div class="overview-label">CPU Cores</div>
@@ -347,10 +348,13 @@ Format: {"minimal": {"cpus": N, "memory": N, "disk": N}, ...}`;
           Colima Instances ({dashboardState.colimaInstances.length})
         </div>
         {#each dashboardState.colimaInstances as inst (inst.name)}
-          {@const isRunning = inst.status === "Running"}
+          {@const statusLower = (inst.status || "stopped").toLowerCase()}
+          {@const isRunning = statusLower === "running"}
+          {@const isStarting = statusLower === "starting"}
+          {@const isUnhealthy = statusLower === "unhealthy"}
           {@const isSelected = selected?.type === "colima" && selected.data.name === inst.name}
           <div role="button" tabindex="0" onkeydown={(e) => e.key === 'Enter' && e.currentTarget.click()} onclick={() => selected = { type: "colima", data: inst }} class="inst-item" style="padding: 10px 14px; cursor: pointer; display: flex; align-items: center; gap: 10px; background: {isSelected ? 'var(--bg-card-hover)' : 'transparent'}; border-left: 3px solid {isSelected ? 'var(--accent-blue)' : 'transparent'};">
-            <div style="width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; background: {isRunning ? 'var(--accent-green)' : 'var(--text-muted)'}; box-shadow: {isRunning ? '0 0 6px var(--accent-green)' : 'none'};"></div>
+            <div style="width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; background: {isRunning ? 'var(--accent-green)' : isStarting ? 'var(--accent-yellow)' : isUnhealthy ? 'var(--accent-red)' : 'var(--text-muted)'}; box-shadow: {isRunning ? '0 0 6px var(--accent-green)' : isStarting ? '0 0 6px var(--accent-yellow)' : isUnhealthy ? '0 0 6px var(--accent-red)' : 'none'};"></div>
             <div style="flex: 1; min-width: 0;">
               <div style="font-weight: 600; font-size: var(--text-sm); color: var(--text-primary); display: flex; align-items: center; gap: 6px;">
                 {inst.name}
@@ -363,7 +367,7 @@ Format: {"minimal": {"cpus": N, "memory": N, "disk": N}, ...}`;
               </div>
             </div>
             <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 4px;">
-              <span style="padding: 2px 6px; border-radius: 10px; font-size: 10px; font-weight: 600; background: {isRunning ? 'rgba(63,185,80,0.1)' : 'rgba(139,148,158,0.1)'}; color: {isRunning ? 'var(--accent-green)' : 'var(--text-muted)'};">{inst.status}</span>
+              <span class="badge-{statusLower}" style="padding: 2px 6px; border-radius: 10px; font-size: 10px; font-weight: 600; background: {isRunning ? 'rgba(63,185,80,0.1)' : isStarting ? 'rgba(234,179,8,0.1)' : isUnhealthy ? 'rgba(248,81,73,0.1)' : 'rgba(139,148,158,0.1)'}; color: {isRunning ? 'var(--accent-green)' : isStarting ? 'var(--accent-yellow)' : isUnhealthy ? 'var(--accent-red)' : 'var(--text-muted)'};">{inst.status || "Stopped"}</span>
               {#if inst.kubernetes}
                 <span style="padding: 2px 6px; border-radius: 10px; font-size: 10px; font-weight: 600; background: rgba(56, 189, 248, 0.1); color: var(--accent-blue);">☸️ K3s</span>
               {/if}
@@ -401,15 +405,18 @@ Format: {"minimal": {"cpus": N, "memory": N, "disk": N}, ...}`;
           <!-- Inline ColimaDetail equivalent for brevity in this rewrite -->
           {@const inst = selected.data}
           {@const profileId = inst.name === "colima" ? "default" : inst.name.replace("colima-", "")}
-          {@const isRunning = inst.status === "Running"}
+          {@const statusLower = (inst.status || "stopped").toLowerCase()}
+          {@const isRunning = statusLower === "running"}
+          {@const isStarting = statusLower === "starting"}
+          {@const isUnhealthy = statusLower === "unhealthy"}
           {@const isLoading = actionLoading?.startsWith(profileId)}
           
           <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 24px;">
             <div>
             <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 6px;">
-              <span class="status-pill {isRunning ? 'pill-running' : 'pill-stopped'}">
+              <span class="status-pill {isRunning ? 'pill-running' : isStarting ? 'pill-starting' : isUnhealthy ? 'pill-unhealthy' : 'pill-stopped'}">
                 <span class="status-dot"></span>
-                {inst.status}
+                {inst.status || "Stopped"}
               </span>
               <h2 style="margin: 0; font-size: var(--text-xl); font-weight: 700;">{inst.name}</h2>
               <span style="padding: 2px 6px; border-radius: 10px; font-size: 10px; font-weight: 600; background: {allPresets.find(p => p.cpus === inst.cpus && p.memory === inst.memory) ? 'rgba(63,185,80,0.1)' : 'rgba(139,148,158,0.1)'}; color: {allPresets.find(p => p.cpus === inst.cpus && p.memory === inst.memory) ? 'var(--accent-green)' : 'var(--text-muted)'}; margin-left: 8px;">
@@ -424,10 +431,16 @@ Format: {"minimal": {"cpus": N, "memory": N, "disk": N}, ...}`;
               {#if isRunning}
                 <button class="btn btn-ghost" disabled={!!isLoading} onclick={() => handleAction(profileId, "stop")} style="font-size: var(--text-xs);">Stop</button>
                 <button class="btn btn-ghost" disabled={!!isLoading} onclick={() => handleAction(profileId, "restart")} style="font-size: var(--text-xs);">Restart</button>
+              {:else if isStarting}
+                <button class="btn btn-primary" disabled={true} style="font-size: var(--text-xs); opacity: 0.6; cursor: not-allowed;">Starting...</button>
+                <button class="btn btn-ghost" disabled={!!isLoading} onclick={() => handleAction(profileId, "stop")} style="font-size: var(--text-xs);">Stop</button>
+              {:else if isUnhealthy}
+                <button class="btn btn-ghost" disabled={!!isLoading} onclick={() => handleAction(profileId, "stop")} style="font-size: var(--text-xs);">Stop</button>
+                <button class="btn btn-ghost" disabled={!!isLoading} onclick={() => handleAction(profileId, "restart")} style="font-size: var(--text-xs);">Restart</button>
               {:else}
                 <button class="btn btn-primary" disabled={!!isLoading} onclick={() => handleAction(profileId, "start")} style="font-size: var(--text-xs);">Start</button>
               {/if}
-              <button class="btn btn-ghost" disabled={!!isLoading} onclick={() => handleAction(profileId, "delete")} style="font-size: var(--text-xs); color: var(--accent-red);">Delete</button>
+              <button class="btn btn-ghost" disabled={!!isLoading || isStarting} onclick={() => handleAction(profileId, "delete")} style="font-size: var(--text-xs); color: var(--accent-red);">Delete</button>
             </div>
           </div>
 
@@ -772,6 +785,22 @@ Format: {"minimal": {"cpus": N, "memory": N, "disk": N}, ...}`;
   .pill-running .status-dot {
     background: var(--accent-green);
     box-shadow: 0 0 5px var(--accent-green);
+  }
+  .pill-starting {
+    background: rgba(251, 191, 36, 0.12);
+    color: var(--status-starting);
+  }
+  .pill-starting .status-dot {
+    background: var(--status-starting);
+    box-shadow: 0 0 5px var(--status-starting);
+  }
+  .pill-unhealthy {
+    background: rgba(248, 113, 113, 0.12);
+    color: var(--accent-red);
+  }
+  .pill-unhealthy .status-dot {
+    background: var(--accent-red);
+    box-shadow: 0 0 5px var(--accent-red);
   }
   .pill-stopped {
     background: rgba(139, 148, 158, 0.12);

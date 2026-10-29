@@ -135,3 +135,7 @@ export function isEventCooldownActive() {
 export function setEventCooldown(durationMs: number = 3000) {
   dockerState.eventCooldownUntil = Date.now() + durationMs;
 }
+
+export function clearEventCooldown() {
+  dockerState.eventCooldownUntil = 0;
+}

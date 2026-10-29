@@ -1,9 +1,77 @@
 use bollard::query_parameters::{EventsOptions, ListContainersOptions, ListImagesOptions};
 use bollard::Docker;
 use futures_util::stream::StreamExt;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use tauri::{AppHandle, Emitter};
 use tokio::sync::RwLock;
+
+static GLOBAL_DOCKER_STATE: OnceLock<Arc<RwLock<DockerState>>> = OnceLock::new();
+static GLOBAL_APP_HANDLE: OnceLock<AppHandle> = OnceLock::new();
+
+/// Initialize global references to DockerState and AppHandle for lifecycle notifications.
+pub fn init_global_docker_state(state: Arc<RwLock<DockerState>>, app: AppHandle) {
+    let _ = GLOBAL_DOCKER_STATE.set(state);
+    let _ = GLOBAL_APP_HANDLE.set(app);
+}
+
+/// Centralized lifecycle helper called when an instance is stopping or being deleted.
+/// Suppresses watcher reconnection, clears Docker caches, invalidates socket probe cache,
+/// and broadcasts connection-lost and empty state events over both SSE and Tauri IPC.
+pub fn notify_instance_stopping(profile: &str) {
+    crate::path_util::invalidate_probe_cache();
+
+    if let Some(state) = GLOBAL_DOCKER_STATE.get() {
+        match state.try_write() {
+            Ok(mut lock) => {
+                lock.docker = None;
+                lock.containers_cache = vec![];
+                lock.images_cache = vec![];
+                lock.suppressed = true;
+            }
+            Err(_) => {
+                let state_clone = state.clone();
+                tauri::async_runtime::spawn(async move {
+                    let mut lock = state_clone.write().await;
+                    lock.docker = None;
+                    lock.containers_cache = vec![];
+                    lock.images_cache = vec![];
+                    lock.suppressed = true;
+                });
+            }
+        }
+    }
+
+    let payload = serde_json::json!({ "profile": profile });
+    let empty_state = serde_json::json!({ "containers": [], "images": [] });
+    crate::sse::publish_sse_event("docker-connection-lost", &payload);
+    crate::sse::publish_sse_event("docker-state-updated", &empty_state);
+
+    if let Some(app) = GLOBAL_APP_HANDLE.get() {
+        let _ = app.emit("docker-connection-lost", payload);
+        let _ = app.emit("docker-state-updated", empty_state);
+    }
+}
+
+/// Centralized lifecycle helper called when an instance has started or is starting.
+/// Invalidates socket probe cache and unsets the suppressed flag so the watcher can reconnect.
+pub fn notify_instance_started(_profile: &str) {
+    crate::path_util::invalidate_probe_cache();
+
+    if let Some(state) = GLOBAL_DOCKER_STATE.get() {
+        match state.try_write() {
+            Ok(mut lock) => {
+                lock.suppressed = false;
+            }
+            Err(_) => {
+                let state_clone = state.clone();
+                tauri::async_runtime::spawn(async move {
+                    let mut lock = state_clone.write().await;
+                    lock.suppressed = false;
+                });
+            }
+        }
+    }
+}
 
 /// Connect to Docker via the Colima socket.
 /// This is essential because macOS .app bundles don't inherit DOCKER_HOST,
@@ -83,6 +151,7 @@ impl Default for DockerState {
 /// Runs forever: connects → streams events → on disconnect, clears state → retries.
 /// Push-based (no polling) — same approach as OrbStack.
 pub async fn start_docker_watcher(app: AppHandle, state: Arc<RwLock<DockerState>>) {
+    init_global_docker_state(state.clone(), app.clone());
     loop {
         // Check suppression flag — stop/delete in progress, don't reconnect
         {
@@ -163,6 +232,11 @@ pub async fn start_docker_watcher(app: AppHandle, state: Arc<RwLock<DockerState>
         crate::sse::publish_sse_event("docker-reconnected", &serde_json::json!({}));
         let _ = app.emit("docker-reconnected", serde_json::json!({}));
 
+        let (detected_host, detected_profile) = match crate::path_util::detect_docker_host() {
+            Some((h, p)) => (h, p),
+            None => (String::new(), "default".to_string()),
+        };
+
         // Stream Docker events until connection drops
         // Trailing-edge debounce: when events arrive in rapid bursts (e.g., docker stop
         // fires kill→stop→die within ~200ms), wait for the burst to settle before
@@ -170,10 +244,29 @@ pub async fn start_docker_watcher(app: AppHandle, state: Arc<RwLock<DockerState>
         // intermediate transition state.
         let mut stream = docker.events(Some(EventsOptions::default()));
         let debounce_ms: u64 = 500; // wait 500ms after last event before fetching
+        let mut heartbeat = tokio::time::interval(std::time::Duration::from_secs(5));
+        heartbeat.tick().await; // Consume initial immediate tick
+
+        let mut connection_lost_reason: Option<String> = None;
 
         loop {
-            // Wait for the next event
+            // Wait for the next event or periodic 5s ping heartbeat
             let event = tokio::select! {
+                _ = heartbeat.tick() => {
+                    let ping_res = tokio::time::timeout(std::time::Duration::from_secs(2), docker.ping()).await;
+                    let is_ok = matches!(&ping_res, Ok(Ok(_)));
+                    if !is_ok {
+                        let reason = match ping_res {
+                            Err(_) => "docker.ping() timed out after 2s".to_string(),
+                            Ok(Err(e)) => format!("docker.ping() failed: {}", e),
+                            _ => "docker ping failed".to_string(),
+                        };
+                        eprintln!("[DockerWatcher] Heartbeat ping failed ({}) — dropping connection", reason);
+                        connection_lost_reason = Some(reason);
+                        break;
+                    }
+                    continue;
+                }
                 ev = stream.next() => ev,
             };
 
@@ -208,12 +301,14 @@ pub async fn start_docker_watcher(app: AppHandle, state: Arc<RwLock<DockerState>
                                 // Another event within the window — keep draining
                                 continue;
                             }
-                            Ok(Some(Err(_))) => {
+                            Ok(Some(Err(e))) => {
                                 // Stream error during drain — break to outer error handling
+                                connection_lost_reason = Some(format!("event stream error during drain: {}", e));
                                 break;
                             }
                             Ok(None) => {
                                 // Stream ended during drain
+                                connection_lost_reason = Some("event stream ended during drain".to_string());
                                 break;
                             }
                             Err(_) => {
@@ -223,28 +318,39 @@ pub async fn start_docker_watcher(app: AppHandle, state: Arc<RwLock<DockerState>
                             }
                         }
                     }
-                    // Fetch and emit the settled state
+                    if connection_lost_reason.is_some() {
+                        break;
+                    }
+                    // Fetch and emit the settled state to BOTH Tauri IPC and SSE
                     if let Ok(data) = update_cache(&docker, &state).await {
+                        crate::sse::publish_sse_event("docker-state-updated", &data);
                         let _ = app.emit("docker-state-updated", data);
                     }
                 }
-                Some(Err(_)) => {
+                Some(Err(e)) => {
                     // Event stream error — break to reconnect logic
+                    connection_lost_reason = Some(format!("event stream error: {}", e));
                     break;
                 }
                 None => {
                     // Stream ended
+                    connection_lost_reason = Some("event stream ended".to_string());
                     break;
                 }
             }
         }
 
-        // Stream ended — check if Docker is actually gone or just a transient stream error
-        let ping_ok = matches!(
-            tokio::time::timeout(std::time::Duration::from_secs(5), docker.ping()).await,
-            Ok(Ok(_))
-        );
-        if ping_ok {
+        // Stream ended or ping failed — check if Docker is actually gone or just a transient stream error
+        let is_transient = if connection_lost_reason.as_deref().is_some_and(|r| r.starts_with("docker.ping()")) {
+            false
+        } else {
+            matches!(
+                tokio::time::timeout(std::time::Duration::from_secs(2), docker.ping()).await,
+                Ok(Ok(_))
+            )
+        };
+
+        if is_transient {
             // Docker is still alive — transient stream error.
             // Don't clear state, just reconnect the event stream.
             eprintln!("[DockerWatcher] Event stream interrupted but Docker is alive — reconnecting stream");
@@ -259,13 +365,23 @@ pub async fn start_docker_watcher(app: AppHandle, state: Arc<RwLock<DockerState>
             lock.containers_cache = vec![];
             lock.images_cache = vec![];
         }
-        // Emit specific connection-lost event so frontend can clear ALL Docker state.
-        // Browser mode needs this as much as Tauri does — more, since a stale
-        // container list there is indistinguishable from a live one.
+        crate::path_util::invalidate_probe_cache();
+
+        let (host, profile) = match crate::path_util::detect_docker_host() {
+            Some((h, p)) => (h, p),
+            None => (detected_host.clone(), detected_profile.clone()),
+        };
+        let reason = connection_lost_reason.unwrap_or_else(|| "Docker daemon connection lost".to_string());
+        let lost_payload = serde_json::json!({
+            "host": host,
+            "profile": profile,
+            "reason": reason,
+        });
         let empty = serde_json::json!({ "containers": [], "images": [] });
-        crate::sse::publish_sse_event("docker-connection-lost", &serde_json::json!({}));
+
+        crate::sse::publish_sse_event("docker-connection-lost", &lost_payload);
         crate::sse::publish_sse_event("docker-state-updated", &empty);
-        let _ = app.emit("docker-connection-lost", serde_json::json!({}));
+        let _ = app.emit("docker-connection-lost", lost_payload);
         let _ = app.emit("docker-state-updated", empty);
 
         eprintln!("[DockerWatcher] Connection lost — will retry in 2s");
@@ -352,7 +468,7 @@ pub fn map_images(images: &[bollard::models::ImageSummary]) -> Vec<serde_json::V
     mapped
 }
 
-async fn update_cache(
+pub(crate) async fn update_cache(
     docker: &Docker,
     state: &Arc<RwLock<DockerState>>,
 ) -> Result<serde_json::Value, String> {
@@ -368,7 +484,7 @@ async fn update_cache(
         Ok(Ok(c)) => c,
         Ok(Err(e)) => {
             eprintln!("[DockerWatcher] list_containers error: {}", e);
-            vec![]
+            return Err(format!("update_cache: list_containers error: {}", e));
         }
         Err(_) => {
             return Err("update_cache: list_containers timed out".to_string());
@@ -387,7 +503,7 @@ async fn update_cache(
         Ok(Ok(i)) => i,
         Ok(Err(e)) => {
             eprintln!("[DockerWatcher] list_images error: {}", e);
-            vec![]
+            return Err(format!("update_cache: list_images error: {}", e));
         }
         Err(_) => {
             return Err("update_cache: list_images timed out".to_string());
@@ -405,4 +521,87 @@ async fn update_cache(
         "containers": mapped_containers,
         "images": mapped_images
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn docker_state_initializes_empty_when_no_daemon() {
+        let state = DockerState {
+            docker: None,
+            containers_cache: vec![],
+            images_cache: vec![],
+            suppressed: false,
+            containerd_warned: false,
+        };
+        assert!(state.docker().is_err());
+        assert!(state.containers_cache.is_empty());
+        assert!(state.images_cache.is_empty());
+    }
+
+    #[test]
+    fn map_containers_formats_ports_and_labels_consistently() {
+        let summary: bollard::models::ContainerSummary = serde_json::from_value(serde_json::json!({
+            "Id": "1234567890abcdef",
+            "Names": ["/my-app"],
+            "Image": "nginx:latest",
+            "Status": "Up 2 hours",
+            "State": "running",
+            "Ports": [{
+                "IP": "0.0.0.0",
+                "PrivatePort": 80,
+                "PublicPort": 8080,
+                "Type": "tcp"
+            }],
+            "Created": 1700000000,
+            "SizeRw": 1024,
+            "Command": "nginx -g 'daemon off;'",
+            "Labels": {
+                "com.docker.compose.project": "demo"
+            }
+        })).expect("deserialize ContainerSummary");
+
+        let mapped = map_containers(&[summary]);
+        assert_eq!(mapped.len(), 1);
+        assert_eq!(mapped[0]["Id"], "1234567890abcdef");
+        assert_eq!(mapped[0]["Names"], "my-app");
+        assert_eq!(mapped[0]["Ports"], "0.0.0.0:8080->80/tcp");
+        assert_eq!(mapped[0]["Labels"]["com.docker.compose.project"], "demo");
+    }
+
+    #[test]
+    fn map_images_strips_sha_prefix_and_handles_tags() {
+        let img = bollard::models::ImageSummary {
+            id: "sha256:abcdef1234567890".to_string(),
+            repo_tags: vec!["alpine:3.18".to_string()],
+            size: 5000000,
+            created: 1700000000,
+            ..Default::default()
+        };
+
+        let mapped = map_images(&[img]);
+        assert_eq!(mapped.len(), 1);
+        assert_eq!(mapped[0]["Id"], "abcdef1234567890");
+        assert_eq!(mapped[0]["Repository"], "alpine");
+        assert_eq!(mapped[0]["Tag"], "3.18");
+    }
+
+    #[tokio::test]
+    async fn update_cache_fails_with_err_when_disconnected() {
+        if let Ok(docker) = Docker::connect_with_unix("/tmp/nonexistent_mock_socket.sock", 1, bollard::API_DEFAULT_VERSION) {
+            let state = Arc::new(RwLock::new(DockerState {
+                docker: Some(docker.clone()),
+                containers_cache: vec![serde_json::json!({"Id": "prev"})],
+                images_cache: vec![],
+                suppressed: false,
+                containerd_warned: false,
+            }));
+            let res = update_cache(&docker, &state).await;
+            assert!(res.is_err(), "update_cache must return Err on failure rather than Ok with empty vectors");
+            let lock = state.read().await;
+            assert_eq!(lock.containers_cache.len(), 1, "Cache must not be clobbered on failure");
+        }
+    }
 }

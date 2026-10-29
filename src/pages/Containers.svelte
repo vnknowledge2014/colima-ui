@@ -7,9 +7,9 @@
   import * as Icons from "../components/Icons.svelte";
   import { viewInTopology, consumeFocus } from "../lib/topology-link";
 
-  import { dockerState } from "../store.svelte";
+  import { dockerState, setEventCooldown, clearEventCooldown } from "../store.svelte";
   import { getCurrentPresetForInstance, getContainerPresetMap, PRESET_LABELS, PRESET_COLORS } from "../lib/presetStateManager";
-  import { setEventCooldown } from "../store.svelte";
+  import { refreshManual } from "../lib/dataPoller";
   import { blockingCapability, capabilityNotice } from "../store/capabilities.svelte";
   import { groupContainersByProject, type ContainerGroup } from "../lib/composeGrouping";
   import { withErrorReport } from "../lib/errorReporter";
@@ -81,7 +81,8 @@
     delete next[id];
     rowErrors = next;
   }
-  let selectedContainer = $state<DockerContainer | null>(null);
+  let selectedContainerId = $state<string | null>(null);
+  const selectedContainer = $derived(selectedContainerId ? dockerState.containers.find((c) => c.Id === selectedContainerId) ?? null : null);
   let showRunModal = $state(false);
   let runtimeName = $state("docker");
   let selected = $state<Set<string>>(new Set());
@@ -119,7 +120,7 @@
       const focus = consumeFocus("containers");
       if (!focus) return;
       const match = dockerState.containers.find((c) => c.Id === focus || c.Id.startsWith(focus));
-      if (match) selectedContainer = match;
+      if (match) selectedContainerId = match.Id;
     });
     sysMethods.getRuntimeInfo().then(r => runtimeName = r).catch(() => {});
 
@@ -172,6 +173,8 @@
               } catch (e) {
                 reportError(e, { action: `Remove container '${name}'` });
                 setRowError(id, e);
+                clearEventCooldown();
+                await Promise.allSettled([refreshContainers(), refreshManual()]);
                 reject(e);
               } finally {
                 actionLoading = null;
@@ -191,6 +194,8 @@
     } catch (e) {
       reportError(e, { action: `${action} container '${name}'` });
       setRowError(id, e);
+      clearEventCooldown();
+      await Promise.allSettled([refreshContainers(), refreshManual()]);
     } finally {
       if (action !== "remove") actionLoading = null;
     }
@@ -245,7 +250,10 @@
         });
         const failed = targets.length - ok;
         if (ok > 0) globalToast("success", `${spec.past} ${ok} container(s)`);
-        if (failed > 0) globalToast("error", `${failed} container(s) failed — see the row for details`);
+        if (failed > 0) {
+          clearEventCooldown();
+          globalToast("error", `${failed} container(s) failed — see the row for details`);
+        }
         selected = new Set();
         batchLoading = false;
         refreshContainers();
@@ -325,8 +333,12 @@
       );
       if (result !== undefined) ok++;
     }
+    const failed = targets.length - ok;
     if (ok > 0) {
       globalToast("success", `${action === "stop" ? "Stopped" : "Started"} ${ok} container(s) in ${group.project}`);
+    }
+    if (failed > 0) {
+      clearEventCooldown();
     }
     batchLoading = false;
     refreshContainers();
@@ -596,7 +608,7 @@
           {@const isRunning = c.State === "running"}
           {@const isPaused = c.Status.toLowerCase().includes("paused")}
           {@const isLoading = actionLoading?.startsWith(c.Id)}
-          <div role="button" tabindex="0" class="vtable-row {selected.has(c.Id) ? 'selected' : ''}" style="display: grid; grid-template-columns: var(--cols); opacity: {isLoading ? 0.6 : 1};" onkeydown={(e) => e.key === 'Enter' && e.currentTarget.click()} onclick={() => selectedContainer = c}>
+          <div role="button" tabindex="0" class="vtable-row {selected.has(c.Id) ? 'selected' : ''}" style="display: grid; grid-template-columns: var(--cols); opacity: {isLoading ? 0.6 : 1};" onkeydown={(e) => e.key === 'Enter' && e.currentTarget.click()} onclick={() => selectedContainerId = c.Id}>
             <div role="button" tabindex="0" class="vtable-cell" style="text-align: center;" onkeydown={(e) => e.key === 'Enter' && e.currentTarget.click()} onclick={(e) => e.stopPropagation()}>
               <input type="checkbox" class="checkbox" checked={selected.has(c.Id)} onchange={() => toggleSelect(c.Id)} />
             </div>
@@ -682,7 +694,7 @@
 
 {#if selectedContainer}
   {@const isRunning = selectedContainer.State === "running"}
-  <div role="button" tabindex="0" class="modal-overlay" onkeydown={(e) => e.key === 'Enter' && e.currentTarget.click()} onclick={() => selectedContainer = null}>
+  <div role="button" tabindex="0" class="modal-overlay" onkeydown={(e) => e.key === 'Enter' && e.currentTarget.click()} onclick={() => selectedContainerId = null}>
     <div role="button" tabindex="0" class="modal" onkeydown={(e) => e.key === 'Enter' && e.currentTarget.click()} onclick={(e) => e.stopPropagation()} style="width: min(960px, 95vw); max-height: 85vh;">
       <div class="modal-header">
         <div>
@@ -699,7 +711,7 @@
           {:else}
             <button class="btn btn-primary" style="font-size: var(--text-xs);" onclick={() => handleAction(selectedContainer!.Id, selectedContainer!.Names, "start")}>Start</button>
           {/if}
-          <button class="btn btn-icon btn-ghost" onclick={() => selectedContainer = null}>X</button>
+          <button class="btn btn-icon btn-ghost" onclick={() => selectedContainerId = null}>X</button>
         </div>
       </div>
 
@@ -784,7 +796,7 @@
       {/if}
 
       <div class="modal-footer">
-        <button class="btn btn-primary" onclick={() => selectedContainer = null}>Close</button>
+        <button class="btn btn-primary" onclick={() => selectedContainerId = null}>Close</button>
       </div>
     </div>
   </div>

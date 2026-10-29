@@ -1,5 +1,6 @@
 import { call } from "./client";
 import type { DockerContainer, DockerImage } from "./types";
+import { normalizeContainer } from "../normalizers";
 
 // ===== Docker API =====
 
@@ -8,18 +9,8 @@ export const dockerApi = {
     const raw = await call<unknown>("list_containers", { all }, "GET", "/api/containers", { all: String(all) });
     if (!raw) return [];
     const items = Array.isArray(raw) ? raw : [];
-    // Normalize field names for Tauri IPC compatibility
-    return items.map((v: Record<string, unknown>) => ({
-      Id: String(v.Id || v.id || v.ID || ""),
-      Names: String(v.Names || v.names || ""),
-      Image: String(v.Image || v.image || ""),
-      Status: String(v.Status || v.status || ""),
-      State: String(v.State || v.state || ""),
-      Ports: String(v.Ports || v.ports || ""),
-      CreatedAt: String(v.CreatedAt || v.created_at || v.createdAt || ""),
-      Size: String(v.Size || v.size || ""),
-      Command: String(v.Command || v.command || ""),
-    }));
+    // Normalize field names for Tauri IPC compatibility while preserving Labels
+    return items.map((v) => normalizeContainer(v as Record<string, unknown>));
   },
 
   startContainer: (containerId: string) =>

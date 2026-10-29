@@ -8,6 +8,9 @@
   import * as Icons from "../components/Icons.svelte";
   import { viewInTopology, consumeFocus } from "../lib/topology-link";
   import { setVisibleInterval } from "../lib/visibleInterval";
+  import { refreshManual } from "../lib/dataPoller";
+  import { clearEventCooldown, setEventCooldown } from "../store.svelte";
+  import { parseComposeStatus } from "../lib/composeGrouping";
 
   let projects = $state<ComposeProject[]>([]);
   let loading = $state(true);
@@ -42,10 +45,14 @@
     return setVisibleInterval(fetchProjects, 15000);
   });
 
-  async function handleAction(name: string, action: "down" | "restart" | "stop") {
+  async function handleAction(name: string, action: "down" | "restart" | "stop" | "start") {
     actionLoading = `${name}-${action}`;
+    setEventCooldown();
     try {
-      if (action === "down") {
+      if (action === "start") {
+        await composeApi.start(name);
+        globalToast("success", `Project '${name}' started`);
+      } else if (action === "down") {
         await composeApi.down(name);
         globalToast("success", `Project '${name}' stopped and removed`);
       } else if (action === "stop") {
@@ -55,11 +62,12 @@
         await composeApi.restart(name);
         globalToast("success", `Project '${name}' restarted`);
       }
-      await fetchProjects();
     } catch (e) {
+      clearEventCooldown();
       globalToast("error", String(e));
     } finally {
       actionLoading = null;
+      await Promise.allSettled([fetchProjects(), refreshManual()]);
     }
   }
 
@@ -96,13 +104,6 @@
     }
   }
 
-  function parseStatus(status: string) {
-    if (!status) return { running: 0, display: "" };
-    const match = status.match(/running\((\d+)\)/);
-    const running = match ? parseInt(match[1]) : 0;
-    return { running, display: status };
-  }
-
 </script>
 
 <div class="content-header" data-tauri-drag-region>
@@ -137,7 +138,7 @@
     {#if projects.length > 0}
       <div class="resource-card-list">
         {#each projects as p (p.Name)}
-          {@const { running } = parseStatus(p.Status)}
+          {@const { running } = parseComposeStatus(p.Status)}
           {@const isLoading = actionLoading?.startsWith(p.Name)}
           {@const hasRunning = running > 0}
           <div role="button" tabindex="0" class="resource-card" onkeydown={(e) => e.key === 'Enter' && e.currentTarget.click()} onclick={() => openProject(p)} style="cursor: pointer; opacity: {isLoading ? 0.6 : 1};">
@@ -167,12 +168,19 @@
                     label: t('common.view_in_topology', { default: 'View in topology' }),
                     onclick: () => viewInTopology("project", p.Name),
                   },
-                  {
-                    icon: Icons.Stop,
-                    label: t('compose.stop', { default: 'Stop' }),
-                    disabled: !!isLoading,
-                    onclick: () => handleAction(p.Name, "stop"),
-                  },
+                  ...(running === 0
+                    ? [{
+                        icon: Icons.Play,
+                        label: t('compose.start', { default: 'Start' }),
+                        disabled: !!isLoading,
+                        onclick: () => handleAction(p.Name, "start"),
+                      }]
+                    : [{
+                        icon: Icons.Stop,
+                        label: t('compose.stop', { default: 'Stop' }),
+                        disabled: !!isLoading,
+                        onclick: () => handleAction(p.Name, "stop"),
+                      }]),
                   {
                     icon: Icons.Refresh,
                     label: t('compose.restart', { default: 'Restart' }),

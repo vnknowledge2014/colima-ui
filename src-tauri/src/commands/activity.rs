@@ -300,7 +300,22 @@ pub struct ActivityFilter {
 }
 
 pub fn db_path() -> PathBuf {
-    crate::path_util::app_data_dir().join("activity.db")
+    #[cfg(test)]
+    {
+        std::env::temp_dir().join(format!("cui_test_activity_{}.db", std::process::id()))
+    }
+    #[cfg(not(test))]
+    {
+        if std::env::var_os("RUST_TEST_THREADS").is_some()
+            || std::env::var("CARGO_TARGET_TMPDIR").is_ok()
+            || std::env::var("TEST_DB_PATH").is_ok()
+            || std::env::current_exe()
+                .is_ok_and(|p| p.to_string_lossy().contains("deps/"))
+        {
+            return std::env::temp_dir().join(format!("cui_test_activity_{}.db", std::process::id()));
+        }
+        crate::path_util::app_data_dir().join("activity.db")
+    }
 }
 
 /// The one connection this store writes through.
@@ -837,5 +852,12 @@ mod tests {
             elapsed < std::time::Duration::from_secs(1),
             "1000 records took {elapsed:?}; recording sits on every user action"
         );
+    }
+
+    #[test]
+    fn db_path_in_test_is_isolated_to_temp_dir() {
+        let path = db_path();
+        assert!(path.starts_with(std::env::temp_dir()));
+        assert!(!path.starts_with(crate::path_util::app_data_dir()));
     }
 }

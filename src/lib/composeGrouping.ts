@@ -40,6 +40,17 @@ export function serviceOf(container: DockerContainer): string {
   return typeof value === "string" ? value.trim() : "";
 }
 
+/**
+ * Parses a Compose project status string (e.g. "running(2)", "exited(1)")
+ * and extracts the running container count.
+ */
+export function parseComposeStatus(status: string): { running: number; display: string } {
+  if (!status) return { running: 0, display: "" };
+  const match = status.match(/running\((\d+)\)/);
+  const running = match ? parseInt(match[1]) : 0;
+  return { running, display: status };
+}
+
 function isRunning(container: DockerContainer): boolean {
   return (container.State || "").toLowerCase() === "running";
 }
