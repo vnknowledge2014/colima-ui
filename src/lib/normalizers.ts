@@ -8,6 +8,44 @@
 
 import type { DockerContainer, DockerImage, DockerVolume, DockerNetwork } from "./api";
 
+/**
+ * 1 GiB in bytes (1024 * 1024 * 1024 = 1_073_741_824).
+ * Matches Rust backend `colima::ONE_GIB_BYTES`.
+ */
+export const ONE_GIB_BYTES = 1_073_741_824;
+
+/**
+ * Normalizes a resource value (memory or disk) that may be supplied either in
+ * raw bytes (>= 1 GiB) or directly in GiB integers (< 1 GiB).
+ * If undefined, null, or <= 0, returns the provided fallback value.
+ */
+export function normalizeResourceToGiB(
+  val?: number | string | null,
+  fallback = 2
+): number {
+  if (val === undefined || val === null || val === "") return fallback;
+  const num = typeof val === "number" ? val : Number(val);
+  if (isNaN(num) || num <= 0) return fallback;
+  if (num >= ONE_GIB_BYTES) {
+    return Math.max(1, Math.round(num / ONE_GIB_BYTES));
+  }
+  return Math.round(num);
+}
+
+/**
+ * Normalizes an instance memory allocation to GiB integers (fallback: 2 GiB).
+ */
+export function normalizeMemoryToGiB(val?: number | string | null): number {
+  return normalizeResourceToGiB(val, 2);
+}
+
+/**
+ * Normalizes an instance disk allocation to GiB integers (fallback: 60 GiB).
+ */
+export function normalizeDiskToGiB(val?: number | string | null): number {
+  return normalizeResourceToGiB(val, 60);
+}
+
 /** Normalize a raw container object into a consistent DockerContainer shape. */
 export function normalizeContainer(v: Record<string, unknown>): DockerContainer {
   return {

@@ -122,7 +122,26 @@
       };
     }
 
+    const unhealthy = instances.filter((i) => i.status?.toLowerCase() === "unhealthy").length;
+    const starting = instances.filter((i) => i.status?.toLowerCase() === "starting").length;
     const running = instances.filter((i) => i.status?.toLowerCase() === "running").length;
+
+    if (unhealthy > 0) {
+      return {
+        tone: "unhealthy" as const,
+        label: `Colima ${version}`,
+        detail: t('sidebar.colima_unhealthy', { default: "{count} unhealthy", count: unhealthy }),
+        target: "instances",
+      };
+    }
+    if (starting > 0) {
+      return {
+        tone: "starting" as const,
+        label: `Colima ${version}`,
+        detail: t('sidebar.colima_starting', { default: "{count} starting", count: starting }),
+        target: "instances",
+      };
+    }
     if (running > 0) {
       return {
         tone: "on" as const,
@@ -254,9 +273,11 @@
     background: var(--accent-green, #3fb950);
     box-shadow: 0 0 0 3px rgba(63, 185, 80, 0.15);
   }
+  .footer-status-starting .footer-dot,
   .footer-status-idle .footer-dot {
     background: var(--accent-yellow, #d29922);
   }
+  .footer-status-unhealthy .footer-dot,
   .footer-status-off .footer-dot {
     background: var(--accent-red, #f85149);
   }

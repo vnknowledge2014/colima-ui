@@ -109,6 +109,8 @@ export const composeApi = {
   },
   up: (projectDir = "", detach = true) =>
     call<string>("compose_up", { projectDir, detach }, "POST", "/api/compose/up", undefined, { projectDir, detach }),
+  start: (projectName: string) =>
+    call<string>("compose_start", { projectName }, "POST", "/api/compose/start", undefined, { projectName }),
   down: (projectName: string) =>
     call<string>("compose_down", { projectName }, "POST", "/api/compose/down", undefined, { projectName }),
   restart: (projectName: string) =>

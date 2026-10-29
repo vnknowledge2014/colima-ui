@@ -562,17 +562,22 @@ pub fn start_resource_saver_daemon(state: Arc<RwLock<ResourceSaverState>>) {
             
             let mut is_idle = true;
             if let Ok(output) = cmd.output() {
-                let stdout = String::from_utf8_lossy(&output.stdout);
-                let mut total_cpu = 0.0;
-                for line in stdout.lines() {
-                    let clean = line.replace("%", "").trim().to_string();
-                    if let Ok(val) = clean.parse::<f64>() {
-                        total_cpu += val;
-                    }
-                }
-                // If total CPU > 1%, it's not idle
-                if total_cpu > 1.0 {
+                if !output.status.success() {
+                    // If docker command returns non-zero, do NOT treat the system as idle
                     is_idle = false;
+                } else {
+                    let stdout = String::from_utf8_lossy(&output.stdout);
+                    let mut total_cpu = 0.0;
+                    for line in stdout.lines() {
+                        let clean = line.replace("%", "").trim().to_string();
+                        if let Ok(val) = clean.parse::<f64>() {
+                            total_cpu += val;
+                        }
+                    }
+                    // If total CPU > 1%, it's not idle
+                    if total_cpu > 1.0 {
+                        is_idle = false;
+                    }
                 }
             } else {
                 // If docker fails, assume not idle to be safe, or assume colima is already off
@@ -583,6 +588,7 @@ pub fn start_resource_saver_daemon(state: Arc<RwLock<ResourceSaverState>>) {
                 s.idle_minutes_count += 1;
                 if s.idle_minutes_count >= s.idle_minutes_threshold {
                     // Trigger auto-pause
+                    crate::docker_state::notify_instance_stopping("default");
                     let colima = crate::path_util::resolve_binary("colima");
                     let mut stop_cmd = std::process::Command::new(&colima);
                     stop_cmd.arg("stop");

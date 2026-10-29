@@ -61,7 +61,7 @@ pub async fn compose_up(project_dir: String, detach: bool) -> Result<String, cra
         args.push("-d".to_string());
     }
 
-    let output = runtime::run(args, runtime::DEFAULT_TIMEOUT).await?;
+    let output = runtime::run(args, runtime::LONG_OP_TIMEOUT).await?;
 
     if !output.status.success() {
         return Err(format!(
@@ -79,7 +79,7 @@ pub async fn compose_up(project_dir: String, detach: bool) -> Result<String, cra
 #[tauri::command]
 pub async fn compose_down(project_name: String) -> Result<String, crate::error::ColimaError> {
     async move {
-    let output = runtime::run(vec!["compose".into(), "-p".into(), project_name.clone(), "down".into()], runtime::DEFAULT_TIMEOUT).await?;
+    let output = runtime::run(vec!["compose".into(), "-p".into(), project_name.clone(), "down".into()], runtime::LONG_OP_TIMEOUT).await?;
 
     if !output.status.success() {
         return Err(format!(
@@ -97,7 +97,7 @@ pub async fn compose_down(project_name: String) -> Result<String, crate::error::
 #[tauri::command]
 pub async fn compose_restart(project_name: String) -> Result<String, crate::error::ColimaError> {
     async move {
-    let output = runtime::run(vec!["compose".into(), "-p".into(), project_name.clone(), "restart".into()], runtime::DEFAULT_TIMEOUT).await?;
+    let output = runtime::run(vec!["compose".into(), "-p".into(), project_name.clone(), "restart".into()], runtime::LONG_OP_TIMEOUT).await?;
 
     if !output.status.success() {
         return Err(format!(
@@ -115,7 +115,7 @@ pub async fn compose_restart(project_name: String) -> Result<String, crate::erro
 #[tauri::command]
 pub async fn compose_stop(project_name: String) -> Result<String, crate::error::ColimaError> {
     async move {
-    let output = runtime::run(vec!["compose".into(), "-p".into(), project_name.clone(), "stop".into()], runtime::DEFAULT_TIMEOUT).await?;
+    let output = runtime::run(vec!["compose".into(), "-p".into(), project_name.clone(), "stop".into()], runtime::LONG_OP_TIMEOUT).await?;
 
     if !output.status.success() {
         return Err(format!(
@@ -125,6 +125,24 @@ pub async fn compose_stop(project_name: String) -> Result<String, crate::error::
     }
 
     Ok(format!("Compose project '{}' stopped", project_name))
+    }
+    .await.map_err(|e: String| crate::error::ColimaError::from(e))
+}
+
+/// Start an existing stopped Docker Compose project
+#[tauri::command]
+pub async fn compose_start(project_name: String) -> Result<String, crate::error::ColimaError> {
+    async move {
+    let output = runtime::run(vec!["compose".into(), "-p".into(), project_name.clone(), "start".into()], runtime::LONG_OP_TIMEOUT).await?;
+
+    if !output.status.success() {
+        return Err(format!(
+            "docker compose start failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        ));
+    }
+
+    Ok(format!("Compose project '{}' started", project_name))
     }
     .await.map_err(|e: String| crate::error::ColimaError::from(e))
 }

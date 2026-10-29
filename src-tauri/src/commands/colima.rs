@@ -40,14 +40,33 @@ pub struct InstanceStatus {
     pub address: String,
 }
 
+pub const ONE_GIB_BYTES: u64 = 1_073_741_824;
+
+/// Normalizes byte amounts to GiB integers.
+/// If `val >= 1 GiB` (1_073_741_824 bytes), converts to GiB integer (`val / 1_073_741_824`, minimum 1 GiB).
+/// Otherwise returns `val` as-is.
+pub fn normalize_bytes_to_gib(val: u64) -> u64 {
+    if val >= ONE_GIB_BYTES {
+        std::cmp::max(1, val / ONE_GIB_BYTES)
+    } else {
+        val
+    }
+}
+
 /// Start instance configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct StartConfig {
+    #[serde(default)]
     pub profile: String,
+    #[serde(default)]
     pub runtime: String,
+    #[serde(default)]
     pub cpus: u32,
-    pub memory: u32,
-    pub disk: u32,
+    #[serde(default)]
+    pub memory: u64,
+    #[serde(default)]
+    pub disk: u64,
+    #[serde(default)]
     pub vm_type: String,
     #[serde(default)]
     pub kubernetes: bool,
@@ -63,6 +82,13 @@ pub struct StartConfig {
     pub dns: Vec<String>,
     #[serde(default)]
     pub network_address: bool,
+}
+
+impl StartConfig {
+    pub fn normalize_resources(&mut self) {
+        self.memory = normalize_bytes_to_gib(self.memory);
+        self.disk = normalize_bytes_to_gib(self.disk);
+    }
 }
 
 fn colima_cmd() -> Command {
@@ -112,10 +138,12 @@ fn profile_config_exists(profile: &str) -> bool {
 /// are the only information that exists. After that the file wins.
 /// `start_instance_saved` takes the same position for the tray.
 #[tauri::command]
-pub async fn start_instance(config: StartConfig) -> Result<String, crate::error::ColimaError> {
+pub async fn start_instance(mut config: StartConfig) -> Result<String, crate::error::ColimaError> {
     crate::validation::ensure_valid_profile(&config.profile)
         .map_err(crate::error::ColimaError::validation)?;
+    config.normalize_resources();
     let is_first_start = !profile_config_exists(&config.profile);
+    crate::docker_state::notify_instance_started(&config.profile);
     // The block below takes ownership, so what the record needs is kept here.
     let logged_profile = config.profile.clone();
     let result = async move {
@@ -222,6 +250,7 @@ pub async fn start_instance(config: StartConfig) -> Result<String, crate::error:
 /// configured with. Passing defaults here would silently resize the user's VM.
 pub async fn start_instance_cli(profile: String) -> Result<String, crate::error::ColimaError> {
     crate::validation::ensure_valid_profile(&profile).map_err(crate::error::ColimaError::validation)?;
+    crate::docker_state::notify_instance_started(&profile);
     tokio::task::spawn_blocking(move || {
         let mut args = vec!["start".to_string()];
         if profile != "default" && !profile.is_empty() {
@@ -250,6 +279,7 @@ pub async fn start_instance_cli(profile: String) -> Result<String, crate::error:
 /// Used by HTTP route handlers which don't have access to Tauri managed state.
 pub async fn stop_instance_cli(profile: String, force: bool) -> Result<String, crate::error::ColimaError> {
     crate::validation::ensure_valid_profile(&profile).map_err(crate::error::ColimaError::validation)?;
+    crate::docker_state::notify_instance_stopping(&profile);
     tokio::task::spawn_blocking(move || {
         let mut args = vec!["stop".to_string()];
         if profile != "default" && !profile.is_empty() {
@@ -281,6 +311,7 @@ pub async fn stop_instance_cli(profile: String, force: bool) -> Result<String, c
 /// Used by HTTP route handlers which don't have access to Tauri managed state.
 pub async fn delete_instance_cli(profile: String, force: bool) -> Result<String, crate::error::ColimaError> {
     crate::validation::ensure_valid_profile(&profile).map_err(crate::error::ColimaError::validation)?;
+    crate::docker_state::notify_instance_stopping(&profile);
     tokio::task::spawn_blocking(move || {
         let mut args = vec!["delete".to_string()];
         if profile != "default" && !profile.is_empty() {
@@ -312,6 +343,7 @@ pub async fn delete_instance_cli(profile: String, force: bool) -> Result<String,
 #[tauri::command]
 pub async fn stop_instance(     app: tauri::AppHandle,     docker_state: tauri::State<'_, std::sync::Arc<tokio::sync::RwLock<crate::docker_state::DockerState>>>,     profile: String,     force: bool, ) -> Result<String, crate::error::ColimaError> {
     crate::validation::ensure_valid_profile(&profile).map_err(crate::error::ColimaError::validation)?;
+    crate::docker_state::notify_instance_stopping(&profile);
     // The block below takes ownership, so what the record needs is kept here.
     let logged_profile = profile.clone();
     let result = async move {
@@ -382,6 +414,7 @@ pub async fn stop_instance(     app: tauri::AppHandle,     docker_state: tauri::
 #[tauri::command]
 pub async fn delete_instance(     app: tauri::AppHandle,     docker_state: tauri::State<'_, std::sync::Arc<tokio::sync::RwLock<crate::docker_state::DockerState>>>,     profile: String,     force: bool, ) -> Result<String, crate::error::ColimaError> {
     crate::validation::ensure_valid_profile(&profile).map_err(crate::error::ColimaError::validation)?;
+    crate::docker_state::notify_instance_stopping(&profile);
     // The block below takes ownership, so what the record needs is kept here.
     let logged_profile = profile.clone();
     let result = async move {
@@ -727,4 +760,60 @@ pub async fn create_worker_node(master_profile: String, worker_profile: String, 
     .map_err(|e| format!("Task join error: {}", e))?
     }
     .await.map_err(|e: String| crate::error::ColimaError::from(e))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn start_config_deserialization_partial_payload() {
+        let json_data = r#"{"profile": "default"}"#;
+        let config: StartConfig = serde_json::from_str(json_data).expect("Should deserialize partial payload");
+        assert_eq!(config.profile, "default");
+        assert_eq!(config.runtime, "");
+        assert_eq!(config.cpus, 0);
+        assert_eq!(config.memory, 0);
+        assert_eq!(config.disk, 0);
+        assert_eq!(config.vm_type, "");
+        assert!(!config.kubernetes);
+        assert_eq!(config.mounts, Vec::<String>::new());
+    }
+
+    #[test]
+    fn start_config_deserialization_empty_payload() {
+        let json_data = r#"{}"#;
+        let config: StartConfig = serde_json::from_str(json_data).expect("Should deserialize empty payload");
+        assert_eq!(config.profile, "");
+        assert_eq!(config.memory, 0);
+        assert_eq!(config.disk, 0);
+    }
+
+    #[test]
+    fn start_config_deserialization_with_byte_values() {
+        let json_data = r#"{
+            "profile": "dev",
+            "cpus": 4,
+            "memory": 8589934592,
+            "disk": 64424509440
+        }"#;
+        let mut config: StartConfig = serde_json::from_str(json_data).expect("Should deserialize u64 byte values");
+        assert_eq!(config.memory, 8_589_934_592);
+        assert_eq!(config.disk, 64_424_509_440);
+
+        config.normalize_resources();
+        assert_eq!(config.memory, 8);
+        assert_eq!(config.disk, 60);
+    }
+
+    #[test]
+    fn normalize_bytes_to_gib_cases() {
+        assert_eq!(normalize_bytes_to_gib(0), 0);
+        assert_eq!(normalize_bytes_to_gib(2), 2);
+        assert_eq!(normalize_bytes_to_gib(60), 60);
+        assert_eq!(normalize_bytes_to_gib(1_073_741_824), 1); // 1 GiB exactly
+        assert_eq!(normalize_bytes_to_gib(1_500_000_000), 1); // 1.4 GiB clamps min 1 GiB
+        assert_eq!(normalize_bytes_to_gib(8_589_934_592), 8); // 8 GiB
+        assert_eq!(normalize_bytes_to_gib(17_179_869_184), 16); // 16 GiB
+    }
 }

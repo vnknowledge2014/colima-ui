@@ -52,6 +52,8 @@ export async function refetchAllResources() {
     dockerState.loading = false;
   } catch {
     fetchFailed = true;
+    dockerState.containers = [];
+    refreshManual();
   }
   
   try {
@@ -69,15 +71,23 @@ export async function refetchAllResources() {
   }
 
   if (fetchFailed) {
-    // Checked before the give-up branch below: a teardown mid-flight must not
-    // log "gave up after 10 attempts" when it never got to retry at all.
+    // Checked before the retry branch below: a teardown mid-flight must not
+    // schedule retries when it never got to retry at all.
     if (disposed) return;
     _refetchRetryCount++;
-    if (_refetchRetryCount < MAX_REFETCH_RETRIES) {
-      refetchRetryTimeout = setTimeout(refetchAllResources, 5000);
-    } else {
-      console.warn(`[ColimaUI] refetchAllResources gave up after ${MAX_REFETCH_RETRIES} attempts`);
-    }
+    const delay = _refetchRetryCount < MAX_REFETCH_RETRIES ? 5000 : 15000;
+    refetchRetryTimeout = setTimeout(() => {
+      if (disposed) return;
+      if (typeof document === "undefined" || document.visibilityState === "visible") {
+        refetchAllResources();
+      } else {
+        const onVisible = () => {
+          document.removeEventListener("visibilitychange", onVisible);
+          if (!disposed) refetchAllResources();
+        };
+        document.addEventListener("visibilitychange", onVisible, { once: true });
+      }
+    }, delay);
   } else {
     _refetchRetryCount = 0;
   }

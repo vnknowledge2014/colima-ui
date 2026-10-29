@@ -70,7 +70,7 @@ pub enum HealTrigger {
 }
 
 impl HealTrigger {
-    fn as_str(self) -> &'static str {
+    pub fn as_str(self) -> &'static str {
         match self {
             Self::Unhealthy => "unhealthy",
             Self::CrashLoop => "crash_loop",
@@ -80,7 +80,7 @@ impl HealTrigger {
         }
     }
 
-    fn parse(s: &str) -> Option<Self> {
+    pub fn parse(s: &str) -> Option<Self> {
         Some(match s {
             "unhealthy" => Self::Unhealthy,
             "crash_loop" => Self::CrashLoop,
@@ -133,7 +133,7 @@ impl HealAction {
         }
     }
 
-    fn parse(s: &str) -> Option<Self> {
+    pub fn parse(s: &str) -> Option<Self> {
         Some(match s {
             "restart_container" => Self::RestartContainer,
             "stop_container" => Self::StopContainer,
@@ -271,8 +271,25 @@ pub struct HealLogEntry {
     pub detail: String,
 }
 
-fn db() -> &'static Mutex<Connection> {
-    crate::commands::knowledge_bank::get_db()
+#[cfg(test)]
+static TEST_DB: std::sync::OnceLock<Mutex<Connection>> = std::sync::OnceLock::new();
+
+fn db() -> Result<&'static Mutex<Connection>, String> {
+    #[cfg(test)]
+    {
+        let tdb = TEST_DB.get_or_init(|| {
+            let conn = Connection::open_in_memory().expect("open test in-memory db");
+            Mutex::new(conn)
+        });
+        Ok(tdb)
+    }
+    #[cfg(not(test))]
+    {
+        std::panic::catch_unwind(|| {
+            crate::commands::knowledge_bank::get_db()
+        })
+        .map_err(|_| "Knowledge bank not initialized".to_string())
+    }
 }
 
 fn now_ms() -> i64 {
@@ -414,7 +431,8 @@ fn row_to_rule(r: &rusqlite::Row) -> rusqlite::Result<HealRule> {
 }
 
 pub fn list_rules() -> Result<Vec<HealRule>, String> {
-    let conn = db()
+    let conn_mutex = db()?;
+    let conn = conn_mutex
         .lock()
         .map_err(|_| "settings database is poisoned".to_string())?;
     init(&conn)?;
@@ -451,7 +469,8 @@ pub fn update_rule(
         return Err("A rule that may act must be allowed at least one action per hour".into());
     }
 
-    let conn = db()
+    let conn_mutex = db()?;
+    let conn = conn_mutex
         .lock()
         .map_err(|_| "settings database is poisoned".to_string())?;
     init(&conn)?;
@@ -483,7 +502,10 @@ pub fn update_rule(
 /// Read at the moment of acting, so flipping it stops work already queued
 /// rather than only preventing new work.
 pub fn is_enabled() -> bool {
-    let Ok(conn) = db().lock() else {
+    let Ok(conn_mutex) = db() else {
+        return false;
+    };
+    let Ok(conn) = conn_mutex.lock() else {
         return false;
     };
     if init(&conn).is_err() {
@@ -496,7 +518,8 @@ pub fn is_enabled() -> bool {
 }
 
 pub fn set_enabled(on: bool) -> Result<(), String> {
-    let conn = db()
+    let conn_mutex = db()?;
+    let conn = conn_mutex
         .lock()
         .map_err(|_| "settings database is poisoned".to_string())?;
     init(&conn)?;
@@ -511,7 +534,8 @@ pub fn set_enabled(on: bool) -> Result<(), String> {
 // ===== Log and quota =====
 
 fn record(entry: &HealLogEntry) -> Result<(), String> {
-    let conn = db()
+    let conn_mutex = db()?;
+    let conn = conn_mutex
         .lock()
         .map_err(|_| "settings database is poisoned".to_string())?;
     init(&conn)?;
@@ -536,7 +560,8 @@ fn record(entry: &HealLogEntry) -> Result<(), String> {
 }
 
 pub fn recent_log(limit: i64) -> Result<Vec<HealLogEntry>, String> {
-    let conn = db()
+    let conn_mutex = db()?;
+    let conn = conn_mutex
         .lock()
         .map_err(|_| "settings database is poisoned".to_string())?;
     init(&conn)?;
@@ -670,7 +695,10 @@ pub async fn execute(firing: Firing) -> HealOutcome {
 }
 
 fn quota_spent(rule: &HealRule) -> bool {
-    let Ok(conn) = db().lock() else {
+    let Ok(conn_mutex) = db() else {
+        return true;
+    };
+    let Ok(conn) = conn_mutex.lock() else {
         return true;
     };
     if init(&conn).is_err() {
@@ -687,14 +715,17 @@ async fn perform(action: HealAction, container_id: &str) -> Result<(), String> {
     // Recorded as `app`, so the activity log can answer "did I restart this or
     // did it restart itself" — the question `heal_log` cannot, because it only
     // contains things the app did.
-    //
-    // No double entry: this path calls the service layer directly, not the
-    // Tauri commands that carry their own recording.
+    let target_kind = if action == HealAction::RestartVm {
+        "instance"
+    } else {
+        "container"
+    };
+
     crate::commands::activity::record(
         crate::commands::activity::ActivityEntry::new(
             crate::commands::activity::ActivityKind::Lifecycle,
             action.as_str(),
-            "container",
+            target_kind,
             container_id,
         )
         .by(crate::commands::activity::ActivityActor::App)
@@ -703,6 +734,15 @@ async fn perform(action: HealAction, container_id: &str) -> Result<(), String> {
     );
 
     result
+}
+
+/// Directly execute a healing action against a given target (or default instance).
+pub async fn execute_heal(action: HealAction) -> Result<(), String> {
+    perform_inner(action, "default").await
+}
+
+pub async fn execute_heal_target(action: HealAction, target: &str) -> Result<(), String> {
+    perform_inner(action, target).await
 }
 
 async fn perform_inner(action: HealAction, container_id: &str) -> Result<(), String> {
@@ -718,10 +758,20 @@ async fn perform_inner(action: HealAction, container_id: &str) -> Result<(), Str
             .await
             .map(|_| ())
             .map_err(|e| e.to_string()),
-        HealAction::RestartVm => crate::commands::colima::start_instance_cli(String::new())
-            .await
-            .map(|_| ())
-            .map_err(|e| e.to_string()),
+        HealAction::RestartVm => {
+            let profile = if container_id.is_empty() {
+                "default".to_string()
+            } else {
+                container_id.to_string()
+            };
+            crate::commands::colima::stop_instance_cli(profile.clone(), true)
+                .await
+                .map_err(|e| e.to_string())?;
+            crate::commands::colima::start_instance_cli(profile)
+                .await
+                .map(|_| ())
+                .map_err(|e| e.to_string())
+        }
         // Unreachable by construction: `execute` returns `Suggested` for these
         // before it can get here. Kept as an explicit refusal rather than a
         // catch-all so adding an action cannot silently fall into "do nothing".
@@ -913,6 +963,32 @@ fn suggest_mem_limit_detail(container_id: &str) -> String {
     }
 }
 
+/// Sweep Colima VM instances and fire VmUnresponsive rule for instances that are "Unhealthy".
+///
+/// An instance status is "Unhealthy" when the Lima process is alive but the Docker socket
+/// has been unresponsive after the startup grace period (>= 90s uptime).
+pub async fn sweep_vm_unresponsive() {
+    let Some(rule) = rule_for(HealTrigger::VmUnresponsive) else {
+        return;
+    };
+
+    let instances = crate::instance_reader::list_instances_fast();
+    for inst in instances {
+        if inst.status == "Unhealthy" {
+            execute(Firing {
+                rule: rule.clone(),
+                container_id: inst.name.clone(),
+                container_name: inst.name.clone(),
+                detail: format!(
+                    "Colima VM instance '{}' is Unhealthy (process alive, socket failing after 90s uptime)",
+                    inst.name
+                ),
+            })
+            .await;
+        }
+    }
+}
+
 /// Poll the conditions that no event reports.
 ///
 /// Docker announces a health transition once and says nothing more; disk usage
@@ -927,6 +1003,7 @@ pub fn spawn_sweeper() {
             tokio::time::sleep(std::time::Duration::from_secs(60)).await;
             ticks += 1;
             sweep_unhealthy().await;
+            sweep_vm_unresponsive().await;
             if ticks.is_multiple_of(5) {
                 sweep_disk().await;
             }
@@ -1154,5 +1231,19 @@ mod tests {
         ] {
             assert_eq!(HealAction::parse(a.as_str()), Some(a));
         }
+    }
+
+    #[tokio::test]
+    async fn sweep_vm_unresponsive_runs_cleanly() {
+        sweep_vm_unresponsive().await;
+    }
+
+    #[test]
+    fn seed_contains_vm_unresponsive_rule() {
+        let rules = list_rules().expect("list_rules");
+        let rule = rules.iter().find(|r| {
+            r.trigger == HealTrigger::VmUnresponsive && r.action == HealAction::RestartVm
+        });
+        assert!(rule.is_some(), "Default rules must include VmUnresponsive rule");
     }
 }

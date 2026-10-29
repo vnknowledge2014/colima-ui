@@ -1,5 +1,14 @@
 import { describe, it, expect } from 'vitest';
-import { normalizeContainer, normalizeImage, normalizeVolume, normalizeNetwork } from './normalizers';
+import {
+  normalizeContainer,
+  normalizeImage,
+  normalizeVolume,
+  normalizeNetwork,
+  normalizeResourceToGiB,
+  normalizeMemoryToGiB,
+  normalizeDiskToGiB,
+  ONE_GIB_BYTES,
+} from './normalizers';
 
 describe('normalizeContainer', () => {
   it('normalizes docker container status correctly', () => {
@@ -108,3 +117,50 @@ describe('normalizeNetwork', () => {
     expect(normalized.Ipv6).toBe('true');
   });
 });
+
+describe('Resource Normalizers (GiB)', () => {
+  it('normalizes byte inputs (>= 1 GiB) to GiB integers', () => {
+    expect(normalizeResourceToGiB(ONE_GIB_BYTES)).toBe(1);
+    expect(normalizeResourceToGiB(8_589_934_592)).toBe(8);
+    expect(normalizeResourceToGiB(17_179_869_184)).toBe(16);
+    expect(normalizeResourceToGiB(68_719_476_736)).toBe(64);
+
+    expect(normalizeMemoryToGiB(8_589_934_592)).toBe(8);
+    expect(normalizeDiskToGiB(64_424_509_440)).toBe(60);
+  });
+
+  it('preserves values already in GiB integers (< 1 GiB)', () => {
+    expect(normalizeResourceToGiB(1)).toBe(1);
+    expect(normalizeResourceToGiB(2)).toBe(2);
+    expect(normalizeResourceToGiB(4)).toBe(4);
+    expect(normalizeResourceToGiB(8)).toBe(8);
+    expect(normalizeResourceToGiB(16)).toBe(16);
+    expect(normalizeResourceToGiB(32)).toBe(32);
+    expect(normalizeResourceToGiB(64)).toBe(64);
+    expect(normalizeResourceToGiB(100)).toBe(100);
+
+    expect(normalizeMemoryToGiB(4)).toBe(4);
+    expect(normalizeDiskToGiB(100)).toBe(100);
+  });
+
+  it('handles degenerate, string, negative, and nullish inputs with fallback', () => {
+    const degenerateValues = [
+      0,
+      -1,
+      -10,
+      undefined,
+      null,
+      NaN,
+      "",
+      "   ",
+      "invalid-number",
+    ];
+
+    for (const val of degenerateValues) {
+      expect(normalizeMemoryToGiB(val)).toBe(2);
+      expect(normalizeDiskToGiB(val)).toBe(60);
+      expect(normalizeResourceToGiB(val, 12)).toBe(12);
+    }
+  });
+});
+

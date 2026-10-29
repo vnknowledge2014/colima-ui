@@ -81,7 +81,7 @@ pub async fn list_containers_cli(all: bool) -> Result<Vec<serde_json::Value>, St
 /// a map. Without this the same container has two different shapes depending on
 /// which path served the request, and compose grouping would work through one
 /// and not the other.
-fn normalize_cli_labels(mut value: serde_json::Value) -> serde_json::Value {
+pub fn normalize_cli_labels(mut value: serde_json::Value) -> serde_json::Value {
     let raw = match value.get("Labels").and_then(|l| l.as_str()) {
         Some(s) => s.to_string(),
         // Already an object, or absent — leave a consistent empty object.
@@ -104,10 +104,10 @@ fn normalize_cli_labels(mut value: serde_json::Value) -> serde_json::Value {
         // Label values may themselves contain '=', so split only on the first.
         match pair.split_once('=') {
             Some((k, v)) => {
-                labels.insert(k.to_string(), serde_json::Value::String(v.to_string()));
+                labels.insert(k.trim().to_string(), serde_json::Value::String(v.trim().to_string()));
             }
             None => {
-                labels.insert(pair.to_string(), serde_json::Value::String(String::new()));
+                labels.insert(pair.trim().to_string(), serde_json::Value::String(String::new()));
             }
         }
     }
@@ -137,6 +137,15 @@ mod tests {
     fn keeps_equals_signs_inside_label_values() {
         let out = normalize_cli_labels(serde_json::json!({ "Labels": "cmd=a=b=c" }));
         assert_eq!(out["Labels"]["cmd"], "a=b=c");
+    }
+
+    #[test]
+    fn trims_whitespace_around_keys_and_values() {
+        let out = normalize_cli_labels(serde_json::json!({
+            "Labels": "  com.example.key  =  some value  ,  flag  "
+        }));
+        assert_eq!(out["Labels"]["com.example.key"], "some value");
+        assert_eq!(out["Labels"]["flag"], "");
     }
 
     #[test]
@@ -210,6 +219,7 @@ pub async fn list_containers(     state: tauri::State<'_, std::sync::Arc<tokio::
             .lines()
             .filter(|l| !l.trim().is_empty())
             .filter_map(|l| serde_json::from_str(l).ok())
+            .map(normalize_cli_labels)
             .map(|c: serde_json::Value| {
                 serde_json::json!({
                     "Id": c.get("ID").or(c.get("Id")).unwrap_or(&serde_json::Value::String(String::new())),
@@ -221,6 +231,7 @@ pub async fn list_containers(     state: tauri::State<'_, std::sync::Arc<tokio::
                     "CreatedAt": c.get("CreatedAt").or(c.get("created_at")).unwrap_or(&serde_json::Value::String(String::new())),
                     "Size": c.get("Size").or(c.get("size")).unwrap_or(&serde_json::Value::String(String::new())),
                     "Command": c.get("Command").or(c.get("command")).unwrap_or(&serde_json::Value::String(String::new())),
+                    "Labels": c.get("Labels").cloned().unwrap_or(serde_json::json!({})),
                 })
             })
             .collect();
@@ -788,7 +799,7 @@ pub async fn run_container(     image: String,     name: String,     ports: Vec<
     }
     args.push(image);
 
-    let output = runtime::run(args, runtime::DEFAULT_TIMEOUT).await?;
+    let output = runtime::run(args, runtime::LONG_OP_TIMEOUT).await?;
 
     if !output.status.success() {
         return Err(format!(
