@@ -794,6 +794,8 @@ struct Watch {
     deaths: HashMap<String, Vec<i64>>,
     /// When each container was first seen unhealthy, and its name.
     unhealthy_since: HashMap<String, (i64, String)>,
+    /// VM profiles already reported during their current Unhealthy spell in Suggest mode.
+    vm_unhealthy_suggested: std::collections::HashSet<String>,
 }
 
 fn watch() -> &'static Mutex<Watch> {
@@ -968,24 +970,52 @@ fn suggest_mem_limit_detail(container_id: &str) -> String {
 /// An instance status is "Unhealthy" when the Lima process is alive but the Docker socket
 /// has been unresponsive after the startup grace period (>= 90s uptime).
 pub async fn sweep_vm_unresponsive() {
+    if crate::docker_state::is_suppressed() {
+        return;
+    }
+
     let Some(rule) = rule_for(HealTrigger::VmUnresponsive) else {
         return;
     };
 
     let instances = crate::instance_reader::list_instances_fast();
-    for inst in instances {
-        if inst.status == "Unhealthy" {
-            execute(Firing {
-                rule: rule.clone(),
-                container_id: inst.name.clone(),
-                container_name: inst.name.clone(),
-                detail: format!(
-                    "Colima VM instance '{}' is Unhealthy (process alive, socket failing after 90s uptime)",
-                    inst.name
-                ),
+    let unhealthy_names: std::collections::HashSet<String> = instances
+        .iter()
+        .filter(|i| i.status == "Unhealthy")
+        .map(|i| i.name.clone())
+        .collect();
+
+    let is_advisory = rule.mode == HealMode::Suggest || !rule.action.auto_capable();
+
+    let due: Vec<String> = {
+        let Ok(mut w) = watch().lock() else { return };
+        w.vm_unhealthy_suggested
+            .retain(|name| unhealthy_names.contains(name));
+
+        instances
+            .into_iter()
+            .filter(|inst| inst.status == "Unhealthy")
+            .filter_map(|inst| {
+                if is_advisory && !w.vm_unhealthy_suggested.insert(inst.name.clone()) {
+                    None
+                } else {
+                    Some(inst.name)
+                }
             })
-            .await;
-        }
+            .collect()
+    };
+
+    for name in due {
+        execute(Firing {
+            rule: rule.clone(),
+            container_id: name.clone(),
+            container_name: name.clone(),
+            detail: format!(
+                "Colima VM instance '{}' is Unhealthy (process alive, socket failing after 90s uptime)",
+                name
+            ),
+        })
+        .await;
     }
 }
 

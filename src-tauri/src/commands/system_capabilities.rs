@@ -165,7 +165,9 @@ fn detect_all_blocking() -> Vec<Capability> {
     let docker_state = match &docker_version {
         None => CapabilityState::Missing,
         Some(_) => {
-            if get_version("docker", &["info", "--format", "{{.ServerVersion}}"]).is_some() {
+            if crate::path_util::detect_docker_host().is_some()
+                || get_version("docker", &["info", "--format", "{{.ServerVersion}}"]).is_some()
+            {
                 CapabilityState::Running
             } else {
                 CapabilityState::InstalledNotRunning
