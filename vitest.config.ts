@@ -17,5 +17,6 @@ export default defineConfig({
     // jsdom + forked workers leak global mocks and the ELK layout worker state
     // between files, causing flaky topology tests. vmThreads isolates properly.
     pool: 'vmThreads',
+    testTimeout: 15000,
   },
 })

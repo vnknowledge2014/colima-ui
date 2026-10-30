@@ -8,12 +8,17 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
  */
 
 const saved: { id: string; content: string }[] = [];
+const cleared: string[] = [];
 let history: { id: string; role: string; content: string }[] = [];
 
 vi.mock("../lib/api", () => ({
   aiApi: {
     saveMessage: async (message: { id: string; content: string }) => {
       saved.push({ id: message.id, content: message.content });
+    },
+    clearHistory: async (conversationId?: string) => {
+      cleared.push(conversationId || "default");
+      saved.length = 0;
     },
     loadHistory: async () => history,
     listConversations: async () => [],
@@ -25,13 +30,23 @@ vi.mock("../lib/settingsStore.svelte", () => ({
   setAppSetting: () => {},
 }));
 
-const { aiState, pushAiMessage, updateAiMessage, deleteAiMessage, persistAiMessages, switchConversation } =
-  await import("./ai.svelte");
+const {
+  aiState,
+  initAiHistory,
+  pushAiMessage,
+  updateAiMessage,
+  deleteAiMessage,
+  persistAiMessages,
+  switchConversation,
+  truncateAiMessagesFrom,
+} = await import("./ai.svelte");
 
 beforeEach(() => {
   saved.length = 0;
+  cleared.length = 0;
   history = [];
   aiState.messages = [];
+  aiState.activeConversationId = "default";
 });
 
 describe("AI chat persistence", () => {
@@ -84,5 +99,85 @@ describe("AI chat persistence", () => {
     await switchConversation("default");
 
     expect(aiState.messages.map((m) => m.id)).toEqual(["u1"]);
+  });
+
+  it("initAiHistory merges loaded history without wiping in-flight startup messages", async () => {
+    history = [{ id: "old-1", role: "user", content: "earlier turn" }];
+    aiState.messages = [{ id: "inflight-1", role: "user", content: "fast startup prompt" }];
+
+    await initAiHistory();
+
+    expect(aiState.messages.map((m) => m.id)).toEqual(["old-1", "inflight-1"]);
+  });
+});
+
+describe("truncateAiMessagesFrom", () => {
+  it("truncates in-memory messages from the target message onwards", async () => {
+    aiState.messages = [
+      { id: "u1", role: "user", content: "first question" },
+      { id: "a1", role: "assistant", content: "first answer" },
+      { id: "u2", role: "user", content: "second question" },
+      { id: "a2", role: "assistant", content: "second answer" },
+    ];
+
+    await truncateAiMessagesFrom("u2");
+
+    expect(aiState.messages.map((m) => m.id)).toEqual(["u1", "a1"]);
+  });
+
+  it("wipes database conversation and re-saves remaining messages", async () => {
+    aiState.activeConversationId = "conv-123";
+    aiState.messages = [
+      { id: "u1", role: "user", content: "q1" },
+      { id: "a1", role: "assistant", content: "a1" },
+      { id: "u2", role: "user", content: "q2" },
+      { id: "a2", role: "assistant", content: "a2" },
+    ];
+
+    await truncateAiMessagesFrom("a2");
+
+    expect(cleared).toContain("conv-123");
+    expect(saved).toEqual([
+      { id: "u1", content: "q1" },
+      { id: "a1", content: "a1" },
+      { id: "u2", content: "q2" },
+    ]);
+  });
+
+  it("does nothing if messageId is not found", async () => {
+    aiState.messages = [
+      { id: "u1", role: "user", content: "q1" },
+      { id: "a1", role: "assistant", content: "a1" },
+    ];
+
+    await truncateAiMessagesFrom("non-existent-id");
+
+    expect(aiState.messages).toHaveLength(2);
+    expect(cleared).toHaveLength(0);
+  });
+
+  it("handles truncating from first message, leaving conversation empty", async () => {
+    aiState.messages = [
+      { id: "u1", role: "user", content: "q1" },
+      { id: "a1", role: "assistant", content: "a1" },
+    ];
+
+    await truncateAiMessagesFrom("u1");
+
+    expect(aiState.messages).toEqual([]);
+    expect(saved).toEqual([]);
+  });
+
+  it("skips remaining messages that have empty content during re-save", async () => {
+    aiState.messages = [
+      { id: "u1", role: "user", content: "q1" },
+      { id: "a1", role: "assistant", content: "" }, // empty placeholder
+      { id: "u2", role: "user", content: "q2" },
+    ];
+
+    await truncateAiMessagesFrom("u2");
+
+    expect(aiState.messages.map((m) => m.id)).toEqual(["u1", "a1"]);
+    expect(saved).toEqual([{ id: "u1", content: "q1" }]);
   });
 });
