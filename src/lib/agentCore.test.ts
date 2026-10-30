@@ -9,6 +9,7 @@ import {
   runAgent,
   type AgentCallbacks,
 } from "./agentCore";
+import { parseToolStep } from "./aiToolStep";
 
 describe("agentCore helpers (DeepSeek-Harness & Harness2 patterns)", () => {
   it("increases MAX_SEARCH_ROUNDS to 5 for multi-step diagnosis and remediation", () => {
@@ -185,6 +186,85 @@ describe("agentCore helpers (DeepSeek-Harness & Harness2 patterns)", () => {
       "preference",
       "Always use dark terminal theme",
     );
+
+    vi.restoreAllMocks();
+  });
+
+  it("runAgent emits a single in-place ToolStep envelope for [EVENT_APPROVE] across pending_approval -> running -> succeeded and denied", async () => {
+    let round = 0;
+    vi.spyOn(llmProviders, "chatStream").mockImplementation(
+      async (_prov, _model, _key, _hist, _endpoint, onChunk) => {
+        round += 1;
+        if (round === 1) {
+          onChunk(
+            'Proposing two actions...\n[EVENT_APPROVE: start-instance | {"profile":"default"}]\n[EVENT_APPROVE: stop-instance | {"profile":"dev"}]',
+          );
+        } else {
+          onChunk("Handled both actions.");
+        }
+      },
+    );
+
+    vi.spyOn(aiEventBus, "getCategory").mockImplementation((evt) =>
+      evt === "stop-instance" ? "DANGEROUS" : "NORMAL",
+    );
+    vi.spyOn(aiEventBus, "executeEvent").mockResolvedValue("instance default started");
+
+    const systemSteps = new Map<string, string[]>();
+    const approvalIds: string[] = [];
+
+    const callbacks: AgentCallbacks = {
+      onStatus: () => {},
+      onMessage: (m) => {
+        if (m.role === "system") {
+          systemSteps.set(m.id, [m.content]);
+        }
+      },
+      onMessageUpdate: (id, content) => {
+        const history = systemSteps.get(id);
+        if (history) history.push(content);
+      },
+      onMessageDelete: () => {},
+      onApprovalRequired: async (id) => {
+        approvalIds.push(id);
+        // Approve the first (start-instance), deny the second (stop-instance)
+        return approvalIds.length === 1;
+      },
+      onNavigate: () => {},
+      onTimerSchedule: () => {},
+      onCronSchedule: () => {},
+      onScheduleCancel: () => {},
+    };
+
+    await runAgent(
+      "Manage VMs",
+      { provider: "ollama-local", model: "qwen2.5", apiKey: "", endpoint: "http://127.0.0.1:11434" },
+      callbacks,
+      [],
+      "",
+      [],
+    );
+
+    expect(approvalIds).toHaveLength(2);
+    // Exactly 2 system messages created (one per tool step, updated in-place — no extra spam bubbles!)
+    expect(systemSteps.size).toBe(2);
+
+    const firstTransitions = systemSteps.get(approvalIds[0])!.map((c) => parseToolStep(c));
+    expect(firstTransitions.map((s) => s?.status)).toEqual([
+      "pending_approval",
+      "running",
+      "succeeded",
+    ]);
+    expect(firstTransitions[0]?.id).toBe(approvalIds[0]);
+    expect(firstTransitions[2]?.output).toContain("instance default started");
+
+    const secondTransitions = systemSteps.get(approvalIds[1])!.map((c) => parseToolStep(c));
+    expect(secondTransitions.map((s) => s?.status)).toEqual([
+      "pending_approval",
+      "denied",
+    ]);
+    expect(secondTransitions[0]?.safety).toBe("DANGEROUS");
+    expect(secondTransitions[0]?.warning).toBeTruthy();
 
     vi.restoreAllMocks();
   });

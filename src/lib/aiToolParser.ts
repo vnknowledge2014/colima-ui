@@ -1,3 +1,32 @@
+export interface ChoiceOption {
+  label: string;
+  description?: string;
+  value: string;
+}
+
+export interface ParsedChoicePrompt {
+  question: string;
+  multi: boolean;
+  options: ChoiceOption[];
+}
+
+export type StreamingTagKind =
+  | "query"
+  | "event_approve"
+  | "run"
+  | "choice"
+  | "suggest"
+  | "diagnose"
+  | "security"
+  | "schedule"
+  | "navigate"
+  | "memory";
+
+export interface StreamingPartialTagResult {
+  cleanText: string;
+  pendingTagKind: StreamingTagKind | null;
+}
+
 export interface ParsedTools {
   cleanText: string;
   hasTools: boolean;
@@ -21,6 +50,8 @@ export interface ParsedTools {
   schedCancels: string[][];
   /** `[label, prompt?]` per chip. Deliberately excluded from `hasTools`. */
   suggests: string[][];
+  /** Interactive choice card prompt, if present. Deliberately excluded from `hasTools`. */
+  choicePrompt?: ParsedChoicePrompt | null;
 }
 
 /** The chat panel renders at most this many chips; the rest are dropped. */
@@ -33,7 +64,7 @@ interface ExtractedTag {
 }
 
 const KNOWN_TAG_OPEN_RE =
-  /^\[(?:QUERY|EVENT_APPROVE|RUN|RUN_APPROVE|DIAGNOSE|QUERY_APP_STATE|LEARN|LEARN_REASONING|REMEMBER_PREFERENCE|NAVIGATE|READ_REFERENCE|SECURITY_THREAT_MODEL|SECURITY_VULN_SCAN|SECURITY_TRIAGE|SECURITY_PATCH_GEN|SCHEDULE_CRON|SCHEDULE_TIMER|SCHEDULE_CANCEL|SUGGEST)(?::|\])/i;
+  /^\[(?:QUERY_APP_STATE|QUERY|EVENT_APPROVE|RUN_APPROVE|RUN|DIAGNOSE|LEARN_REASONING|LEARN|REMEMBER_PREFERENCE|NAVIGATE|READ_REFERENCE|SECURITY_THREAT_MODEL|SECURITY_VULN_SCAN|SECURITY_TRIAGE|SECURITY_PATCH_GEN|SCHEDULE_CRON|SCHEDULE_TIMER|SCHEDULE_CANCEL|SUGGEST|ASK_CHOICE)(?::|\])/i;
 
 function extractColonTags(
   text: string,
@@ -174,6 +205,259 @@ function stripSpans(
   return out;
 }
 
+/**
+ * Extracts [ASK_CHOICE: ...] tag, parsing both structured JSON and compact pipe syntax.
+ */
+export function extractChoicePrompt(text: string): {
+  cleanText: string;
+  choicePrompt: ParsedChoicePrompt | null;
+  rawTag?: string;
+} {
+  const choiceTags = extractColonTags(text, "ASK_CHOICE", { caseInsensitive: true });
+  if (choiceTags.length === 0) {
+    return { cleanText: text, choicePrompt: null };
+  }
+
+  const tag = choiceTags[0];
+  const inner = tag.match[1]?.trim() ?? "";
+  const rawTag = tag.match[0];
+  let choicePrompt: ParsedChoicePrompt | null = null;
+
+  // 1. Try parsing JSON format
+  let jsonParsed = false;
+  if (inner.startsWith("{")) {
+    try {
+      const parsed = JSON.parse(inner);
+      jsonParsed = true;
+      const question = typeof parsed?.question === "string" ? parsed.question.trim() : "";
+      if (question && Array.isArray(parsed.options)) {
+        const options: ChoiceOption[] = parsed.options
+          .map((opt: unknown) => {
+            if (typeof opt === "string") {
+              const trimmed = opt.trim();
+              return trimmed ? { label: trimmed, value: trimmed } : null;
+            } else if (opt && typeof opt === "object") {
+              const o = opt as Record<string, unknown>;
+              const label = String(o.label ?? "").trim();
+              if (!label) return null;
+              return {
+                label,
+                description: o.description ? String(o.description).trim() : undefined,
+                value: String(o.value ?? label).trim(),
+              };
+            }
+            return null;
+          })
+          .filter((o: ChoiceOption | null): o is ChoiceOption => o !== null);
+
+        if (options.length > 0) {
+          choicePrompt = {
+            question,
+            multi: Boolean(parsed.multi),
+            options,
+          };
+        }
+      }
+    } catch {
+      // Fall through to pipe format
+    }
+  }
+
+  // 2. Try parsing pipe format: [ASK_CHOICE: Question | Opt1 | Opt2]
+  if (!choicePrompt && !jsonParsed) {
+    const rawParts = inner.split("|").map((p) => p.trim());
+    if (rawParts.length >= 2) {
+      let rawQuestion = rawParts[0];
+      let multi = false;
+
+      if (/^\[multi\]/i.test(rawQuestion)) {
+        multi = true;
+        rawQuestion = rawQuestion.replace(/^\[multi\]\s*/i, "");
+      } else if (/^\(multi\)/i.test(rawQuestion)) {
+        multi = true;
+        rawQuestion = rawQuestion.replace(/^\(multi\)\s*/i, "");
+      }
+
+      const question = rawQuestion.trim();
+      if (question.length > 0) {
+        const optionParts = rawParts.slice(1).filter(Boolean);
+        const options: ChoiceOption[] = optionParts.map((optStr) => {
+          const colonIdx = optStr.indexOf(":");
+          if (colonIdx > 0 && colonIdx < optStr.length - 1) {
+            const label = optStr.slice(0, colonIdx).trim();
+            const description = optStr.slice(colonIdx + 1).trim();
+            return { label, description, value: label };
+          }
+          return { label: optStr, value: optStr };
+        });
+
+        if (options.length > 0) {
+          choicePrompt = {
+            question,
+            multi,
+            options,
+          };
+        }
+      }
+    }
+  }
+
+  // Strip all choice tag spans from cleanText
+  const spans = choiceTags.map((t) => ({ start: t.start, end: t.end }));
+  const cleanText = stripSpans(text, spans).trim();
+
+  return { cleanText, choicePrompt, rawTag };
+}
+
+/**
+ * Balance-aware bracket checker to determine if a tag starting at tail[0] is closed.
+ * Correctly accounts for nested brackets (e.g. JSON arrays), braces, quotes, and escape characters.
+ */
+function isTagClosed(tail: string): boolean {
+  let bracketDepth = 0;
+  let braceDepth = 0;
+  let inString = false;
+  let inEscape = false;
+
+  for (let i = 0; i < tail.length; i++) {
+    const ch = tail[i];
+
+    if (inString) {
+      if (inEscape) {
+        inEscape = false;
+      } else if (ch === "\\") {
+        inEscape = true;
+      } else if (ch === '"') {
+        inString = false;
+      }
+      continue;
+    }
+
+    if (ch === '"') {
+      inString = true;
+      continue;
+    }
+
+    if (ch === "{") {
+      braceDepth++;
+    } else if (ch === "}") {
+      if (braceDepth > 0) braceDepth--;
+    } else if (ch === "[") {
+      bracketDepth++;
+    } else if (ch === "]") {
+      if (bracketDepth > 1) {
+        bracketDepth--;
+      } else if (bracketDepth === 1) {
+        if (braceDepth === 0) {
+          return true;
+        }
+      }
+    }
+  }
+
+  return false;
+}
+
+/**
+ * Strips unclosed tool/interactive tags at the tail of streaming text,
+ * preventing flickering while preserving regular markdown links and brackets.
+ */
+export function stripStreamingPartialTags(text: string): StreamingPartialTagResult {
+  if (!text) {
+    return { cleanText: "", pendingTagKind: null };
+  }
+
+  // 1. Strip completed known tags first
+  const parsed = parseAiTools(text);
+  const workingText = parsed.cleanText;
+
+  // 2. Check for an unclosed tag at the tail of workingText
+  // Matches [TAG_NAME: or [TAG_NAME that has not closed.
+  // QUERY_APP_STATE precedes QUERY to avoid prefix shadowing.
+  const partialTagMatch = workingText.match(
+    /\[(QUERY_APP_STATE|QUERY|EVENT_APPROVE|RUN_APPROVE|RUN|ASK_CHOICE|SUGGEST|DIAGNOSE|SECURITY_[A-Z_]+|SCHEDULE_[A-Z_]+|NAVIGATE|READ_REFERENCE|LEARN_REASONING|LEARN|REMEMBER_PREFERENCE)(?::|\]|\s|$|[^\n\]]*$)/i
+  );
+
+  if (!partialTagMatch || partialTagMatch.index === undefined) {
+    return { cleanText: workingText, pendingTagKind: null };
+  }
+
+  // Verify that this tag is indeed unclosed (no matching ']' closing this tag)
+  const tagStart = partialTagMatch.index;
+  const tail = workingText.slice(tagStart);
+  if (isTagClosed(tail)) {
+    // If it has a closing bracket, it was closed or handled
+    return { cleanText: workingText, pendingTagKind: null };
+  }
+
+  const rawTagName = partialTagMatch[1].toUpperCase();
+  let pendingTagKind: StreamingTagKind;
+
+  if (rawTagName === "QUERY") pendingTagKind = "query";
+  else if (rawTagName === "EVENT_APPROVE") pendingTagKind = "event_approve";
+  else if (rawTagName === "RUN" || rawTagName === "RUN_APPROVE") pendingTagKind = "run";
+  else if (rawTagName === "ASK_CHOICE") pendingTagKind = "choice";
+  else if (rawTagName === "SUGGEST") pendingTagKind = "suggest";
+  else if (rawTagName === "DIAGNOSE" || rawTagName === "QUERY_APP_STATE") pendingTagKind = "diagnose";
+  else if (rawTagName.startsWith("SECURITY_")) pendingTagKind = "security";
+  else if (rawTagName.startsWith("SCHEDULE_")) pendingTagKind = "schedule";
+  else if (rawTagName === "NAVIGATE" || rawTagName === "READ_REFERENCE") pendingTagKind = "navigate";
+  else pendingTagKind = "memory";
+
+  const cleanText = workingText.slice(0, tagStart).trimEnd();
+  return { cleanText, pendingTagKind };
+}
+
+/**
+ * Rebuilds assistant turn content for database persistence, preserving [SUGGEST]
+ * and [ASK_CHOICE] tags while stripping execution tags ([QUERY], [RUN], etc.).
+ */
+export function rebuildAssistantTurnContent(
+  cleanText: string,
+  suggests?: string[][],
+  rawChoices?: string[] | ParsedChoicePrompt | null
+): string {
+  // Strip any accidental execution tags from prose
+  const parsed = parseAiTools(cleanText || "");
+  let out = parsed.cleanText.trim();
+
+  // 1. Append [ASK_CHOICE] if present
+  if (Array.isArray(rawChoices) && rawChoices.length > 0) {
+    for (const choice of rawChoices) {
+      if (choice.trim()) {
+        out = out ? `${out}\n\n${choice.trim()}` : choice.trim();
+      }
+    }
+  } else if (rawChoices && typeof rawChoices === "object" && "question" in rawChoices) {
+    const choiceTag = `[ASK_CHOICE: ${JSON.stringify(rawChoices)}]`;
+    out = out ? `${out}\n\n${choiceTag}` : choiceTag;
+  }
+
+  // 2. Append [SUGGEST] chips if present
+  if (suggests && suggests.length > 0) {
+    const chipTags: string[] = [];
+    for (const item of suggests) {
+      // Handles both [fullMatch, label, prompt] and [label, prompt]
+      const label = (item.length >= 3 ? item[1] : item[0])?.trim();
+      const prompt = (item.length >= 3 ? item[2] : item[1])?.trim();
+
+      if (!label) continue;
+      if (prompt && prompt !== label) {
+        chipTags.push(`[SUGGEST: ${label} | ${prompt}]`);
+      } else {
+        chipTags.push(`[SUGGEST: ${label}]`);
+      }
+    }
+
+    if (chipTags.length > 0) {
+      const joinedChips = chipTags.join("\n");
+      out = out ? `${out}\n\n${joinedChips}` : joinedChips;
+    }
+  }
+
+  return out;
+}
+
 export function parseAiTools(responseText: string): ParsedTools {
   const spans: Array<{ start: number; end: number }> = [];
   const collect = (items: ExtractedTag[]): string[][] => {
@@ -275,6 +559,19 @@ export function parseAiTools(responseText: string): ParsedTools {
     }),
   );
 
+  // Choice prompt. Not a tool: nothing runs until user selects an option.
+  const choiceTags = extractColonTags(responseText, "ASK_CHOICE", {
+    caseInsensitive: true,
+  });
+  let choicePrompt: ParsedChoicePrompt | null = null;
+  if (choiceTags.length > 0) {
+    for (const item of choiceTags) {
+      spans.push({ start: item.start, end: item.end });
+    }
+    const extracted = extractChoicePrompt(responseText);
+    choicePrompt = extracted.choicePrompt;
+  }
+
   const cleanText = stripSpans(responseText, spans).trim();
 
   const hasTools =
@@ -321,5 +618,6 @@ export function parseAiTools(responseText: string): ParsedTools {
     // Capped here rather than at the call site so every consumer gets the same
     // list and a chatty model cannot flood the panel.
     suggests: suggests.slice(0, MAX_SUGGESTIONS),
+    choicePrompt,
   };
 }
