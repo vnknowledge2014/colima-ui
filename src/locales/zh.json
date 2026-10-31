@@ -37,7 +37,8 @@
     "colima_instances": "实例",
     "security": "安全",
     "ai_panel_close": "Close the AI panel (⌘K)",
-    "ai_panel_open": "Open the AI panel beside the page (⌘K)"
+    "ai_panel_open": "Open the AI panel beside the page (⌘K)",
+    "environment": "环境"
   },
   "dashboard": {
     "title": "仪表盘",
@@ -1239,5 +1240,24 @@
     "no_workloads": "No workloads found",
     "pods": "Pods",
     "no_pods": "No pods found"
+  },
+  "environment": {
+    "shellEnv": "Shell 环境",
+    "dualityExplain": "GUI 进程继承的是 launchd 的环境变量，而非你 shell 的（快照：经由 $SHELL 启动一次非登录 shell——zsh 对应 .zshenv；bash 对应 $BASH_ENV/.bashrc 等）。两列出现差异属正常现象——重要的是下方的解析记录。",
+    "diverges": "在 Shell (.zshenv) 与本应用两列中的取值不同",
+    "resolutionExplain": "本应用实际使用的值，以及为每个值选定所依据的规则。红色表示配置的路径已不存在。",
+    "title": "环境",
+    "subtitle": "本应用对你的设置的认知，以及它所基于的规则。",
+    "refresh": "重新扫描",
+    "loading": "扫描中…",
+    "snapshotError": "Shell 环境快照不可用",
+    "dualityTitle": "环境：Shell 环境 vs 本应用",
+    "variable": "变量",
+    "appEnv": "本应用",
+    "resolutionTitle": "解析记录",
+    "what": "项目",
+    "rule": "规则",
+    "resolvedTo": "解析为",
+    "detail": "详情"
   }
 }

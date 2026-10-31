@@ -1,3 +1,5 @@
+/** Environment resolution record — see commands/resolution.rs */
+pub mod resolution;
 pub mod announcements;
 pub mod misc;
 pub mod system;

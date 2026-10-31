@@ -204,6 +204,7 @@ pub fn run() {
             colima::get_ssh_command,
             colima::kubernetes_action,
             colima::collect_diagnostic_logs,
+            commands::resolution::get_environment_resolutions,
             colima::create_worker_node,
             // Colima config (colima.yaml is the single source of truth)
             commands::colima_config::get_colima_config,

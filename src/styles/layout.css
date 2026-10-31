@@ -232,6 +232,10 @@
 
 .content-body {
   flex: 1;
+  /* min-width:0 is load-bearing: as a flex item it defaults to min-width:auto
+     ("as wide as my widest child"), so a wide table/path stretches the whole
+     pane and any width:100% child is computed against that inflated width. */
+  min-width: 0;
   overflow-y: auto;
   padding: 20px 24px;
 }

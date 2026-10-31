@@ -37,7 +37,8 @@
     "colima_instances": "Máy ảo",
     "security": "Bảo mật",
     "ai_panel_close": "Close the AI panel (⌘K)",
-    "ai_panel_open": "Open the AI panel beside the page (⌘K)"
+    "ai_panel_open": "Open the AI panel beside the page (⌘K)",
+    "environment": "Môi trường"
   },
   "dashboard": {
     "title": "Bảng Điều Khiển",
@@ -1239,5 +1240,24 @@
     "no_workloads": "No workloads found",
     "pods": "Pods",
     "no_pods": "No pods found"
+  },
+  "environment": {
+    "shellEnv": "Môi trường shell",
+    "dualityExplain": "Tiến trình GUI kế thừa env từ launchd, không phải shell của bạn (ảnh chụp: khởi động shell không đăng nhập qua $SHELL — với zsh là .zshenv; bash là $BASH_ENV/.bashrc; v.v.). Hai cột khác nhau là bình thường — quan trọng là bản ghi phân giải bên dưới.",
+    "diverges": "giá trị khác nhau giữa Shell (.zshenv) và Ứng dụng này",
+    "resolutionExplain": "Các giá trị ứng dụng đang thực sự dùng, và quy tắc đã chọn từng giá trị. Màu đỏ nghĩa là đường dẫn đã cấu hình không còn tồn tại.",
+    "title": "Môi trường",
+    "subtitle": "Những gì ứng dụng này tin về cấu hình của bạn, và quy tắc dẫn đến điều đó.",
+    "refresh": "Quét lại",
+    "loading": "Đang quét…",
+    "snapshotError": "Không thể tạo ảnh chụp môi trường shell",
+    "dualityTitle": "Môi trường: Shell env vs Ứng dụng này",
+    "variable": "Biến",
+    "appEnv": "Ứng dụng này",
+    "resolutionTitle": "Bản ghi phân giải",
+    "what": "Mục",
+    "rule": "Quy tắc",
+    "resolvedTo": "Giải quyết thành",
+    "detail": "Chi tiết"
   }
 }

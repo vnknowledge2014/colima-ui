@@ -20,3 +20,4 @@ export * from "./telemetry";
 export * from "./subscription";
 export * from "./security";
 export * from "./activity";
+export * from "./environment";
