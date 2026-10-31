@@ -4,8 +4,15 @@ import { chatStream } from "./llmProviders";
 import { newId } from "./ids";
 import { getCategory, executeEvent } from "./aiEventBus";
 import { BUILT_IN_PRESETS } from "./presetStateManager";
-import { parseAiTools } from "./aiToolParser";
+import { parseAiTools, stripStreamingPartialTags, rebuildAssistantTurnContent } from "./aiToolParser";
 import { findProvider } from "./aiProviderConfig";
+import {
+  createToolStep,
+  transitionToolStep,
+  serializeToolStep,
+  humanizeToolName,
+  type ToolStepSafety,
+} from "./aiToolStep";
 
 export interface AgentCallbacks {
   onStatus: (text: string) => void;
@@ -155,7 +162,8 @@ export async function runAgent(
 
       await chatStream(provider, model, apiKey, fullHistory, endpoint, (chunk) => {
         responseText += chunk;
-        callbacks.onMessageUpdate(streamId, responseText);
+        const { cleanText } = stripStreamingPartialTags(responseText);
+        callbacks.onMessageUpdate(streamId, cleanText);
       }, signal);
 
       // Keep whatever streamed in before the stop, but do not run the tools the
@@ -172,18 +180,20 @@ export async function runAgent(
         runs, runApprovals, learns, learnReasoning, prefs,
         hasDiagnose, hasQueryState,
         navigates, readReferences, secThreatModels, secVulnScans,
-        secTriages, secPatchGens, schedCrons, schedTimers, schedCancels
+        secTriages, secPatchGens, schedCrons, schedTimers, schedCancels,
+        suggests, choicePrompt,
       } = parsed;
 
-      if (!cleanText) {
+      const hasInteractiveContent = (suggests && suggests.length > 0) || Boolean(choicePrompt);
+
+      if (!cleanText && !hasInteractiveContent) {
         callbacks.onMessageDelete(streamId);
       } else {
-        callbacks.onMessageUpdate(streamId, cleanText);
+        const turnContent = rebuildAssistantTurnContent(cleanText, suggests, choicePrompt);
+        callbacks.onMessageUpdate(streamId, turnContent);
       }
 
       if (!hasTools) {
-        // If there were no tools, the response is final
-        callbacks.onMessageUpdate(streamId, responseText); // Need to save original text for history (if necessary, depending on UI)
         break;
       }
 
@@ -207,13 +217,29 @@ export async function runAgent(
         }
         
         callbacks.onStatus(`🔍 Querying ${evt}...`);
+        const stepId = newId();
+        let step = createToolStep({
+          id: stepId,
+          kind: "query",
+          name: evt,
+          title: humanizeToolName(evt),
+          safety: "SAFE",
+          status: "running",
+          rawInput: pld || undefined,
+        });
+        callbacks.onMessage({ id: stepId, role: "system", content: serializeToolStep(step) });
         try {
           const parsedPayload = pld ? JSON.parse(pld) : {};
           const result = await executeEvent(evt, parsedPayload);
           seenToolCalls.add(callKey);
-          toolContext += `\n### Query: ${evt}\n${capToolOutput(String(result))}\n`;
+          const capped = capToolOutput(String(result));
+          toolContext += `\n### Query: ${evt}\n${capped}\n`;
+          step = transitionToolStep(step, "succeeded", { output: capToolOutput(String(result), 1200) });
+          callbacks.onMessageUpdate(stepId, serializeToolStep(step));
         } catch (e) {
           toolContext += `\n(Query failed: ${e})\n`;
+          step = transitionToolStep(step, "failed", { warning: String(e) });
+          callbacks.onMessageUpdate(stepId, serializeToolStep(step));
         }
       }
 
@@ -232,42 +258,86 @@ export async function runAgent(
 
         if (category === "SAFE") {
           callbacks.onStatus(`✅ Auto-executing safe event ${evt}...`);
+          const stepId = newId();
+          let step = createToolStep({
+            id: stepId,
+            kind: "event",
+            name: evt,
+            title: humanizeToolName(evt),
+            safety: "SAFE",
+            status: "running",
+            rawInput: pld || undefined,
+          });
+          callbacks.onMessage({ id: stepId, role: "system", content: serializeToolStep(step) });
           try {
             const result = await executeEvent(evt, parsedPayload);
-            toolContext += `\n### Event: ${evt}\n${capToolOutput(String(result))}\n`;
+            const capped = capToolOutput(String(result));
+            toolContext += `\n### Event: ${evt}\n${capped}\n`;
+            step = transitionToolStep(step, "succeeded", { output: capToolOutput(String(result), 1200) });
+            callbacks.onMessageUpdate(stepId, serializeToolStep(step));
           } catch (e) {
             toolContext += `\n(Event failed: ${e})\n`;
+            step = transitionToolStep(step, "failed", { warning: String(e) });
+            callbacks.onMessageUpdate(stepId, serializeToolStep(step));
           }
         } else {
           callbacks.onStatus(`⏳ Awaiting approval: ${evt}`);
           const approvalId = newId();
-          callbacks.onMessage({ id: approvalId, role: "system", content: `⚠️ Action Required:\nTrigger App Event: **${evt}**\n\`${pld}\`` });
+          const safety: ToolStepSafety = category === "DANGEROUS" ? "DANGEROUS" : "NORMAL";
+          let step = createToolStep({
+            id: approvalId,
+            kind: "event",
+            name: evt,
+            title: humanizeToolName(evt),
+            safety,
+            status: "pending_approval",
+            rawInput: pld || undefined,
+            warning: safety === "DANGEROUS"
+              ? "Destructive or irreversible state change — confirm before proceeding."
+              : undefined,
+          });
+          callbacks.onMessage({ id: approvalId, role: "system", content: serializeToolStep(step) });
           
           const approved = await callbacks.onApprovalRequired(approvalId, `[EVENT_APPROVE: ${evt} | ${pld}]`);
           if (aborted()) break;
 
           if (approved) {
-            callbacks.onMessage({ id: newId(), role: "system", content: `✅ Approved: \`${evt}\`. Executing...` });
+            step = transitionToolStep(step, "running");
+            callbacks.onMessageUpdate(approvalId, serializeToolStep(step));
             try {
               const result = await executeEvent(evt, parsedPayload);
               // State-mutating action succeeded: invalidate cached read-only tool calls
               seenToolCalls.clear();
-              toolContext += `\n\n### Approved Event: \`${evt}\`\nResult: ${capToolOutput(String(result))}\n`;
-              callbacks.onMessage({ id: newId(), role: "system", content: `🏁 Action Completed.` });
+              const capped = capToolOutput(String(result));
+              toolContext += `\n\n### Approved Event: \`${evt}\`\nResult: ${capped}\n`;
+              step = transitionToolStep(step, "succeeded", { output: capToolOutput(String(result), 1200) });
+              callbacks.onMessageUpdate(approvalId, serializeToolStep(step));
             } catch (e) {
               toolContext += `\n(Event execution failed: ${e})\n`;
+              step = transitionToolStep(step, "failed", { warning: String(e) });
+              callbacks.onMessageUpdate(approvalId, serializeToolStep(step));
             }
           } else {
             toolContext += `\n\n### Event DENIED by user: \`${evt}\`\n`;
-            callbacks.onMessage({ id: newId(), role: "system", content: `❌ Denied: \`${evt}\`` });
+            step = transitionToolStep(step, "denied");
+            callbacks.onMessageUpdate(approvalId, serializeToolStep(step));
           }
         }
       }
 
-      // 3. Old Tools handling
+      // 3. System state, diagnostics, commands & navigation
       if (hasQueryState && !aborted()) {
         callbacks.onStatus("🔍 Reading live system state...");
-        callbacks.onMessage({ id: newId(), role: "system", content: "🔍 Reading live system state..." });
+        const stepId = newId();
+        let step = createToolStep({
+          id: stepId,
+          kind: "query",
+          name: "query-app-state",
+          title: "Read Live System State",
+          safety: "SAFE",
+          status: "running",
+        });
+        callbacks.onMessage({ id: stepId, role: "system", content: serializeToolStep(step) });
         try {
           const hostSpecsPromise = sysMethods.hostSpecs();
           const [instances, containers, composeProjects, k8sContext, hostSpecs] = 
@@ -279,101 +349,175 @@ export async function runAgent(
               hostSpecsPromise,
             ]);
           
+          const instanceList = instances.status === "fulfilled" ? instances.value : [];
+          const containerList = (containers.status === "fulfilled" ? containers.value : [])
+            .map((c) => ({id: c.Id?.slice(0,12), name: c.Names, image: c.Image, status: c.Status}));
+          const composeList = composeProjects.status === "fulfilled" ? composeProjects.value : [];
+          const k8sCtx = k8sContext.status === "fulfilled" ? k8sContext.value : "none";
+
           toolContext += `\n### Live System State
 Host: ${JSON.stringify(hostSpecs.status === "fulfilled" ? hostSpecs.value : "unknown")}
-Instances: ${JSON.stringify(instances.status === "fulfilled" ? instances.value : [])}
-Containers (summary): ${JSON.stringify(
-(containers.status === "fulfilled" ? containers.value : [])
-  .map((c) => ({id: c.Id?.slice(0,12), name: c.Names, image: c.Image, status: c.Status}))
-)}
-Compose Projects: ${JSON.stringify(composeProjects.status === "fulfilled" ? composeProjects.value : [])}
-K8s Context: ${k8sContext.status === "fulfilled" ? k8sContext.value : "none"}
+Instances: ${JSON.stringify(instanceList)}
+Containers (summary): ${JSON.stringify(containerList)}
+Compose Projects: ${JSON.stringify(composeList)}
+K8s Context: ${k8sCtx}
 Custom Presets: ${JSON.stringify(customPresets)}
 Built-in Presets: ${JSON.stringify(BUILT_IN_PRESETS)}
 `;
+          step = transitionToolStep(step, "succeeded", {
+            output: `Instances: ${instanceList.length}, Containers: ${containerList.length}, Compose: ${composeList.length}, K8s: ${k8sCtx}`,
+          });
+          callbacks.onMessageUpdate(stepId, serializeToolStep(step));
         } catch (e) {
           toolContext += `\n(Query app state failed: ${e})\n`;
+          step = transitionToolStep(step, "failed", { warning: String(e) });
+          callbacks.onMessageUpdate(stepId, serializeToolStep(step));
         }
       }
 
       if (hasDiagnose && !aborted()) {
         callbacks.onStatus("🔬 Collecting diagnostics...");
-        callbacks.onMessage({ id: newId(), role: "system", content: "🔬 Collecting diagnostics (logs, processes, locks)..." });
+        const stepId = newId();
+        let step = createToolStep({
+          id: stepId,
+          kind: "diagnose",
+          name: "diagnose",
+          title: "Collect System Diagnostics",
+          safety: "SAFE",
+          status: "running",
+        });
+        callbacks.onMessage({ id: stepId, role: "system", content: serializeToolStep(step) });
         try {
           const diagReport = await knowledgeBankApi.collectDiagnosticLogs("default");
           toolContext += `\n\n### Diagnostic Report\n${capToolOutput(diagReport)}\n`;
-        } catch (e) { toolContext += `\n(Diagnostic failed: ${e})\n`; }
+          step = transitionToolStep(step, "succeeded", { output: capToolOutput(diagReport, 1200) });
+          callbacks.onMessageUpdate(stepId, serializeToolStep(step));
+        } catch (e) {
+          toolContext += `\n(Diagnostic failed: ${e})\n`;
+          step = transitionToolStep(step, "failed", { warning: String(e) });
+          callbacks.onMessageUpdate(stepId, serializeToolStep(step));
+        }
       }
 
       for (const [, cmd] of runs.slice(0, 3)) {
         if (aborted()) break;
-        const callKey = normalizeToolCallKey("RUN", cmd);
+        const trimmedCmd = cmd.trim();
+        const callKey = normalizeToolCallKey("RUN", trimmedCmd);
         if (seenToolCalls.has(callKey)) {
-          toolContext += `\n[SYSTEM REMINDER: You already executed [RUN: ${cmd.trim()}] in an earlier round. Use the previous output above or try a different command.]\n`;
+          toolContext += `\n[SYSTEM REMINDER: You already executed [RUN: ${trimmedCmd}] in an earlier round. Use the previous output above or try a different command.]\n`;
           continue;
         }
-        callbacks.onStatus(`🔧 Executing: ${cmd}`);
-        callbacks.onMessage({ id: newId(), role: "system", content: `🔧 Executing: \`${cmd}\`` });
+        callbacks.onStatus(`🔧 Executing: ${trimmedCmd}`);
+        const stepId = newId();
+        let step = createToolStep({
+          id: stepId,
+          kind: "command",
+          name: "sandbox-exec",
+          title: "Execute Command",
+          safety: "SAFE",
+          status: "running",
+          rawInput: trimmedCmd,
+        });
+        callbacks.onMessage({ id: stepId, role: "system", content: serializeToolStep(step) });
         try {
           const r = await sandboxApi.execute(cmd);
           seenToolCalls.add(callKey);
           const out = capToolOutput(r.stdout || r.stderr || "(no output)");
           toolContext += `\n\n### Command: \`${cmd}\` (exit: ${r.exit_code})\n\`\`\`\n${out}\n\`\`\`\n`;
+          step = transitionToolStep(step, r.exit_code === 0 ? "succeeded" : "failed", {
+            output: capToolOutput(r.stdout || r.stderr || "(no output)", 1200),
+            exitCode: r.exit_code,
+          });
+          callbacks.onMessageUpdate(stepId, serializeToolStep(step));
         } catch (e) {
           if (isApprovalRequiredError(e)) {
-            callbacks.onStatus(`⏳ Awaiting approval: ${cmd}`);
-            const approvalId = newId();
-            callbacks.onMessage({
-              id: approvalId,
-              role: "system",
-              content: `⚠️ Action Required:\n\`${cmd}\``,
+            callbacks.onStatus(`⏳ Awaiting approval: ${trimmedCmd}`);
+            step = createToolStep({
+              id: stepId,
+              kind: "command",
+              name: "sandbox-exec",
+              title: "Command Approval Required",
+              safety: "NORMAL",
+              status: "pending_approval",
+              rawInput: trimmedCmd,
+              warning: "Command requires user approval before execution.",
             });
-            const approved = await callbacks.onApprovalRequired(approvalId, cmd);
+            callbacks.onMessageUpdate(stepId, serializeToolStep(step));
+            const approved = await callbacks.onApprovalRequired(stepId, cmd);
             if (aborted()) break;
             if (approved) {
+              step = transitionToolStep(step, "running");
+              callbacks.onMessageUpdate(stepId, serializeToolStep(step));
               try {
                 const r = await sandboxApi.executeApproved(cmd);
                 // State-mutating command succeeded: invalidate cached read-only tool calls
                 seenToolCalls.clear();
                 const out = capToolOutput(r.stdout || r.stderr || "(no output)");
                 toolContext += `\n\n### Approved Command: \`${cmd}\` (exit: ${r.exit_code})\n\`\`\`\n${out}\n\`\`\`\n`;
-                callbacks.onMessage({
-                  id: newId(),
-                  role: "system",
-                  content: `✅ Approved & Executed: \`${cmd}\``,
+                step = transitionToolStep(step, r.exit_code === 0 ? "succeeded" : "failed", {
+                  output: capToolOutput(r.stdout || r.stderr || "(no output)", 1200),
+                  exitCode: r.exit_code,
                 });
+                callbacks.onMessageUpdate(stepId, serializeToolStep(step));
               } catch (approvedErr) {
                 toolContext += `\n(Approved command failed: ${approvedErr})\n`;
+                step = transitionToolStep(step, "failed", { warning: String(approvedErr) });
+                callbacks.onMessageUpdate(stepId, serializeToolStep(step));
               }
             } else {
               toolContext += `\n\n### Command DENIED by user: \`${cmd}\`\n`;
-              callbacks.onMessage({ id: newId(), role: "system", content: `❌ Denied: \`${cmd}\`` });
+              step = transitionToolStep(step, "denied");
+              callbacks.onMessageUpdate(stepId, serializeToolStep(step));
             }
           } else {
             toolContext += `\n(Command failed: ${e})\n`;
+            step = transitionToolStep(step, "failed", { warning: String(e) });
+            callbacks.onMessageUpdate(stepId, serializeToolStep(step));
           }
         }
       }
 
       for (const [, cmd] of runApprovals.slice(0, 2)) {
         if (aborted()) break;
-        callbacks.onStatus(`⏳ Awaiting approval: ${cmd}`);
+        const trimmedCmd = cmd.trim();
+        callbacks.onStatus(`⏳ Awaiting approval: ${trimmedCmd}`);
         const approvalId = newId();
-        callbacks.onMessage({ id: approvalId, role: "system", content: `⚠️ Action Required:\n\`${cmd}\`` });
+        let step = createToolStep({
+          id: approvalId,
+          kind: "command",
+          name: "run-approve",
+          title: "Execute Terminal Command",
+          safety: "DANGEROUS",
+          status: "pending_approval",
+          rawInput: trimmedCmd,
+          warning: "Review this shell command carefully before approving execution.",
+        });
+        callbacks.onMessage({ id: approvalId, role: "system", content: serializeToolStep(step) });
         const approved = await callbacks.onApprovalRequired(approvalId, cmd);
         if (aborted()) break;
         if (approved) {
+          step = transitionToolStep(step, "running");
+          callbacks.onMessageUpdate(approvalId, serializeToolStep(step));
           try {
             const r = await sandboxApi.executeApproved(cmd);
             // State-mutating command succeeded: invalidate cached read-only tool calls
             seenToolCalls.clear();
             const out = capToolOutput(r.stdout || r.stderr || "(no output)");
             toolContext += `\n\n### Approved Command: \`${cmd}\` (exit: ${r.exit_code})\n\`\`\`\n${out}\n\`\`\`\n`;
-            callbacks.onMessage({ id: newId(), role: "system", content: `✅ Approved & Executed: \`${cmd}\`` });
-          } catch (e) { toolContext += `\n(Approved command failed: ${e})\n`; }
+            step = transitionToolStep(step, r.exit_code === 0 ? "succeeded" : "failed", {
+              output: capToolOutput(r.stdout || r.stderr || "(no output)", 1200),
+              exitCode: r.exit_code,
+            });
+            callbacks.onMessageUpdate(approvalId, serializeToolStep(step));
+          } catch (e) {
+            toolContext += `\n(Approved command failed: ${e})\n`;
+            step = transitionToolStep(step, "failed", { warning: String(e) });
+            callbacks.onMessageUpdate(approvalId, serializeToolStep(step));
+          }
         } else {
           toolContext += `\n\n### Command DENIED by user: \`${cmd}\`\n`;
-          callbacks.onMessage({ id: newId(), role: "system", content: `❌ Denied: \`${cmd}\`` });
+          step = transitionToolStep(step, "denied");
+          callbacks.onMessageUpdate(approvalId, serializeToolStep(step));
         }
       }
 
@@ -388,25 +532,41 @@ Built-in Presets: ${JSON.stringify(BUILT_IN_PRESETS)}
         if (aborted()) break;
         callbacks.onStatus(`⏳ Awaiting approval: Security ${task.tool}`);
         const approvalId = newId();
-        const warning = task.dangerous ? `\n\n🚨 **WARNING**: This generates code patches. Review carefully before applying.` : "";
         const cmdStr = `${task.cmd} ${task.args.join(" ")}`;
-        callbacks.onMessage({ id: approvalId, role: "system", content: `⚠️ Security Action Required:\n**${task.tool}**\n\`${cmdStr}\`${warning}` });
+        let step = createToolStep({
+          id: approvalId,
+          kind: "security",
+          name: `security-${task.tool.toLowerCase()}`,
+          title: `Security: ${humanizeToolName(task.tool.toLowerCase())}`,
+          safety: task.dangerous ? "DANGEROUS" : "NORMAL",
+          status: "pending_approval",
+          rawInput: cmdStr,
+          warning: task.dangerous
+            ? "Generates candidate code patches — review diffs carefully before applying."
+            : undefined,
+        });
+        callbacks.onMessage({ id: approvalId, role: "system", content: serializeToolStep(step) });
         
         const approved = await callbacks.onApprovalRequired(approvalId, `[EVENT_APPROVE: cli-exec | {"command":"${task.cmd}","args":${JSON.stringify(task.args)}}]`);
         if (aborted()) break;
 
         if (approved) {
-          callbacks.onMessage({ id: newId(), role: "system", content: `✅ Approved: Security ${task.tool}. Executing...` });
+          step = transitionToolStep(step, "running");
+          callbacks.onMessageUpdate(approvalId, serializeToolStep(step));
           try {
             const result = await executeEvent("cli-exec", { command: task.cmd, args: task.args });
             toolContext += `\n\n### Security ${task.tool}\nResult: ${result}\n`;
-            callbacks.onMessage({ id: newId(), role: "system", content: `🏁 Security ${task.tool} Completed.` });
+            step = transitionToolStep(step, "succeeded", { output: capToolOutput(String(result), 1200) });
+            callbacks.onMessageUpdate(approvalId, serializeToolStep(step));
           } catch (e) {
             toolContext += `\n(Execution failed: ${e})\n`;
+            step = transitionToolStep(step, "failed", { warning: String(e) });
+            callbacks.onMessageUpdate(approvalId, serializeToolStep(step));
           }
         } else {
           toolContext += `\n(User denied Security ${task.tool})\n`;
-          callbacks.onMessage({ id: newId(), role: "system", content: `❌ Denied: Security ${task.tool}` });
+          step = transitionToolStep(step, "denied");
+          callbacks.onMessageUpdate(approvalId, serializeToolStep(step));
         }
       }
 
@@ -435,7 +595,17 @@ Built-in Presets: ${JSON.stringify(BUILT_IN_PRESETS)}
       for (const [, tab] of navigates) {
         const page = tab.toLowerCase().trim();
         toolContext += `\n(Navigated to ${page})\n`;
-        callbacks.onMessage({ id: newId(), role: "system", content: `🧭 Navigated to ${page} tab` });
+        const stepId = newId();
+        const step = createToolStep({
+          id: stepId,
+          kind: "navigate",
+          name: "navigate",
+          title: `Navigated to ${humanizeToolName(page)}`,
+          safety: "SAFE",
+          status: "succeeded",
+          rawInput: page,
+        });
+        callbacks.onMessage({ id: stepId, role: "system", content: serializeToolStep(step) });
         callbacks.onNavigate(page);
       }
 

@@ -36,7 +36,25 @@ export async function initAiHistory() {
   const saved = getAppSetting("ai_active_conversation", DEFAULT_CONVERSATION_ID);
   await refreshConversations();
   const exists = aiState.conversations.some((c) => c.id === saved);
-  await switchConversation(exists ? saved : DEFAULT_CONVERSATION_ID);
+  const targetId = exists ? saved : DEFAULT_CONVERSATION_ID;
+  aiState.activeConversationId = targetId;
+  setAppSetting("ai_active_conversation", targetId);
+  try {
+    const history = await aiApi.loadHistory(targetId);
+    const loaded = ((history as AiMessage[]) ?? []).filter((m) => m.content);
+    // Preserve any messages pushed during startup (e.g. fast starter click,
+    // auto-error trigger, or pre-seeded state) instead of clobbering them.
+    if (aiState.messages.length > 0) {
+      const loadedIds = new Set(loaded.map((m) => m.id));
+      const newer = aiState.messages.filter((m) => !loadedIds.has(m.id));
+      aiState.messages = [...loaded, ...newer];
+    } else {
+      aiState.messages = loaded;
+    }
+  } catch (e) {
+    console.error("Failed to load AI chat history:", e);
+    if (aiState.messages.length === 0) aiState.messages = [];
+  }
 }
 
 export async function switchConversation(id: string) {
@@ -170,3 +188,33 @@ export async function clearAiHistory() {
     console.error("Failed to clear AI chat history:", e);
   }
 }
+
+/**
+ * Truncates the active conversation starting from `messageId` onwards.
+ * Used for "Retry / Regenerate" (assistant messages) and "Edit & Resend" (user messages).
+ *
+ * 1. Drops `[messageId, ...]` from in-memory `aiState.messages`.
+ * 2. Wipes SQLite messages for active conversation via `aiApi.clearHistory(conversationId)`.
+ * 3. Re-saves the remaining messages via `aiApi.saveMessage(m, conversationId)`.
+ * 4. Requires 0 SQLite schema changes or migrations in `src-tauri`.
+ */
+export async function truncateAiMessagesFrom(messageId: string): Promise<void> {
+  const index = aiState.messages.findIndex((m) => m.id === messageId);
+  if (index === -1) return;
+
+  // Keep all turns strictly before the target message
+  aiState.messages = aiState.messages.slice(0, index);
+
+  const conversationId = aiState.activeConversationId;
+  try {
+    await aiApi.clearHistory(conversationId);
+    for (const message of aiState.messages) {
+      if (!message.content) continue;
+      await aiApi.saveMessage(message, conversationId);
+    }
+    await refreshConversations();
+  } catch (e) {
+    console.error("Failed to truncate AI chat history:", e);
+  }
+}
+

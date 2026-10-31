@@ -21,6 +21,7 @@
     deleteAiMessage,
     persistAiMessages,
     clearAiHistory,
+    truncateAiMessagesFrom,
     createConversation,
     switchConversation,
     renameConversation,
@@ -29,30 +30,120 @@
     type AiMessage,
   } from "../store/ai.svelte";
   import { t } from "../lib/i18n.svelte";
-  import { uiState, openSettingsSection } from "../store.svelte";
+  import {
+    uiState,
+    openSettingsSection,
+    dockerState,
+    dashboardState,
+  } from "../store.svelte";
   import { closeNotificationPanel } from "../store/notifications.svelte";
   import { aiApi } from "../lib/api";
-  import { onError } from "../lib/globalToast";
+  import { onError, globalToast } from "../lib/globalToast";
   import { appState, setAppSetting, getAppSetting } from "../lib/settingsStore.svelte";
-  import { renderMarkdown } from "../lib/markdown";
   import { parseAiTools } from "../lib/aiToolParser";
   import { newId } from "../lib/ids";
   import { runAgent, type AgentCallbacks } from "../lib/agentCore";
+  import { confirm } from "../store/confirm.svelte";
+  import { parseToolStep } from "../lib/aiToolStep";
+  import { getStarterPrompts, deriveFallbackSuggestions, buildLiveUiContextSnapshot } from "../lib/aiSuggestions";
+  import { getActiveProvider, activateProvider, setProviderField, findProvider } from "../lib/aiProviderConfig";
+  import AiMessageBody from "./ai/AiMessageBody.svelte";
+  import ToolStepCard from "./ai/ToolStepCard.svelte";
+  import InteractiveChoiceCard from "./ai/InteractiveChoiceCard.svelte";
+  import AiFollowUpBar from "./ai/AiFollowUpBar.svelte";
+  import AiEmptyState from "./ai/AiEmptyState.svelte";
+  import AiModelQuickBar from "./ai/AiModelQuickBar.svelte";
 
   onMount(() => {
     initAiHistory();
   });
 
-  function renderMarkdownHTML(text: string): string {
-    return renderMarkdown(text);
+  function getProvider() {
+    return getAppSetting("ai_provider", "anthropic");
+  }
+  function getModel() {
+    return getAppSetting("ai_model", "");
+  }
+  function isAutoTrigger() {
+    return getAppSetting("ai_diag_auto_trigger") !== "false";
+  }
+  function getApiKey() {
+    return getAppSetting("ai_api_key", "");
+  }
+  function getEndpoint() {
+    return getAppSetting("ai_endpoint", "");
   }
 
-  /** Chips belong to the newest reply only — see the render block. */
+  /** Chips and choice-card latest lock belong to the newest assistant reply only. */
   const lastAssistantId = $derived(
     aiState.messages.reduce<string | null>(
       (found: string | null, m: AiMessage) => (m.role === "assistant" ? m.id : found),
       null,
     ),
+  );
+
+  const lastAssistantMessage = $derived.by(() => {
+    for (let i = aiState.messages.length - 1; i >= 0; i--) {
+      if (aiState.messages[i].role === "assistant") {
+        return aiState.messages[i];
+      }
+    }
+    return undefined;
+  });
+
+  const lastAssistantParsed = $derived(
+    lastAssistantMessage ? parseAiTools(lastAssistantMessage.content) : null
+  );
+
+  const recentTurnTools = $derived.by(() => {
+    if (!lastAssistantMessage) return [];
+    const tools: { kind: string; name: string }[] = [];
+    for (let i = aiState.messages.length - 1; i >= 0; i--) {
+      const m = aiState.messages[i];
+      if (m.role === "user") break;
+      if (m.role === "system") {
+        const step = parseToolStep(m.content);
+        if (step) tools.push({ kind: step.kind, name: step.name });
+      }
+    }
+    return tools;
+  });
+
+  const activeSuggestions = $derived.by(() => {
+    if (!lastAssistantMessage || !lastAssistantParsed) return [];
+    if (lastAssistantParsed.suggests && lastAssistantParsed.suggests.length > 0) {
+      return lastAssistantParsed.suggests.slice(0, 3) as [string, string][];
+    }
+    return deriveFallbackSuggestions({
+      toolsExecuted: recentTurnTools,
+      currentPage: uiState.currentPage,
+      hasChoiceCard: Boolean(lastAssistantParsed.choicePrompt),
+    }).slice(0, 3);
+  });
+
+  const isConfigured = $derived.by(() => {
+    const prov = getProvider();
+    const model = getModel()?.trim();
+    const endpoint = getEndpoint()?.trim();
+    const apiKey = getApiKey()?.trim();
+    if (!model) return false;
+    const spec = findProvider(prov);
+    if (spec?.needsEndpoint && !endpoint) return false;
+    const keyRequired = spec
+      ? spec.needsKey && !(spec.needsEndpoint && Boolean(endpoint))
+      : prov !== "ollama-local" && prov !== "ollama";
+    if (keyRequired && !apiKey) return false;
+    return true;
+  });
+
+  const starterPrompts = $derived(
+    getStarterPrompts({
+      currentPage: uiState.currentPage,
+      instances: dashboardState.colimaInstances,
+      instancesLoaded: dashboardState.instancesLoaded,
+      containers: dockerState.containers,
+      k8sStatus: dashboardState.k8sStatus,
+    })
   );
 
   let panelWidth = $state(parseInt(getAppSetting("ai_panel_width", "400"), 10));
@@ -224,23 +315,167 @@
    */
   const unreadCount = $derived(aiState.errorCount + pendingApprovals.length);
 
-  const getProvider = () => getAppSetting("ai_provider", "anthropic");
-  const getModel = () => getAppSetting("ai_model", "");
-  const isAutoTrigger = () => getAppSetting("ai_diag_auto_trigger") !== "false";
-  const getApiKey = () => getAppSetting("ai_api_key", "");
-  const getEndpoint = () => getAppSetting("ai_endpoint", "");
+  // Scroll management elements and state (Feature 20)
+  let messagesContainerEl = $state<HTMLDivElement>();
+  let userScrolledUp = $state(false);
+  let showScrollToBottom = $state(false);
+  let unreadWhileScrolledUp = $state(0);
+  let prevMessagesCount = 0;
 
-  let messagesEndRef = $state<HTMLDivElement>();
+  // Live UI Context toggle (Feature 19)
+  let liveContextEnabled = $state(getAppSetting("ai_live_context_enabled", "true") !== "false");
 
-  function scrollToBottom() {
-    messagesEndRef?.scrollIntoView({ behavior: "smooth" });
+  function handleToggleLiveContext(enabled: boolean) {
+    liveContextEnabled = enabled;
+    void setAppSetting("ai_live_context_enabled", enabled ? "true" : "false");
+  }
+
+  function handleSelectModel(provider: string, model: string) {
+    if (provider !== getActiveProvider()) {
+      activateProvider(provider);
+    }
+    setProviderField(provider, "model", model);
+    void setAppSetting("ai_provider", provider);
+    void setAppSetting("ai_model", model);
+  }
+
+  const SCROLL_THRESHOLD = 72;
+
+  function isNearBottom(el: HTMLElement, threshold = SCROLL_THRESHOLD): boolean {
+    const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
+    return distance < threshold;
+  }
+
+  function handleScroll() {
+    if (!messagesContainerEl) return;
+    const near = isNearBottom(messagesContainerEl, SCROLL_THRESHOLD);
+    userScrolledUp = !near;
+    showScrollToBottom = !near;
+    if (near) {
+      unreadWhileScrolledUp = 0;
+    }
+  }
+
+  function scrollToBottom(behavior: "auto" | "smooth" = "smooth") {
+    if (!messagesContainerEl) return;
+    messagesContainerEl.scrollTo({
+      top: messagesContainerEl.scrollHeight,
+      behavior,
+    });
+    userScrolledUp = false;
+    showScrollToBottom = false;
+    unreadWhileScrolledUp = 0;
+  }
+
+  function handleScrollToBottomClick() {
+    scrollToBottom("smooth");
   }
 
   $effect(() => {
-    if (aiState.messages.length || aiState.isProcessing) {
-      tick().then(scrollToBottom);
-    }
+    const count = aiState.messages.length;
+    const isProc = aiState.isProcessing;
+    const lastMsgContent = count > 0 ? aiState.messages[count - 1]?.content : "";
+    void isProc;
+    void lastMsgContent;
+
+    tick().then(() => {
+      if (!messagesContainerEl) return;
+
+      // Track unread turns if user has scrolled up to read earlier history
+      if (count > prevMessagesCount && userScrolledUp) {
+        unreadWhileScrolledUp += (count - prevMessagesCount);
+      }
+      prevMessagesCount = count;
+
+      // Anti-hijacking: only auto-scroll if user has not scrolled away from bottom
+      if (!userScrolledUp) {
+        messagesContainerEl.scrollTop = messagesContainerEl.scrollHeight;
+      }
+    });
   });
+
+  function handleInsert(text: string) {
+    if (!text) return;
+    if (!userInput.trim()) {
+      userInput = text;
+    } else {
+      userInput = userInput.trimEnd() + "\n" + text;
+    }
+    tick().then(() => {
+      if (inputEl) {
+        inputEl.focus();
+        autoGrowTextarea();
+      }
+    });
+  }
+
+  async function handleCopyTurn(text: string) {
+    try {
+      if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text);
+        globalToast("success", t("ai.turn_copied", { default: "Message copied to clipboard" }), { record: false });
+      }
+    } catch (err) {
+      console.error("Failed to copy turn:", err);
+    }
+  }
+
+  async function handleRetryTurn(msg: AiMessage) {
+    if (aiState.isProcessing) return;
+    const msgIdx = aiState.messages.findIndex((m) => m.id === msg.id);
+    if (msgIdx === -1) return;
+
+    // Find previous user prompt that initiated this exchange
+    let precedingUser: AiMessage | undefined;
+    for (let i = msgIdx - 1; i >= 0; i--) {
+      if (aiState.messages[i].role === "user") {
+        precedingUser = aiState.messages[i];
+        break;
+      }
+    }
+    if (!precedingUser) return;
+
+    const prompt = precedingUser.content;
+    // Truncate history starting from the user prompt onwards
+    await truncateAiMessagesFrom(precedingUser.id);
+    // Re-send user prompt
+    await handleSend(prompt);
+  }
+
+  async function handleEditTurn(msg: AiMessage) {
+    if (aiState.isProcessing) return;
+    userInput = msg.content;
+    await truncateAiMessagesFrom(msg.id);
+    tick().then(() => {
+      if (inputEl) {
+        inputEl.focus();
+        autoGrowTextarea();
+      }
+    });
+  }
+
+  function handleToolApprove(id: string) {
+    const approval = pendingApprovals.find((a) => a.id === id);
+    if (approval) {
+      approval.resolve(true);
+      pendingApprovals = pendingApprovals.filter((a) => a.id !== id);
+    }
+  }
+
+  function handleToolDeny(id: string) {
+    const approval = pendingApprovals.find((a) => a.id === id);
+    if (approval) {
+      approval.resolve(false);
+      pendingApprovals = pendingApprovals.filter((a) => a.id !== id);
+    }
+  }
+
+  function handleUseOllama() {
+    activateProvider("ollama-local");
+    setProviderField("ollama-local", "model", "llama3.2");
+    void setAppSetting("ai_provider", "ollama-local");
+    void setAppSetting("ai_model", "llama3.2");
+  }
 
   onMount(() => {
     aiApi.getAppContext().then(ctx => appContext = ctx).catch(() => {});
@@ -339,9 +574,22 @@
       }
     })();
 
+    let effectiveAppContext = appContext;
+    if (liveContextEnabled) {
+      const liveSnapshot = buildLiveUiContextSnapshot({
+        currentPage: uiState.currentPage,
+        colimaInstances: dashboardState.colimaInstances,
+        containers: dockerState.containers,
+        k8sStatus: dashboardState.k8sStatus,
+      });
+      effectiveAppContext = effectiveAppContext
+        ? `${effectiveAppContext}\n\n${liveSnapshot}`
+        : liveSnapshot;
+    }
+
     try {
       await runAgent(
-        text, config, callbacks, [...aiState.messages], appContext, customPresets,
+        text, config, callbacks, [...aiState.messages], effectiveAppContext, customPresets,
         abortController.signal
       );
     } finally {
@@ -365,9 +613,26 @@
     }
   }
 
-  function handleClear() {
+  async function handleClear() {
+    if (aiState.messages.length === 0) return;
+    let isConfirmed: boolean;
+    try {
+      isConfirmed = await confirm({
+        title: t("ai.clear_chat_title", { default: "Clear Chat" }),
+        message: t("ai.clear_chat_confirm", {
+          default: "Are you sure you want to clear this conversation? This action cannot be undone.",
+        }),
+        confirmText: t("ai.clear", { default: "Clear" }),
+        variant: "danger",
+      });
+    } catch {
+      isConfirmed = typeof window !== "undefined" && typeof window.confirm === "function"
+        ? window.confirm(t("ai.clear_chat_confirm", { default: "Are you sure you want to clear this chat?" }))
+        : true;
+    }
+    if (!isConfirmed) return;
     clearActiveSchedules();
-    clearAiHistory();
+    await clearAiHistory();
   }
 
   async function handleNewChat() {
@@ -440,8 +705,13 @@
         >
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
         </button>
-        <button onclick={handleClear} title={t("ai.clear_chat", { default: "Clear this chat" })}>
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+        <button
+          type="button"
+          onclick={handleClear}
+          disabled={aiState.messages.length === 0}
+          title={t("ai.clear_chat", { default: "Clear this chat" })}
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
         </button>
         <!-- Minimise, not close: a chevron rather than an X, because the run
              and the conversation both survive. -->
@@ -450,6 +720,17 @@
         </button>
       </div>
     </div>
+
+    <!-- Feature 19: AI Model & Provider Quick-Bar with Live Context Toggle -->
+    <AiModelQuickBar
+      activeProviderId={getProvider()}
+      activeModel={getModel()}
+      liveContextEnabled={liveContextEnabled}
+      currentPage={uiState.currentPage}
+      onSelectModel={handleSelectModel}
+      onToggleLiveContext={handleToggleLiveContext}
+      onOpenSettings={() => openSettingsSection("ai")}
+    />
 
     {#if showHistory}
       <div class="ai-history-dropdown">
@@ -503,96 +784,184 @@
       </div>
     {/if}
 
-    <div class="ai-panel-messages">
+    <div
+      class="ai-panel-messages"
+      bind:this={messagesContainerEl}
+      onscroll={handleScroll}
+      role="log"
+      aria-live="polite"
+      aria-label={t("ai.chat_history", { default: "Chat history" })}
+    >
+      <!-- Feature 18: Empty State with Warning-Prioritized Starter Prompts & Onboarding -->
       {#if aiState.messages.length === 0}
-        <div class="ai-panel-empty">
-          <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="var(--accent-blue)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="margin-bottom: 16px;">
-            <path d="M12 2a2 2 0 0 1 2 2v2a2 2 0 0 1-2 2 2 2 0 0 1-2-2V4a2 2 0 0 1 2-2z"></path>
-            <path d="M5.636 5.636a2 2 0 0 1 2.828 0l1.414 1.414a2 2 0 0 1 0 2.828 2 2 0 0 1-2.828 0L5.636 7.05a2 2 0 0 1 0-2.828z"></path>
-            <path d="M22 12a2 2 0 0 1-2 2h-2a2 2 0 0 1-2-2 2 2 0 0 1 2-2h2a2 2 0 0 1 2 2z"></path>
-            <path d="M18.364 18.364a2 2 0 0 1-2.828 0l-1.414-1.414a2 2 0 0 1 0-2.828 2 2 0 0 1 2.828 0l1.414 1.414a2 2 0 0 1 0 2.828z"></path>
-            <path d="M12 22a2 2 0 0 1-2-2v-2a2 2 0 0 1 2-2 2 2 0 0 1 2 2v2a2 2 0 0 1-2 2z"></path>
-            <path d="M5.636 18.364a2 2 0 0 1 0-2.828l1.414-1.414a2 2 0 0 1 2.828 0 2 2 0 0 1 0 2.828l-1.414 1.414a2 2 0 0 1-2.828 0z"></path>
-            <path d="M2 12a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2 2 2 0 0 1-2 2H4a2 2 0 0 1-2-2z"></path>
-          </svg>
-          <p>{t("ai.empty_title", { default: "Hi! I'm your Colima AI Assistant." })}</p>
-          <p class="ai-panel-empty-hint">
-            {t("ai.empty_hint", {
-              default: "I can control containers, troubleshoot issues, read the knowledge bank, and manage your VMs.",
-            })}
-          </p>
-        </div>
+        <AiEmptyState
+          {starterPrompts}
+          {isConfigured}
+          onSelectPrompt={(p) => handleSend(p)}
+          onInsertPrompt={handleInsert}
+          onUseOllama={handleUseOllama}
+          onOpenSettings={() => openSettingsSection("ai")}
+        />
       {/if}
 
+      <!-- Message History List -->
       {#each aiState.messages as msg (msg.id)}
         <div class="ai-msg {msg.role}" id="ai-msg-{msg.id}">
           {#if msg.role === "system"}
-            <div class="ai-msg-system">
-              {@html renderMarkdownHTML(msg.content)}
-            </div>
-          {:else if msg.role === "user"}
-            <div class="ai-msg-label">{t("ai.role_you", { default: "You" })}</div>
-            <div class="ai-msg-user">
-              {@html renderMarkdownHTML(msg.content)}
-            </div>
-          {:else}
-            {@const parsed = parseAiTools(msg.content)}
-            <div class="ai-msg-label">{t("ai.role_assistant", { default: "Colima AI" })}</div>
-            <!-- A reply that is only suggestions has no prose to show; an empty
-                 bubble above the chips would read as a failed response. -->
-            {#if parsed.cleanText}
-              <div class="ai-msg-assistant">
-                {@html renderMarkdownHTML(parsed.cleanText)}
+            {@const step = parseToolStep(msg.content)}
+            {#if step}
+              <!-- Feature 15: Unified In-Place ToolStepCard -->
+              <ToolStepCard
+                {step}
+                onApprove={handleToolApprove}
+                onDeny={handleToolDeny}
+              />
+            {:else}
+              <div class="ai-msg-system">
+                <AiMessageBody content={msg.content} onInsert={handleInsert} />
               </div>
             {/if}
-            <!-- Only the newest reply offers chips: a suggestion from three
-                 turns ago sends a prompt that no longer fits the conversation. -->
-            {#if msg.id === lastAssistantId && parsed.suggests.length > 0}
-              <div class="ai-suggestions">
-                <!-- Keyed by position, not label: a model that repeats a label
-                     would otherwise crash the keyed each with a duplicate key. -->
-                {#each parsed.suggests as [, label, prompt], i (i)}
-                  <button
-                    class="ai-suggestion-chip"
-                    disabled={aiState.isProcessing}
-                    onclick={() => handleSend((prompt ?? label).trim())}
-                  >{label.trim()}</button>
-                {/each}
+          {:else if msg.role === "user"}
+            <!-- User Turn with Copy and Edit & Resend Action Controls (natural DOM order) -->
+            <div class="ai-msg-header">
+              <div class="ai-msg-actions">
+                <button
+                  type="button"
+                  class="ai-action-btn"
+                  title={t("ai.copy", { default: "Copy" })}
+                  aria-label={t("ai.copy", { default: "Copy message" })}
+                  onclick={() => handleCopyTurn(msg.content)}
+                >
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                  </svg>
+                </button>
+                <button
+                  type="button"
+                  class="ai-action-btn"
+                  title={t("ai.edit_resend", { default: "Edit & Resend" })}
+                  aria-label={t("ai.edit_resend", { default: "Edit and resend" })}
+                  onclick={() => handleEditTurn(msg)}
+                >
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M12 20h9"></path>
+                    <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4z"></path>
+                  </svg>
+                </button>
               </div>
+              <span class="ai-msg-label">{t("ai.role_you", { default: "You" })}</span>
+            </div>
+            <div class="ai-msg-user">
+              <AiMessageBody content={msg.content} onInsert={handleInsert} />
+            </div>
+          {:else}
+            <!-- Assistant Turn with Markdown AST, Tool Parser & Interactive Choice Cards -->
+            {@const parsed = parseAiTools(msg.content)}
+            <div class="ai-msg-header">
+              <span class="ai-msg-label">{t("ai.role_assistant", { default: "Colima AI" })}</span>
+              <div class="ai-msg-actions">
+                <button
+                  type="button"
+                  class="ai-action-btn"
+                  title={t("ai.copy", { default: "Copy" })}
+                  aria-label={t("ai.copy", { default: "Copy message" })}
+                  onclick={() => handleCopyTurn(parsed.cleanText || msg.content)}
+                >
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                  </svg>
+                </button>
+                {#if !aiState.isProcessing}
+                  <button
+                    type="button"
+                    class="ai-action-btn"
+                    title={t("ai.retry", { default: "Retry / Regenerate" })}
+                    aria-label={t("ai.retry", { default: "Retry message" })}
+                    onclick={() => handleRetryTurn(msg)}
+                  >
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                      <polyline points="1 4 1 10 7 10"></polyline>
+                      <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"></path>
+                    </svg>
+                  </button>
+                {/if}
+              </div>
+            </div>
+            {#if parsed.cleanText}
+              <div class="ai-msg-assistant">
+                <AiMessageBody content={parsed.cleanText} onInsert={handleInsert} />
+              </div>
+            {/if}
+            {#if parsed.choicePrompt}
+              <!-- Feature 16: Interactive Choice Cards with Turn Locking -->
+              <InteractiveChoiceCard
+                choice={parsed.choicePrompt}
+                isLatest={msg.id === lastAssistantId}
+                onSelect={(val) => handleSend(val)}
+                onInsert={handleInsert}
+              />
             {/if}
           {/if}
         </div>
       {/each}
 
-      {#each pendingApprovals as approval (approval.id)}
+      <!-- Fallback Pending Approvals Rendered via ToolStepCard -->
+      {#each pendingApprovals.filter(a => !aiState.messages.some(m => m.id === a.id)) as approval (approval.id)}
+        {@const fallbackStep = {
+          version: 1 as const,
+          id: approval.id,
+          kind: "command" as const,
+          name: "command",
+          title: "Command Approval Required",
+          safety: "DANGEROUS" as const,
+          status: "pending_approval" as const,
+          rawInput: approval.command,
+          warning: "This action requires user confirmation before execution.",
+          timestamp: Date.now(),
+        }}
         <div class="ai-msg system">
-          <div class="ai-msg-system" style="border: 1px solid var(--accent-red); background: rgba(248, 81, 73, 0.1);">
-            <div style="font-weight: 600; margin-bottom: 8px; color: var(--accent-red);">Action Approval Required</div>
-            <pre style="margin: 0 0 12px 0; background: var(--bg-app); padding: 8px; border-radius: 4px; font-size: var(--text-xs); overflow-x: auto;">{approval.command}</pre>
-            <div style="display: flex; gap: 8px;">
-              <button 
-                class="btn" 
-                style="background: var(--accent-green); color: #fff; border: none; padding: 6px 12px; font-size: var(--text-xs); border-radius: 4px; cursor: pointer;"
-                onclick={() => {
-                  approval.resolve(true);
-                  pendingApprovals = pendingApprovals.filter(a => a.id !== approval.id);
-                }}
-              >Approve</button>
-              <button 
-                class="btn btn-ghost"
-                style="padding: 6px 12px; font-size: var(--text-xs); border-radius: 4px; border: 1px solid var(--border-primary); cursor: pointer; color: var(--text-primary);"
-                onclick={() => {
-                  approval.resolve(false);
-                  pendingApprovals = pendingApprovals.filter(a => a.id !== approval.id);
-                }}
-              >Deny</button>
-            </div>
-          </div>
+          <ToolStepCard
+            step={fallbackStep}
+            onApprove={() => handleToolApprove(approval.id)}
+            onDeny={() => handleToolDeny(approval.id)}
+          />
         </div>
       {/each}
 
-      <div bind:this={messagesEndRef} style="height: 1px;"></div>
+      <div class="ai-messages-anchor" style="height: 1px;"></div>
     </div>
+
+    <!-- Feature 20: Floating Scroll-to-Bottom Button -->
+    {#if showScrollToBottom}
+      <button
+        type="button"
+        class="ai-scroll-bottom-btn"
+        onclick={handleScrollToBottomClick}
+        aria-label={t("ai.scroll_to_bottom", { default: "Scroll to bottom" })}
+        title={t("ai.scroll_to_bottom", { default: "Scroll to bottom" })}
+      >
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="6 9 12 15 18 9"></polyline>
+        </svg>
+        {#if unreadWhileScrolledUp > 0}
+          <span class="ai-scroll-unread-badge">{unreadWhileScrolledUp > 9 ? "9+" : unreadWhileScrolledUp}</span>
+        {/if}
+      </button>
+    {/if}
+
+    <!-- Feature 17: Follow-up Suggestions Bar (Mounted above prompt composer) -->
+    {#if activeSuggestions.length > 0 && !aiState.isProcessing}
+      <div class="ai-follow-up-wrapper">
+        <AiFollowUpBar
+          suggestions={activeSuggestions}
+          disabled={aiState.isProcessing}
+          onSend={(prompt) => handleSend(prompt)}
+          onInsert={handleInsert}
+        />
+      </div>
+    {/if}
 
     <div class="ai-panel-input">
       {#if queuedMessage}
@@ -703,7 +1072,7 @@
     z-index: 10;
   }
   .ai-panel-resizer:hover {
-    background: rgba(88, 166, 255, 0.2);
+    background: var(--border-accent);
   }
 
   /* Shares the header tokens with the sidebar and the page header so all three
@@ -732,11 +1101,11 @@
 
   .ai-status-badge {
     font-size: 10px;
-    background: rgba(88, 166, 255, 0.1);
+    background: var(--surface-selected);
     color: var(--accent-blue);
     padding: 2px 6px;
-    border-radius: 10px;
-    border: 1px solid rgba(88, 166, 255, 0.2);
+    border-radius: var(--radius-full);
+    border: 1px solid var(--border-accent);
     animation: pulse 2s infinite;
   }
 
@@ -757,12 +1126,16 @@
     cursor: pointer;
     transition: var(--transition-fast);
   }
-  .ai-panel-actions button:hover {
+  .ai-panel-actions button:hover:not(:disabled) {
     background: var(--bg-card-hover);
     color: var(--text-primary);
   }
+  .ai-panel-actions button:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
   .ai-panel-actions button.active {
-    background: rgba(88, 166, 255, 0.15);
+    background: var(--surface-selected);
     color: var(--accent-blue);
   }
 
@@ -803,7 +1176,7 @@
     background: var(--bg-card-hover);
   }
   .ai-history-row.active {
-    background: rgba(88, 166, 255, 0.12);
+    background: var(--surface-selected);
   }
 
   .ai-history-item {
@@ -916,23 +1289,61 @@
   .ai-msg {
     display: flex;
     flex-direction: column;
+    position: relative;
+  }
+
+  .ai-msg-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 4px;
+    padding: 0 2px;
+  }
+  .ai-msg.user .ai-msg-header {
+    justify-content: flex-end;
+    gap: 6px;
   }
 
   .ai-msg-label {
     font-size: 10px;
     color: var(--text-muted);
-    margin-bottom: 4px;
   }
-  .ai-msg.user .ai-msg-label {
-    align-self: flex-end;
+
+  .ai-msg-actions {
+    display: flex;
+    gap: 4px;
+    opacity: 0;
+    transition: opacity var(--transition-fast);
+  }
+  .ai-msg:hover .ai-msg-actions,
+  .ai-msg:focus-within .ai-msg-actions {
+    opacity: 1;
+  }
+
+  .ai-action-btn {
+    background: transparent;
+    border: none;
+    color: var(--text-muted);
+    width: 22px;
+    height: 22px;
+    border-radius: var(--radius-sm);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: background var(--transition-fast), color var(--transition-fast);
+  }
+  .ai-action-btn:hover {
+    background: var(--bg-card-hover);
+    color: var(--text-primary);
   }
 
   .ai-msg-user {
     align-self: flex-end;
-    background: #1f6feb;
-    color: #fff;
+    background: var(--accent-blue);
+    color: var(--bg-app);
     padding: 10px 14px;
-    border-radius: 14px 14px 4px 14px;
+    border-radius: var(--radius-lg) var(--radius-lg) var(--radius-sm) var(--radius-lg);
     font-size: var(--text-sm);
     max-width: 85%;
     line-height: 1.5;
@@ -943,7 +1354,7 @@
     background: var(--bg-card);
     border: 1px solid var(--border-subtle);
     padding: 10px 14px;
-    border-radius: 14px 14px 14px 4px;
+    border-radius: var(--radius-lg) var(--radius-lg) var(--radius-lg) var(--radius-sm);
     color: var(--text-primary);
     font-size: var(--text-sm);
     max-width: 95%;
@@ -955,11 +1366,58 @@
     background: var(--bg-app);
     border: 1px solid var(--border-subtle);
     padding: 8px 12px;
-    border-radius: 8px;
+    border-radius: var(--radius-md);
     color: var(--text-secondary);
     font-size: 12px;
     max-width: 90%;
     line-height: 1.5;
+  }
+
+  .ai-follow-up-wrapper {
+    padding: 6px 12px 0 12px;
+    background: var(--bg-sidebar);
+  }
+
+  /* Floating Scroll-to-Bottom Button (Feature 20) */
+  .ai-scroll-bottom-btn {
+    position: absolute;
+    bottom: 84px;
+    right: 20px;
+    z-index: 50;
+    width: 32px;
+    height: 32px;
+    border-radius: var(--radius-full);
+    background: var(--bg-card);
+    border: 1px solid var(--border-primary);
+    color: var(--text-secondary);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    box-shadow: var(--shadow-md);
+    transition: transform var(--transition-fast), color var(--transition-fast), background var(--transition-fast);
+  }
+  .ai-scroll-bottom-btn:hover {
+    background: var(--bg-card-hover);
+    color: var(--accent-blue);
+    transform: translateY(-2px);
+  }
+  .ai-scroll-unread-badge {
+    position: absolute;
+    top: -6px;
+    right: -6px;
+    min-width: 16px;
+    height: 16px;
+    border-radius: var(--radius-full);
+    background: var(--accent-blue);
+    color: var(--bg-app);
+    font-size: 9px;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0 4px;
+    border: 1px solid var(--bg-card);
   }
 
   .ai-panel-input {
@@ -1047,17 +1505,17 @@
     gap: 8px;
     background: var(--bg-input);
     border: 1px solid var(--border-primary);
-    border-radius: 22px;
+    border-radius: var(--radius-xl);
     padding: 6px 6px 6px 14px;
     transition: border-color var(--transition-fast), box-shadow var(--transition-fast),
       background var(--transition-fast);
   }
   .ai-input-pill:hover {
-    border-color: #484f58;
+    border-color: var(--border-accent);
   }
   .ai-input-pill:focus-within {
     border-color: var(--accent-blue);
-    box-shadow: 0 0 0 2px rgba(88, 166, 255, 0.18);
+    box-shadow: 0 0 0 2px var(--accent-blue-glow);
     background: var(--bg-card);
   }
   .ai-input-pill textarea {
@@ -1098,23 +1556,23 @@
   .ai-send-btn {
     width: 36px;
     height: 36px;
-    border-radius: 50%;
-    background: linear-gradient(135deg, #58a6ff, #1f6feb);
-    color: #fff;
+    border-radius: var(--radius-full);
+    background: var(--accent-blue);
+    color: var(--bg-app);
     border: none;
     display: flex;
     align-items: center;
     justify-content: center;
     cursor: pointer;
     transition: background var(--transition-fast), transform var(--transition-fast),
-      box-shadow var(--transition-fast);
+      box-shadow var(--transition-fast), filter var(--transition-fast);
     flex-shrink: 0;
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+    box-shadow: var(--shadow-sm);
   }
   .ai-send-btn:hover:not(:disabled) {
-    background: linear-gradient(135deg, #6cb2ff, #2f7cf0);
+    filter: brightness(1.1);
     transform: scale(1.05);
-    box-shadow: 0 2px 8px rgba(31, 111, 235, 0.4);
+    box-shadow: var(--shadow-glow-blue);
   }
   .ai-send-btn:active:not(:disabled) {
     transform: scale(0.92);
@@ -1122,11 +1580,12 @@
   /* Red rather than blue: it interrupts rather than sends, and it occupies the
      exact spot the send button was in a moment ago. */
   .ai-stop-btn {
-    background: linear-gradient(135deg, #f85149, #da3633);
+    background: var(--accent-red);
+    color: var(--bg-app);
   }
   .ai-stop-btn:hover:not(:disabled) {
-    background: linear-gradient(135deg, #ff6b63, #e5484d);
-    box-shadow: 0 2px 8px rgba(218, 54, 51, 0.4);
+    filter: brightness(1.1);
+    box-shadow: var(--accent-red-glow);
   }
 
   .ai-send-btn:disabled {
@@ -1152,19 +1611,19 @@
     width: 48px;
     height: 48px;
     border-radius: var(--radius-full);
-    background: linear-gradient(135deg, #58a6ff, #bc8cff);
+    background: linear-gradient(135deg, var(--accent-blue), var(--accent-purple));
     border: none;
     cursor: pointer;
     display: flex;
     align-items: center;
     justify-content: center;
-    box-shadow: 0 4px 16px rgba(88, 166, 255, 0.3);
+    box-shadow: var(--shadow-md);
     transition: transform var(--transition-fast), box-shadow var(--transition-fast),
       opacity var(--transition-fast);
   }
   .ai-bubble-trigger:hover {
     transform: scale(1.08);
-    box-shadow: 0 6px 24px rgba(88, 166, 255, 0.4);
+    box-shadow: var(--shadow-lg);
   }
   /* Faded rather than unmounted so showing and hiding both animate. */
   .ai-bubble-trigger-hidden {
@@ -1175,7 +1634,7 @@
   .ai-bubble-trigger svg {
     width: 22px;
     height: 22px;
-    color: #fff;
+    color: var(--bg-app);
   }
 
   .ai-bubble-badge {
@@ -1186,7 +1645,7 @@
     height: 18px;
     border-radius: var(--radius-full);
     background: var(--accent-red);
-    color: #fff;
+    color: var(--bg-app);
     font-size: 10px;
     font-weight: 600;
     display: flex;
@@ -1208,8 +1667,13 @@
     position: absolute;
     inset: 0;
     border-radius: var(--radius-full);
-    border: 2px solid rgba(88, 166, 255, 0.6);
+    border: 2px solid var(--accent-blue);
     animation: ai-bubble-ring 1.6s ease-out infinite;
+  }
+
+  @keyframes ai-bubble-ring {
+    0% { transform: scale(1); opacity: 0.7; }
+    100% { transform: scale(1.5); opacity: 0; }
   }
 
   @keyframes ai-bubble-ring {
