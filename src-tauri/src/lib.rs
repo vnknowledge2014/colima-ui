@@ -9,6 +9,7 @@ pub mod crash;
 pub mod docker_state;
 pub mod docker_events;
 pub mod instance_reader;
+pub mod shell_env;
 pub mod path_util;
 mod poller;
 mod terminal_session;
@@ -75,6 +76,33 @@ fn reap_terminal_sessions(app: &tauri::AppHandle) {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Launchd gives GUI apps a bare environment. Two fixes, both needed for
+    // the colima/dockerd socket discovery to behave like a user shell:
+    //
+    // 1. export XDG_CONFIG_HOME when absent — without it, colima 0.10.x falls
+    //    back to a legacy ~/.colima, creating hollow stub dirs via MkdirAll on
+    //    every spawned command, and then prefers that stub over the real XDG
+    //    config home on all later resolutions.
+    // 2. the gate is the LAYOUT, not the var: colima only resolves
+    //    $XDG_CONFIG_HOME/colima when that dir exists — pre-create it so the
+    //    resolution lands in the XDG home (also covers a machine whose
+    //    XDG_CONFIG_HOME points at a relocated root never yet initialized).
+    //
+    // Adopt the rest of the user's shell env (LIMA_HOME, DOCKER_*, KUBECONFIG,
+    // PATH) — one-shot via shell_env::adopt(); already-set vars stay.
+    let xdg_absent = match std::env::var("XDG_CONFIG_HOME") {
+        Ok(v) => v.trim().is_empty(),
+        Err(_) => true,
+    };
+    if xdg_absent {
+        let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
+        std::env::set_var("XDG_CONFIG_HOME", format!("{}/.config", home));
+    }
+    if let Ok(xdg) = std::env::var("XDG_CONFIG_HOME") {
+        let _ = std::fs::create_dir_all(std::path::PathBuf::from(&xdg).join("colima"));
+    }
+    shell_env::adopt();
+
     // Redact secrets from panic output before anything else can panic.
     crash::install();
 

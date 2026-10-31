@@ -47,13 +47,62 @@ struct KubernetesConfig {
     enabled: bool,
 }
 
-/// Get the colima home directory (~/.colima)
+/// Get the colima home directory.
+/// Mirrors colima 0.10.x's own XDG resolution (config/files.go):
+/// COLIMA_HOME (if the dir exists) > legacy ~/.colima (if it exists) >
+/// ~/.config/colima (if it exists) > legacy ~/.colima.
+/// Modern colima keeps profile configs, _templates and sockets under the
+/// XDG config home; older installs keep them under ~/.colima.
 pub fn colima_home() -> PathBuf {
-    if let Ok(home) = std::env::var("COLIMA_HOME") {
-        return PathBuf::from(home);
-    }
+    let colima_home_env = std::env::var("COLIMA_HOME").ok();
     let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
-    PathBuf::from(home).join(".colima")
+    resolve_colima_home(colima_home_env.as_deref(), &home)
+}
+
+/// Resolution legs with explicit inputs, so they are testable without
+/// mutating process env (tests run in parallel threads; env races forbid
+/// `set_var` here).
+pub fn resolve_colima_home(colima_home_env: Option<&str>, home: &str) -> PathBuf {
+    /// A dir "holds state" if it contains any profile's colima.yaml, the
+    /// profile store, or template files. Hollow stub dirs (created by colima's
+    /// mkdir-only code paths, e.g. status/run under a sanitized env) must not
+    /// outrank a real config home, and must not redirect anything to the
+    /// legacy path once it exists.
+    fn holds_config_state(dir: &std::path::Path) -> bool {
+        if !dir.is_dir() {
+            return false;
+        }
+        if dir.join("_store").join("colima.json").exists()
+            || dir.join("_templates").join("default.yaml").exists()
+        {
+            return true;
+        }
+        std::fs::read_dir(dir).is_ok_and(|entries| {
+            entries
+                .flatten()
+                .any(|e| e.path().is_dir() && e.path().join("colima.yaml").is_file())
+        })
+    }
+
+    // COLIMA_HOME is honored only when the dir exists (colima's own rule).
+    if let Some(dir) = colima_home_env {
+        if std::path::Path::new(dir).is_dir() {
+            return PathBuf::from(dir);
+        }
+    }
+    let legacy = PathBuf::from(home).join(".colima");
+    let xdg = PathBuf::from(home).join(".config").join("colima");
+
+    // Prefer a candidate that actually contains colima state; the plain
+    // existence check would let a hollow stub (created by colima's own
+    // mkdir-fallback under a sanitized env) hijack the resolution.
+    if legacy.is_dir() && holds_config_state(&legacy) {
+        return legacy;
+    }
+    if xdg.is_dir() {
+        return xdg;
+    }
+    legacy
 }
 
 /// Map a profile name to its lima instance directory name.
@@ -180,7 +229,7 @@ fn read_instance(colima_home: &Path, profile: &str) -> Option<ColimaInstance> {
         return None;
     }
     let lima_name = lima_instance_name(profile);
-    let lima_dir = colima_home.join("_lima").join(&lima_name);
+    let lima_dir = crate::path_util::lima_home().join(&lima_name);
 
     // Read and parse the colima.yaml config
     let config: ColimaConfig = if config_path.exists() {
@@ -387,7 +436,12 @@ mod tests {
     fn temp_test_dir(name: &str) -> PathBuf {
         static COUNTER: AtomicU64 = AtomicU64::new(0);
         let id = COUNTER.fetch_add(1, Ordering::Relaxed);
-        let dir = PathBuf::from(format!("/tmp/cui-ir-test-{}-{}-{}", name, std::process::id(), id));
+        let dir = PathBuf::from(format!(
+            "/tmp/cui-ir-test-{}-{}-{}",
+            name,
+            std::process::id(),
+            id
+        ));
         let _ = std::fs::remove_dir_all(&dir);
         let _ = std::fs::create_dir_all(&dir);
         dir
@@ -408,14 +462,21 @@ mod tests {
         // Profile 1: runtime containerd
         let prof1_dir = home.join("containerd_prof");
         std::fs::create_dir_all(&prof1_dir).unwrap();
-        std::fs::write(prof1_dir.join("colima.yaml"), "cpu: 2\nruntime: containerd\n").unwrap();
+        std::fs::write(
+            prof1_dir.join("colima.yaml"),
+            "cpu: 2\nruntime: containerd\n",
+        )
+        .unwrap();
 
         // Profile 2: default docker when empty or missing
         let prof2_dir = home.join("docker_prof");
         std::fs::create_dir_all(&prof2_dir).unwrap();
         std::fs::write(prof2_dir.join("colima.yaml"), "cpu: 4\n").unwrap();
 
-        assert_eq!(read_profile_runtime_in(&home, "containerd_prof"), "containerd");
+        assert_eq!(
+            read_profile_runtime_in(&home, "containerd_prof"),
+            "containerd"
+        );
         assert_eq!(read_profile_runtime_in(&home, "docker_prof"), "docker");
         assert_eq!(read_profile_runtime_in(&home, "nonexistent"), "docker");
     }
@@ -455,8 +516,14 @@ mod tests {
         let old_time = (now - 120) as libc::time_t;
         let c_path = std::ffi::CString::new(ha_pid.to_str().unwrap()).unwrap();
         let times = [
-            libc::timeval { tv_sec: old_time, tv_usec: 0 },
-            libc::timeval { tv_sec: old_time, tv_usec: 0 },
+            libc::timeval {
+                tv_sec: old_time,
+                tv_usec: 0,
+            },
+            libc::timeval {
+                tv_sec: old_time,
+                tv_usec: 0,
+            },
         ];
         unsafe {
             libc::utimes(c_path.as_ptr(), times.as_ptr());
@@ -556,5 +623,108 @@ mod tests {
 
         let names: Vec<&str> = instances.iter().map(|i| i.name.as_str()).collect();
         assert_eq!(names, vec!["beta", "gamma", "alpha", "zebra"]);
+    }
+
+    // --- colima home resolution (see resolve_colima_home) ---
+
+    #[test]
+    fn test_resolve_colima_home_env_dir_wins() {
+        // COLIMA_HOME with an existing dir outranks both filesystem legs
+        let temp_home = temp_test_dir("res-env");
+        let env_dir = temp_test_dir("res-env-dir");
+        std::fs::create_dir_all(temp_home.join(".config").join("colima")).unwrap();
+        assert_eq!(
+            resolve_colima_home(Some(env_dir.to_str().unwrap()), temp_home.to_str().unwrap()),
+            env_dir
+        );
+    }
+
+    #[test]
+    fn test_resolve_colima_home_env_nonexistent_is_ignored() {
+        // COLIMA_HOME pointing at a missing dir must NOT poison the result:
+        // colima itself only honors the var when the dir exists (verified
+        // against colima 0.10.x behavior on 2026-10-28).
+        let temp_home = temp_test_dir("res-env-missing");
+        let xdg = temp_home.join(".config").join("colima");
+        std::fs::create_dir_all(&xdg).unwrap();
+        let bogus = "/tmp/colima-ui-no-such-dir-12345";
+        assert_eq!(
+            resolve_colima_home(Some(bogus), temp_home.to_str().unwrap()),
+            xdg
+        );
+    }
+
+    #[test]
+    fn test_resolve_colima_home_legacy_preferred_over_xdg() {
+        let temp_home = temp_test_dir("res-legacy");
+        let legacy = temp_home.join(".colima");
+        let legacy_default = legacy.join("default");
+        std::fs::create_dir_all(&legacy_default).unwrap();
+        std::fs::write(legacy_default.join("colima.yaml"), "cpu: 2\n").unwrap();
+        std::fs::create_dir_all(temp_home.join(".config").join("colima")).unwrap();
+        assert_eq!(
+            resolve_colima_home(None, temp_home.to_str().unwrap()),
+            legacy
+        );
+    }
+
+    #[test]
+    fn test_resolve_colima_home_xdg_when_legacy_missing() {
+        // the case this patch exists for: modern XDG-relocated colima install
+        let temp_home = temp_test_dir("res-xdg");
+        let xdg = temp_home.join(".config").join("colima");
+        std::fs::create_dir_all(&xdg).unwrap();
+        assert_eq!(resolve_colima_home(None, temp_home.to_str().unwrap()), xdg);
+    }
+
+    #[test]
+    fn test_resolve_colima_home_defaults_legacy_when_nothing_exists() {
+        let temp_home = temp_test_dir("res-none");
+        assert_eq!(
+            resolve_colima_home(None, temp_home.to_str().unwrap()),
+            temp_home.join(".colima")
+        );
+    }
+
+    #[test]
+    fn test_resolve_colima_home_hollow_stub_is_skipped() {
+        // a hollow legacy dir (colima's mkdir-fallback stub: empty _lima/
+        // _store/default, no config anywhere) must not hijack the resolution
+        // away from an XDG home that actually holds state — this was the
+        // recurring "colima is ignored but the stub keeps coming back" bug.
+        let temp_home = temp_test_dir("res-hollow");
+        std::fs::create_dir_all(temp_home.join(".colima").join("default")).unwrap();
+        std::fs::create_dir_all(temp_home.join(".colima").join("_store")).unwrap();
+        std::fs::create_dir_all(temp_home.join(".colima").join("_lima")).unwrap();
+        let xdg_home = temp_home.join(".config").join("colima");
+        let xdg_default = xdg_home.join("default");
+        std::fs::create_dir_all(&xdg_default).unwrap();
+        std::fs::write(xdg_default.join("colima.yaml"), "cpu: 4\n").unwrap();
+        assert_eq!(
+            resolve_colima_home(None, temp_home.to_str().unwrap()),
+            xdg_home
+        );
+    }
+
+    #[test]
+    fn test_profile_runtime_read_from_xdg_home() {
+        // end-to-end over the resolution: instance reading works against an
+        // XDG-layout colima home, not just the legacy one — the exact shape
+        // of a relocated colima 0.10 install
+        let temp_home = temp_test_dir("res-xdg-runtime");
+        let profile_dir = temp_home.join(".config").join("colima").join("default");
+        std::fs::create_dir_all(&profile_dir).unwrap();
+        std::fs::write(
+            profile_dir.join("colima.yaml"),
+            "cpu: 4\nruntime: containerd\n",
+        )
+        .unwrap();
+        assert_eq!(
+            read_profile_runtime_in(
+                &resolve_colima_home(None, temp_home.to_str().unwrap()),
+                "default"
+            ),
+            "containerd"
+        );
     }
 }
