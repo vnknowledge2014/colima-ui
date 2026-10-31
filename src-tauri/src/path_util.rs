@@ -358,6 +358,21 @@ fn profile_from_docker_context(context: &str) -> Option<String> {
     }
 }
 
+/// Lima instance store (VM dirs incl. ha.pid/ha.sock).
+///
+/// Mirrors colima's own `limaDir()`: `LIMA_HOME` is honored unconditionally
+/// when non-empty (it is provisioned into this process at startup — see
+/// `shell_env::adopt`), else instances live under the colima config home's
+/// `_lima/`.
+pub fn lima_home() -> PathBuf {
+    if let Ok(home) = std::env::var("LIMA_HOME") {
+        if !home.trim().is_empty() {
+            return PathBuf::from(home);
+        }
+    }
+    crate::instance_reader::colima_home().join("_lima")
+}
+
 /// Detect the Docker socket from a running Colima instance.
 /// Returns something like "unix:///Users/mike/.colima/default/docker.sock".
 ///
@@ -380,8 +395,7 @@ pub fn detect_docker_host() -> Option<(String, String)> {
         }
     }
 
-    let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
-    let colima_home = std::env::var("COLIMA_HOME").unwrap_or_else(|_| format!("{}/.colima", home));
+    let colima_home = crate::instance_reader::colima_home();
     let colima_path = std::path::Path::new(&colima_home);
 
     if !colima_path.exists() {
@@ -432,9 +446,13 @@ pub fn detect_docker_host() -> Option<(String, String)> {
             } else {
                 format!("colima-{}", name)
             };
-            let lima_dir = colima_path.join("_lima").join(&lima_name);
+            let lima_dir = lima_home().join(&lima_name);
             let sock = colima_path.join(&name).join("docker.sock");
 
+            // Both gates required: the aliveness files prove the VM/forwarder
+            // pair is up (a stale forwarder socket may still answer PING for a
+            // dead instance — the adversarial suite pins that), and the probe
+            // proves the daemon actually answers.
             if is_lima_instance_alive(&lima_dir) && probe_docker_socket_cached(&sock) {
                 return Some((format!("unix://{}", sock.display()), name));
             }
