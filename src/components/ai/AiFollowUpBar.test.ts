@@ -76,7 +76,7 @@ describe("AiFollowUpBar.svelte", () => {
     expect(onSend).not.toHaveBeenCalled();
   });
 
-  it("handles keyboard Enter to send and Shift+Enter to insert", async () => {
+  it("handles keyboard Shift+Enter to insert and click to send without duplicate invocation", async () => {
     const onSend = vi.fn();
     const onInsert = vi.fn();
     const suggestions: [string, string][] = [
@@ -92,8 +92,13 @@ describe("AiFollowUpBar.svelte", () => {
     expect(onInsert).toHaveBeenCalledWith("kubectl get nodes");
     expect(onSend).not.toHaveBeenCalled();
 
-    // Plain Enter sends
+    // Plain Enter on keydown does not directly invoke onSend (native button click handles it)
     await fireEvent.keyDown(chipBtn, { key: "Enter", shiftKey: false });
+    expect(onSend).not.toHaveBeenCalled();
+
+    // Native button click sends prompt
+    await fireEvent.click(chipBtn);
+    expect(onSend).toHaveBeenCalledTimes(1);
     expect(onSend).toHaveBeenCalledWith("kubectl get nodes");
   });
 

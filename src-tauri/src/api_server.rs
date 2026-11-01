@@ -189,6 +189,7 @@ pub fn build_router() -> Router {
         // System
         .route("/api/system/prune", post(api_system_prune))
         .route("/api/system/df", get(api_system_df))
+        .route("/api/system/reference", get(api_system_reference))
         // Models
         .route("/api/models", get(api_list_models))
         .route("/api/models/pull", post(api_pull_model))

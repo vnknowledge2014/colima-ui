@@ -157,4 +157,55 @@ describe("InteractiveChoiceCard.svelte", () => {
 
     expect(onSelect).toHaveBeenCalledWith("large");
   });
+
+  it("stops propagation on Enter/Space in multi-select option row and prevents double-toggle", async () => {
+    const onSelect = vi.fn();
+    const choice: ParsedChoicePrompt = {
+      question: "Select volumes",
+      multi: true,
+      options: [
+        { label: "vol-data", value: "vol-data" },
+        { label: "vol-cache", value: "vol-cache" },
+      ],
+    };
+
+    render(InteractiveChoiceCard, { choice, onSelect });
+
+    const optRow = screen.getByText("vol-data").closest(".choice-option-row")!;
+    expect(optRow).toHaveAttribute("aria-checked", "false");
+
+    // Press Space on the row
+    await fireEvent.keyDown(optRow, { key: " " });
+    // Should be checked, not double-toggled back to false
+    expect(optRow).toHaveAttribute("aria-checked", "true");
+
+    // Press Enter on the row to toggle off
+    await fireEvent.keyDown(optRow, { key: "Enter" });
+    expect(optRow).toHaveAttribute("aria-checked", "false");
+  });
+
+  it("guards custom text Enter submission while IME composition is active (isComposing or keyCode 229)", async () => {
+    const onSelect = vi.fn();
+    const choice: ParsedChoicePrompt = {
+      question: "Select CPU cores",
+      multi: false,
+      options: [{ label: "2 cores", value: "2" }],
+    };
+
+    render(InteractiveChoiceCard, { choice, onSelect });
+
+    await fireEvent.click(screen.getByRole("button", { name: /type other response…/i }));
+    const input = screen.getByPlaceholderText(/type custom answer/i);
+    await fireEvent.input(input, { target: { value: "tối ưu" } });
+
+    // Confirming IME candidate on Safari/WebKit (keyCode 229) or standard browsers (isComposing) must NOT submit
+    await fireEvent.keyDown(input, { key: "Enter", isComposing: true });
+    await fireEvent.keyDown(input, { key: "Enter", keyCode: 229 });
+    expect(onSelect).not.toHaveBeenCalled();
+
+    // Non-composing Enter submits cleanly
+    await fireEvent.keyDown(input, { key: "Enter", isComposing: false, keyCode: 13 });
+    expect(onSelect).toHaveBeenCalledTimes(1);
+    expect(onSelect).toHaveBeenCalledWith("tối ưu");
+  });
 });

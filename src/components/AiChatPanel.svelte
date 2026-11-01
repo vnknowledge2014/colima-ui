@@ -29,7 +29,7 @@
     refreshConversations,
     type AiMessage,
   } from "../store/ai.svelte";
-  import { t } from "../lib/i18n.svelte";
+  import { t, getLanguage } from "../lib/i18n.svelte";
   import {
     uiState,
     openSettingsSection,
@@ -65,7 +65,7 @@
     return getAppSetting("ai_model", "");
   }
   function isAutoTrigger() {
-    return getAppSetting("ai_diag_auto_trigger") !== "false";
+    return getAppSetting("ai_diag_auto_trigger", "false") === "true";
   }
   function getApiKey() {
     return getAppSetting("ai_api_key", "");
@@ -477,16 +477,36 @@
     void setAppSetting("ai_model", "llama3.2");
   }
 
+  let detectedSystemError = $state<string | null>(null);
+
+  function handleDiagnoseError() {
+    if (!detectedSystemError) return;
+    const err = detectedSystemError;
+    detectedSystemError = null;
+    pushAiMessage({
+      id: newId(), role: "system", content: `⚠️ Error detected: ${err}`
+    });
+    handleSend(`System error occurred: ${err}\n\nPlease analyze this error and help me troubleshoot it.`);
+  }
+
+  function handleDismissError() {
+    detectedSystemError = null;
+  }
+
   onMount(() => {
     aiApi.getAppContext().then(ctx => appContext = ctx).catch(() => {});
 
     return onError((errorText) => {
-      if (!isAutoTrigger()) return;
-      pushAiMessage({
-        id: newId(), role: "system", content: `⚠️ Error detected: ${errorText}`
-      });
+      if (isAutoTrigger()) {
+        pushAiMessage({
+          id: newId(), role: "system", content: `⚠️ Error detected: ${errorText}`
+        });
+        if (!uiState.aiPanelOpen) aiState.errorCount++;
+        handleSend(`System error occurred: ${errorText}\n\nPlease analyze this error and help me troubleshoot it.`);
+        return;
+      }
+      detectedSystemError = errorText;
       if (!uiState.aiPanelOpen) aiState.errorCount++;
-      handleSend(`System error occurred: ${errorText}\n\nPlease analyze this error and help me troubleshoot it.`);
     });
   });
 
@@ -506,22 +526,45 @@
       return;
     }
     
-    pushAiMessage({ id: newId(), role: "user", content: text });
+    const turnConversationId = aiState.activeConversationId;
+    const historyBeforeTurn = [...aiState.messages];
+    const userMsgId = newId();
+    const touched = new Set<string>([userMsgId]);
+    const turnSnapshot: AiMessage[] = [{ id: userMsgId, role: "user", content: text }];
+    pushAiMessage({ id: userMsgId, role: "user", content: text }, { persist: false });
     userInput = "";
     if (inputEl) inputEl.style.height = `${INPUT_MIN_HEIGHT}px`;
     aiState.isProcessing = true;
     abortController = new AbortController();
 
-    // Every message this turn creates or fills, so the history is written once
-    // the agent settles instead of on each streamed chunk.
-    const touched = new Set<string>();
-
     const callbacks: AgentCallbacks = {
       onStatus: (t) => { statusText = t; },
-      onMessage: (msg) => { touched.add(msg.id); pushAiMessage(msg as AiMessage); },
-      onMessageUpdate: (id, content) => { touched.add(id); updateAiMessage(id, content); },
-      onMessageDelete: (id) => { touched.delete(id); deleteAiMessage(id); },
+      onMessage: (msg) => {
+        const entry = { ...(msg as AiMessage) };
+        touched.add(entry.id);
+        turnSnapshot.push(entry);
+        if (aiState.activeConversationId === turnConversationId) {
+          pushAiMessage(entry, { persist: false });
+        }
+      },
+      onMessageUpdate: (id, content) => {
+        touched.add(id);
+        const snapIdx = turnSnapshot.findIndex((m) => m.id === id);
+        if (snapIdx !== -1) turnSnapshot[snapIdx].content = content;
+        if (aiState.activeConversationId === turnConversationId) {
+          updateAiMessage(id, content);
+        }
+      },
+      onMessageDelete: (id) => {
+        touched.delete(id);
+        const snapIdx = turnSnapshot.findIndex((m) => m.id === id);
+        if (snapIdx !== -1) turnSnapshot.splice(snapIdx, 1);
+        if (aiState.activeConversationId === turnConversationId) {
+          deleteAiMessage(id);
+        }
+      },
       onApprovalRequired: (id, command) => {
+        void persistAiMessages(touched, { conversationId: turnConversationId, snapshot: turnSnapshot });
         return new Promise<boolean>((resolve) => {
           pendingApprovals.push({ id, command, resolve });
         });
@@ -578,6 +621,7 @@
     if (liveContextEnabled) {
       const liveSnapshot = buildLiveUiContextSnapshot({
         currentPage: uiState.currentPage,
+        language: getLanguage(),
         colimaInstances: dashboardState.colimaInstances,
         containers: dockerState.containers,
         k8sStatus: dashboardState.k8sStatus,
@@ -589,13 +633,13 @@
 
     try {
       await runAgent(
-        text, config, callbacks, [...aiState.messages], effectiveAppContext, customPresets,
+        text, config, callbacks, historyBeforeTurn, effectiveAppContext, customPresets,
         abortController.signal
       );
     } finally {
       // Before clearing the run state, and in the `finally` so a failed or
       // stopped turn still keeps whatever the assistant managed to say.
-      await persistAiMessages(touched);
+      await persistAiMessages(touched, { conversationId: turnConversationId, snapshot: turnSnapshot });
       // isProcessing gates the send button — leaving it true locks the panel.
       aiState.isProcessing = false;
       statusText = "";
@@ -747,7 +791,11 @@
                 autofocus
                 onblur={commitRename}
                 onkeydown={(e) => {
-                  if (e.key === "Enter") { e.preventDefault(); commitRename(); }
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    if (e.isComposing || e.keyCode === 229) return;
+                    commitRename();
+                  }
                   if (e.key === "Escape") renamingId = "";
                 }}
               />
@@ -893,6 +941,17 @@
               <div class="ai-msg-assistant">
                 <AiMessageBody content={parsed.cleanText} onInsert={handleInsert} />
               </div>
+            {:else if aiState.isProcessing && msg.id === lastAssistantId && !parsed.choicePrompt}
+              <div
+                class="ai-msg-assistant ai-msg-typing"
+                role="progressbar"
+                aria-label={statusText || t("ai.generating_reply", { default: "Generating reply..." })}
+              >
+                <span class="typing-dot" aria-hidden="true"></span>
+                <span class="typing-dot" aria-hidden="true"></span>
+                <span class="typing-dot" aria-hidden="true"></span>
+                <span class="typing-text">{statusText || t("ai.generating_reply", { default: "Generating reply..." })}</span>
+              </div>
             {/if}
             {#if parsed.choicePrompt}
               <!-- Feature 16: Interactive Choice Cards with Turn Locking -->
@@ -960,6 +1019,39 @@
           onSend={(prompt) => handleSend(prompt)}
           onInsert={handleInsert}
         />
+      </div>
+    {/if}
+
+    <!-- 1-Touch Error Diagnostic Banner -->
+    {#if detectedSystemError}
+      <div class="ai-error-banner" role="alert">
+        <div class="ai-error-banner-content">
+          <svg class="ai-error-banner-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--accent-red)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <circle cx="12" cy="12" r="10"></circle>
+            <line x1="12" y1="8" x2="12" y2="12"></line>
+            <line x1="12" y1="16" x2="12.01" y2="16"></line>
+          </svg>
+          <div class="ai-error-banner-text">
+            <span class="ai-error-banner-title">{t("ai.error_banner_title", { default: "System error detected" })}</span>
+            <span class="ai-error-banner-desc" title={detectedSystemError}>{detectedSystemError}</span>
+          </div>
+        </div>
+        <div class="ai-error-banner-actions">
+          <button
+            type="button"
+            class="ai-error-banner-btn ai-error-diagnose-btn"
+            onclick={handleDiagnoseError}
+          >
+            {t("ai.error_banner_diagnose", { default: "Diagnose with AI" })}
+          </button>
+          <button
+            type="button"
+            class="ai-error-banner-btn ai-error-dismiss-btn"
+            onclick={handleDismissError}
+          >
+            {t("ai.error_banner_dismiss", { default: "Dismiss" })}
+          </button>
+        </div>
       </div>
     {/if}
 
@@ -1359,6 +1451,137 @@
     font-size: var(--text-sm);
     max-width: 95%;
     line-height: 1.6;
+  }
+
+  .ai-msg-assistant.ai-msg-typing {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 14px;
+    color: var(--text-muted);
+    font-size: var(--text-xs);
+  }
+
+  .typing-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: var(--radius-full);
+    background: var(--accent-blue);
+    display: inline-block;
+    animation: typing-breathe 1.4s infinite ease-in-out both;
+  }
+
+  .typing-dot:nth-child(1) {
+    animation-delay: -0.32s;
+  }
+
+  .typing-dot:nth-child(2) {
+    animation-delay: -0.16s;
+  }
+
+  .typing-dot:nth-child(3) {
+    animation-delay: 0s;
+  }
+
+  .typing-text {
+    margin-left: 4px;
+    color: var(--text-secondary);
+    font-style: italic;
+  }
+
+  @keyframes typing-breathe {
+    0%, 80%, 100% {
+      opacity: 0.3;
+      transform: scale(0.8);
+    }
+    40% {
+      opacity: 1;
+      transform: scale(1.15);
+    }
+  }
+
+  /* 1-Touch Error Diagnostic Banner */
+  .ai-error-banner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 8px 12px;
+    margin: 4px 12px;
+    background: var(--bg-card);
+    border: 1px solid var(--accent-red-glow);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-sm);
+  }
+
+  .ai-error-banner-content {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    flex: 1;
+  }
+
+  .ai-error-banner-icon {
+    flex-shrink: 0;
+  }
+
+  .ai-error-banner-text {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+  }
+
+  .ai-error-banner-title {
+    font-size: var(--text-xs);
+    font-weight: 600;
+    color: var(--accent-red);
+  }
+
+  .ai-error-banner-desc {
+    font-size: 11px;
+    color: var(--text-secondary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 220px;
+  }
+
+  .ai-error-banner-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-shrink: 0;
+  }
+
+  .ai-error-banner-btn {
+    padding: 4px 8px;
+    border-radius: var(--radius-sm);
+    font-size: 11px;
+    cursor: pointer;
+    transition: background var(--transition-fast), color var(--transition-fast);
+  }
+
+  .ai-error-diagnose-btn {
+    background: var(--accent-blue);
+    color: var(--bg-app);
+    border: none;
+    font-weight: 500;
+  }
+
+  .ai-error-diagnose-btn:hover {
+    opacity: 0.9;
+  }
+
+  .ai-error-dismiss-btn {
+    background: transparent;
+    border: 1px solid var(--border-primary);
+    color: var(--text-secondary);
+  }
+
+  .ai-error-dismiss-btn:hover {
+    background: var(--bg-card-hover);
+    color: var(--text-primary);
   }
 
   .ai-msg-system {

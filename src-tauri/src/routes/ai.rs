@@ -222,26 +222,28 @@ pub async fn api_ai_delete_conversation(
 
 
 pub async fn api_ai_context() -> (StatusCode, Json<ApiResponse<String>>) {
-    // Find CONTEXT.md adjacent to the binary (same as Tauri resource_dir behavior)
     let exe_path = std::env::current_exe().unwrap_or_default();
-    // In a bundled .app: .../ColimaUI.app/Contents/MacOS/colima-ui
-    // Tauri puts resources at: .../ColimaUI.app/Contents/Resources/resources/
-    let resource_dir = exe_path
+    let bundled = exe_path
         .parent() // MacOS/
         .and_then(|p| p.parent()) // Contents/
-        .map_or_else(
-            || exe_path.parent().unwrap_or(&exe_path).to_path_buf(),
-            |p| p.join("Resources").join("resources"),
-        );
+        .map(|p| p.join("Resources").join("resources"));
 
-    let context_path = resource_dir.join("CONTEXT.md");
-    match std::fs::read_to_string(&context_path) {
-        Ok(content) => ok(content),
-        Err(e) => err(format!(
-            "Cannot read CONTEXT.md from {:?}: {e}",
-            context_path
-        )),
-    }
+    let resource_dir = match bundled {
+        Some(ref b) if b.exists() => b.clone(),
+        _ => {
+            if std::path::Path::new("src-tauri/resources").exists() {
+                std::path::PathBuf::from("src-tauri/resources")
+            } else if std::path::Path::new("resources").exists() {
+                std::path::PathBuf::from("resources")
+            } else {
+                bundled.unwrap_or_else(|| exe_path.parent().unwrap_or(&exe_path).to_path_buf())
+            }
+        }
+    };
+
+    let home_dir = std::env::var("HOME").ok().map(std::path::PathBuf::from);
+    let context = crate::commands::system::build_app_context_from_dir(&resource_dir, home_dir);
+    ok(context)
 }
 
 

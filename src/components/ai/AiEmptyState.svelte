@@ -37,6 +37,7 @@
   }
 
   function handleCardKeyDown(e: KeyboardEvent, prompt: string) {
+    if (e.target !== e.currentTarget) return;
     if (e.key === "Enter" || e.key === " ") {
       if (e.shiftKey) {
         e.preventDefault();

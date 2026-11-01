@@ -215,3 +215,52 @@ pub async fn api_set_metrics_interval(
     crate::commands::metrics_collector::set_interval_ms(body.ms);
     ok(crate::commands::metrics_collector::interval_ms())
 }
+
+#[derive(serde::Deserialize)]
+pub struct ReferenceQuery {
+    pub path: String,
+}
+
+pub async fn api_system_reference(
+    Query(q): Query<ReferenceQuery>,
+) -> (StatusCode, Json<ApiResponse<String>>) {
+    let exe_path = std::env::current_exe().unwrap_or_default();
+    let bundled = exe_path
+        .parent()
+        .and_then(|p| p.parent())
+        .map(|p| p.join("Resources").join("resources"));
+    let resource_dir = match bundled {
+        Some(ref b) if b.exists() => b.clone(),
+        _ => {
+            if std::path::Path::new("src-tauri/resources").exists() {
+                std::path::PathBuf::from("src-tauri/resources")
+            } else if std::path::Path::new("resources").exists() {
+                std::path::PathBuf::from("resources")
+            } else {
+                bundled.unwrap_or_else(|| exe_path.parent().unwrap_or(&exe_path).to_path_buf())
+            }
+        }
+    };
+
+    match system::read_reference_from_dir(&resource_dir, &q.path) {
+        Ok(content) => ok(content),
+        Err(e) => {
+            let status = if e.contains("outside resources") || e.contains("denied") {
+                StatusCode::FORBIDDEN
+            } else if e.contains("Failed to canonicalize") || e.contains("not found") || e.contains("No such file") {
+                StatusCode::NOT_FOUND
+            } else {
+                StatusCode::BAD_REQUEST
+            };
+            (
+                status,
+                Json(ApiResponse {
+                    success: false,
+                    data: None,
+                    error: Some(crate::error::ColimaError::from(e)),
+                }),
+            )
+        }
+    }
+}
+

@@ -1,5 +1,6 @@
 import { colimaApi, dockerApi, composeApi, k8sApi, sysMethods, knowledgeBankApi, sandboxApi, aiApi } from "./api";
 import type { ChatMessage } from "./api";
+import type { AiMessage } from "../store/ai.svelte";
 import { chatStream } from "./llmProviders";
 import { newId } from "./ids";
 import { getCategory, executeEvent } from "./aiEventBus";
@@ -86,11 +87,99 @@ export function isApprovalRequiredError(err: unknown): boolean {
   return msg.toLowerCase().includes("requires user approval");
 }
 
+/**
+ * Sanitize and structure conversation history before sending it to the LLM.
+ *
+ * 1. Clean old tool tags ([SUGGEST], [ASK_CHOICE], [QUERY], etc.) from assistant messages using parseAiTools.
+ * 2. Skip system messages (handled separately) and messages with empty content.
+ * 3. Deduplicate userMessage: If caller pushed { role: "user", content: userMessage } to the end of
+ *    chatHistory, do not append userMessage twice.
+ * 4. Merge consecutive messages with the same role using `\n\n` (ensures strict alternation user <-> assistant).
+ * 5. Take `slice(-maxTurns)`.
+ * 6. CRITICAL ANTHROPIC REQUIREMENT: While the first message in the sliced window has `role === "assistant"`,
+ *    shift/remove it so that the first message sent to the API is GUARANTEED to have `role: "user"`.
+ * 7. If the window is empty or does not end with the current user message, ensure { role: "user", content: userMessage }
+ *    is at the end.
+ */
+export function buildCleanConversationWindow(
+  chatHistory: Array<AiMessage | ChatMessage | { role: string; content: string }>,
+  userMessage: string,
+  maxTurns = 10,
+): ChatMessage[] {
+  const trimmedUserMsg = (userMessage || "").trim();
+  const cleaned: Array<{ role: "user" | "assistant"; content: string }> = [];
+
+  for (const m of chatHistory) {
+    if (!m || m.role === "system") continue;
+    if (m.role === "assistant") {
+      const text = parseAiTools(m.content || "").cleanText.trim();
+      if (text) {
+        cleaned.push({ role: "assistant", content: text });
+      }
+    } else if (m.role === "user") {
+      const text = (m.content || "").trim();
+      if (text) {
+        cleaned.push({ role: "user", content: text });
+      }
+    }
+  }
+
+  // Deduplicate userMessage: If caller already pushed { role: "user", content: userMessage }
+  // to the end of chatHistory, do not append userMessage twice.
+  const lastCleaned = cleaned[cleaned.length - 1];
+  const alreadyHasUserMsg = Boolean(
+    lastCleaned &&
+    lastCleaned.role === "user" &&
+    lastCleaned.content === trimmedUserMsg,
+  );
+
+  if (!alreadyHasUserMsg && trimmedUserMsg) {
+    cleaned.push({ role: "user", content: trimmedUserMsg });
+  }
+
+  // Merge consecutive messages with the same role using \n\n (ensures strict alternation user <-> assistant)
+  const merged: Array<{ role: "user" | "assistant"; content: string }> = [];
+  for (const m of cleaned) {
+    if (merged.length > 0 && merged[merged.length - 1].role === m.role) {
+      merged[merged.length - 1].content += `\n\n${m.content}`;
+    } else {
+      merged.push({ role: m.role, content: m.content });
+    }
+  }
+
+  // Take slice(-maxTurns)
+  const window = maxTurns > 0 ? merged.slice(-maxTurns) : [...merged];
+
+  // CRITICAL ANTHROPIC REQUIREMENT: While the first message in the sliced window has role === "assistant",
+  // shift/remove it so that the first message sent to the API is GUARANTEED to have role: "user".
+  while (window.length > 0 && window[0].role === "assistant") {
+    window.shift();
+  }
+
+  // If the window is empty or does not end with the current user message, ensure { role: "user", content: userMessage } is at the end.
+  if (trimmedUserMsg) {
+    if (window.length === 0) {
+      window.push({ role: "user", content: trimmedUserMsg });
+    } else {
+      const last = window[window.length - 1];
+      if (last.role !== "user") {
+        window.push({ role: "user", content: trimmedUserMsg });
+      } else if (last.content !== trimmedUserMsg) {
+        if (!last.content.endsWith(trimmedUserMsg)) {
+          last.content += `\n\n${trimmedUserMsg}`;
+        }
+      }
+    }
+  }
+
+  return window;
+}
+
 export async function runAgent(
   userMessage: string,
   config: { provider: string; model: string; apiKey: string; endpoint: string },
   callbacks: AgentCallbacks,
-  chatHistory: ChatMessage[],
+  chatHistory: Array<ChatMessage | AiMessage | { role: string; content: string }>,
   appContext: string,
   customPresets: unknown,
   signal?: AbortSignal,
@@ -138,14 +227,15 @@ export async function runAgent(
     // Memory retrieval failure is non-fatal — the agent can still run without it.
   }
 
+  const cleanTurns = buildCleanConversationWindow(chatHistory, userMessage, 10);
   const fullHistory: ChatMessage[] = [
     ...(appContext ? [{ role: "system" as const, content: appContext }] : []),
     ...(kbContext ? [{ role: "system" as const, content: `[Knowledge Bank]\n${kbContext}` }] : []),
     ...(memoryContext ? [{ role: "system" as const, content: `[USER_MEMORY]\n- ${memoryContext}` }] : []),
-    ...chatHistory.filter(m => m.role !== "system").slice(-10).map(m => ({ role: m.role as "user" | "assistant", content: m.content })),
-    { role: "user", content: userMessage },
+    ...cleanTurns,
   ];
 
+  let pendingSupersededStreamId: string | null = null;
   const seenToolCalls = new Set<string>();
 
   try {
@@ -163,6 +253,10 @@ export async function runAgent(
       await chatStream(provider, model, apiKey, fullHistory, endpoint, (chunk) => {
         responseText += chunk;
         const { cleanText } = stripStreamingPartialTags(responseText);
+        if (pendingSupersededStreamId && cleanText.trim().length > 0) {
+          callbacks.onMessageDelete(pendingSupersededStreamId);
+          pendingSupersededStreamId = null;
+        }
         callbacks.onMessageUpdate(streamId, cleanText);
       }, signal);
 
@@ -186,6 +280,11 @@ export async function runAgent(
 
       const hasInteractiveContent = (suggests && suggests.length > 0) || Boolean(choicePrompt);
 
+      if (pendingSupersededStreamId && (cleanText.trim().length > 0 || hasInteractiveContent)) {
+        callbacks.onMessageDelete(pendingSupersededStreamId);
+        pendingSupersededStreamId = null;
+      }
+
       if (!cleanText && !hasInteractiveContent) {
         callbacks.onMessageDelete(streamId);
       } else {
@@ -197,6 +296,7 @@ export async function runAgent(
         break;
       }
 
+      let roundAwaitedApproval = false;
       let toolContext = "";
 
       // 1. [QUERY: eventName | payload]
@@ -297,7 +397,7 @@ export async function runAgent(
               : undefined,
           });
           callbacks.onMessage({ id: approvalId, role: "system", content: serializeToolStep(step) });
-          
+          roundAwaitedApproval = true;
           const approved = await callbacks.onApprovalRequired(approvalId, `[EVENT_APPROVE: ${evt} | ${pld}]`);
           if (aborted()) break;
 
@@ -443,6 +543,7 @@ Built-in Presets: ${JSON.stringify(BUILT_IN_PRESETS)}
               warning: "Command requires user approval before execution.",
             });
             callbacks.onMessageUpdate(stepId, serializeToolStep(step));
+            roundAwaitedApproval = true;
             const approved = await callbacks.onApprovalRequired(stepId, cmd);
             if (aborted()) break;
             if (approved) {
@@ -493,6 +594,7 @@ Built-in Presets: ${JSON.stringify(BUILT_IN_PRESETS)}
           warning: "Review this shell command carefully before approving execution.",
         });
         callbacks.onMessage({ id: approvalId, role: "system", content: serializeToolStep(step) });
+        roundAwaitedApproval = true;
         const approved = await callbacks.onApprovalRequired(approvalId, cmd);
         if (aborted()) break;
         if (approved) {
@@ -546,7 +648,7 @@ Built-in Presets: ${JSON.stringify(BUILT_IN_PRESETS)}
             : undefined,
         });
         callbacks.onMessage({ id: approvalId, role: "system", content: serializeToolStep(step) });
-        
+        roundAwaitedApproval = true;
         const approved = await callbacks.onApprovalRequired(approvalId, `[EVENT_APPROVE: cli-exec | {"command":"${task.cmd}","args":${JSON.stringify(task.args)}}]`);
         if (aborted()) break;
 
@@ -681,9 +783,19 @@ Built-in Presets: ${JSON.stringify(BUILT_IN_PRESETS)}
         break;
       }
 
+      const supersededThisRound =
+        !roundAwaitedApproval && (cleanText.trim().length > 0 || hasInteractiveContent);
+      if (supersededThisRound) {
+        pendingSupersededStreamId = streamId;
+      }
+
+      const continuationPrompt = supersededThisRound
+        ? "Continue reasoning. Note: Your preliminary draft before these tool results will be replaced in the UI, so provide a complete, self-contained response."
+        : "Continue reasoning.";
+
       fullHistory.push(
         { role: "assistant", content: responseText },
-        { role: "user", content: `[Tool Results]\n${toolContext}\n\nContinue reasoning.` }
+        { role: "user", content: `[Tool Results]\n${toolContext}\n\n${continuationPrompt}` }
       );
     }
   } catch (e) {

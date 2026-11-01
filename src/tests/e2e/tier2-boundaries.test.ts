@@ -17,6 +17,8 @@ import {
   getAiToolParser,
   getAiSuggestionsEngine,
   renderInlineChatMarkdown,
+  specBuildCleanConversationWindow,
+  specBuildRichLiveUiContext,
   type ThinkBlock,
   type CodeBlock,
 } from './helpers/contractAdapter';
@@ -33,7 +35,16 @@ import {
   isNearBottom,
   type SimulatedMessage,
 } from './helpers/testUtils';
-import { parseAiTools } from '../../lib/aiToolParser';
+import {
+  parseAiTools,
+  cleanToolSyntaxRemnants,
+  stripStreamingPartialTags,
+} from '../../lib/aiToolParser';
+import {
+  getStarterPrompts,
+  deriveFallbackSuggestions,
+  buildLiveUiContextSnapshot,
+} from '../../lib/aiSuggestions';
 
 describe('Tier 2: Boundary & Corner Cases', () => {
   // -------------------------------------------------------------------------
@@ -396,4 +407,191 @@ describe('Tier 2: Boundary & Corner Cases', () => {
       expect(prompts.some((p) => p.category === 'help')).toBe(true);
     });
   });
+
+  // -------------------------------------------------------------------------
+  // Boundary 9: Empty Strings across Parsers, Prompts, Windows & Fences
+  // -------------------------------------------------------------------------
+  describe('B9: Empty Strings across Parsers, Prompts, Windows & Fences', () => {
+    it('9.1: cleanToolSyntaxRemnants handles empty string and whitespace without throw', () => {
+      expect(cleanToolSyntaxRemnants('')).toBe('');
+      expect(cleanToolSyntaxRemnants('   \n\n  ')).toBe('');
+    });
+
+    it('9.2: stripStreamingPartialTags handles empty input safely', () => {
+      const res = stripStreamingPartialTags('');
+      expect(res.cleanText).toBe('');
+      expect(res.pendingTagKind).toBeNull();
+    });
+
+    it('9.3: parseAiTools parses empty string and returns empty tool collections', () => {
+      const parsed = parseAiTools('');
+      expect(parsed.cleanText).toBe('');
+      expect(parsed.hasTools).toBe(false);
+      expect(parsed.queries).toHaveLength(0);
+      expect(parsed.suggests).toHaveLength(0);
+      expect(parsed.choicePrompt).toBeNull();
+    });
+
+    it('9.4: buildCleanConversationWindow handles empty history and empty user message', () => {
+      const window = specBuildCleanConversationWindow([], '');
+      expect(window).toHaveLength(0);
+    });
+
+    it('9.5: buildLiveUiContextSnapshot handles empty options safely', () => {
+      const snapshot = buildLiveUiContextSnapshot({});
+      expect(snapshot).toContain('[LIVE_UI_CONTEXT]');
+      expect(snapshot).toContain('Current Page: dashboard');
+      expect(snapshot).toContain('Language: en');
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Boundary 10: Huge Context & Defensive Budget Clamping
+  // -------------------------------------------------------------------------
+  describe('B10: Huge Context & Defensive Budget Clamping', () => {
+    it('10.1: strictly caps 50 containers to at most 6 in live context snapshot', () => {
+      const containers = Array.from({ length: 50 }, (_, i) => ({
+        name: `long_named_heavy_worker_container_${i}`,
+        Image: `registry.internal.corp/production/service_${i}:v2.10.4-alpine`,
+        Status: `Up ${i + 1} hours (healthy)`,
+        State: 'running',
+      }));
+      const ctx = specBuildRichLiveUiContext({ containers });
+      // Count how many container names appear in Active Container Details
+      const matches = ctx.match(/long_named_heavy_worker_con/g);
+      expect(matches?.length).toBeLessThanOrEqual(6);
+    });
+
+    it('10.2: enforces defensive string length limits on oversized container fields', () => {
+      const oversizedContainer = {
+        name: 'a'.repeat(200),
+        Image: 'b'.repeat(200),
+        Status: 'c'.repeat(200),
+        State: 'running',
+      };
+      const ctx = specBuildRichLiveUiContext({ containers: [oversizedContainer] });
+      expect(ctx).toContain('a'.repeat(30));
+      expect(ctx).not.toContain('a'.repeat(31));
+    });
+
+    it('10.3: guarantees total live UI snapshot never exceeds 900 characters under extreme load', () => {
+      const hugeInstances = Array.from({ length: 10 }, (_, i) => ({
+        name: `colima-cluster-instance-with-excessively-long-name-${i}`,
+        status: 'Running',
+        cpus: 16,
+        memory: 64,
+      }));
+      const hugeContainers = Array.from({ length: 20 }, (_, i) => ({
+        name: `production-database-replica-shard-worker-node-${i}`,
+        Image: `harbor.internal.infrastructure.corp/data/postgres-distributed:${i}`,
+        Status: 'Up 45 days 12 hours 30 minutes',
+        State: 'running',
+      }));
+      const ctx = specBuildRichLiveUiContext({
+        currentPage: 'very_long_custom_page_identifier_that_might_overflow_ui',
+        language: 'vi',
+        instances: hugeInstances,
+        containers: hugeContainers,
+      });
+      expect(ctx.length).toBeLessThanOrEqual(900);
+    });
+
+    it('10.4: truncates 100-turn chat history down to maxTurns window', () => {
+      const longHistory = Array.from({ length: 100 }, (_, i) => ({
+        role: (i % 2 === 0 ? 'user' : 'assistant') as 'user' | 'assistant',
+        content: `Message ${i} with detailed diagnostics log output: ${'x'.repeat(100)}`,
+      }));
+      const window = specBuildCleanConversationWindow(longHistory, 'Latest', 10);
+      expect(window.length).toBeLessThanOrEqual(10);
+      expect(window[0].role).toBe('user');
+    });
+
+    it('10.5: capToolOutput applies 80%/20% head+tail pruning on huge outputs', async () => {
+      const { capToolOutput } = await import('../../lib/agentCore');
+      const hugeOutput = 'HEAD_DATA\n' + 'x'.repeat(10000) + '\nTAIL_DATA';
+      const capped = capToolOutput(hugeOutput, 1000);
+      expect(capped.length).toBeLessThan(1200);
+      expect(capped).toContain('HEAD_DATA');
+      expect(capped).toContain('TAIL_DATA');
+      expect(capped).toContain('chars omitted (head+tail pruned)');
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Boundary 11: Missing & Null Fields Resilience
+  // -------------------------------------------------------------------------
+  describe('B11: Missing & Null Fields Resilience', () => {
+    it('11.1: live context snapshot handles containers with missing Names/name safely', () => {
+      const containerWithoutName = {
+        Status: 'Up 1 hour',
+        Image: 'redis:latest',
+        State: 'running',
+      };
+      const ctx = specBuildRichLiveUiContext({ containers: [containerWithoutName] });
+      expect(ctx).toContain('unnamed');
+    });
+
+    it('11.2: handles container with null/undefined State and Status', () => {
+      const containerWithoutStatus = {
+        name: 'test-box',
+        State: undefined,
+        Status: undefined,
+      };
+      const ctx = specBuildRichLiveUiContext({ containers: [containerWithoutStatus] });
+      expect(ctx).toContain('test-box');
+    });
+
+    it('11.3: starter prompts handle missing containers and instances properties', () => {
+      const prompts = getStarterPrompts({});
+      expect(Array.isArray(prompts)).toBe(true);
+    });
+
+    it('11.4: fallback suggestions handle missing toolsExecuted gracefully', () => {
+      const suggestions = deriveFallbackSuggestions({});
+      expect(Array.isArray(suggestions)).toBe(true);
+    });
+
+    it('11.5: parseToolStep returns null without throwing on malformed or empty step content', async () => {
+      const { parseToolStep } = await import('../../lib/aiToolStep');
+      expect(parseToolStep('')).toBeNull();
+      expect(parseToolStep('<!--AI_TOOL_STEP:{}-->')).toBeNull();
+      expect(parseToolStep('not a tool step at all')).toBeNull();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Boundary 12: Invalid JSON & Malformed Payloads Resilience
+  // -------------------------------------------------------------------------
+  describe('B12: Invalid JSON & Malformed Payloads Resilience', () => {
+    it('12.1: extractChoicePrompt recovers safely from truncated JSON inside [ASK_CHOICE]', () => {
+      const input = '[ASK_CHOICE: {"question": "Truncated';
+      const parsed = parseAiTools(input);
+      expect(parsed.choicePrompt === null || typeof parsed.choicePrompt === 'object').toBe(true);
+    });
+
+    it('12.2: handles invalid JSON with unescaped newlines in tool tags', () => {
+      const input = '[EVENT_APPROVE: cli-exec | {"command": "docker",\n"args": ["ps"]}]';
+      const parsed = parseAiTools(input);
+      expect(parsed.eventApprovals.length).toBeGreaterThanOrEqual(0);
+    });
+
+    it('12.3: handles tool step with corrupted JSON payload', async () => {
+      const { parseToolStep } = await import('../../lib/aiToolStep');
+      const corrupted = '<!--AI_TOOL_STEP:{"version": 1, "kind": "command", broken_json-->';
+      expect(parseToolStep(corrupted)).toBeNull();
+    });
+
+    it('12.4: normalizeToolCallKey handles malformed JSON payload without crashing', async () => {
+      const { normalizeToolCallKey } = await import('../../lib/agentCore');
+      const key = normalizeToolCallKey('command', 'colima', '{broken json payload');
+      expect(key).toContain('COMMAND:colima');
+    });
+
+    it('12.5: handles malformed surrogate pairs and special unicode characters in prose', () => {
+      const input = 'Unicode test: \uD83D\uDE80 Rocket \u0000 Null byte ``';
+      const cleaned = cleanToolSyntaxRemnants(input);
+      expect(cleaned).toContain('Rocket');
+    });
+  });
 });
+

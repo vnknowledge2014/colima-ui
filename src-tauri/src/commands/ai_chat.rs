@@ -65,7 +65,7 @@ pub async fn ai_chat_list_conversations() -> Result<Vec<AiConversation>, crate::
                     (SELECT COUNT(*) FROM chat_messages m WHERE m.conversation_id = c.id),
                     COALESCE((SELECT m.content FROM chat_messages m
                               WHERE m.conversation_id = c.id AND m.role = 'user'
-                              ORDER BY m.created_at ASC LIMIT 1), '')
+                              ORDER BY m.created_at ASC, m.rowid ASC LIMIT 1), '')
              FROM chat_conversations c
              ORDER BY c.updated_at DESC",
         )
@@ -152,7 +152,7 @@ pub async fn ai_chat_load_history(
     let mut stmt = conn
         .prepare(
             "SELECT id, role, content FROM chat_messages
-             WHERE conversation_id = ?1 ORDER BY created_at ASC",
+             WHERE conversation_id = ?1 ORDER BY created_at ASC, rowid ASC",
         )
         .map_err(|e| e.to_string())?;
 

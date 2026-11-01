@@ -133,4 +133,33 @@ describe("AiEmptyState.svelte", () => {
       expect(screen.getByText(`Prompt ${icon}`)).toBeInTheDocument();
     }
   });
+
+  it("does not trigger card selection when pressing Enter/Space on child insert button", async () => {
+    const onSelectPrompt = vi.fn();
+    const onInsertPrompt = vi.fn();
+
+    const starterPrompts: StarterPrompt[] = [
+      {
+        id: "p1",
+        title: "Diagnose VM",
+        prompt: "colima status --verbose",
+        icon: "vm",
+        category: "context",
+      },
+    ];
+
+    render(AiEmptyState, {
+      starterPrompts,
+      onSelectPrompt,
+      onInsertPrompt,
+    });
+
+    const insertBtn = screen.getByRole("button", { name: /insert .* into chat input/i });
+
+    // Press Enter on the insert button itself
+    await fireEvent.keyDown(insertBtn, { key: "Enter" });
+
+    // Parent card should not have called onSelectPrompt
+    expect(onSelectPrompt).not.toHaveBeenCalled();
+  });
 });

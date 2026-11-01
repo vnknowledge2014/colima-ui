@@ -55,7 +55,7 @@
   let searxngInstances = $state(getInitialSearxngInstances());
   let contentMode = $state(getAppSetting("ai_diag_content_mode", "full"));
   let maxPageSize = $state(getAppSetting("ai_diag_max_page_size", "8000"));
-  let autoTrigger = $state(getAppSetting("ai_diag_auto_trigger") !== "false");
+  let autoTrigger = $state(getAppSetting("ai_diag_auto_trigger", "false") === "true");
   
   let searxngTesting = $state(false);
   let searxngStatus = $state<"ok" | "fail" | null>(null);

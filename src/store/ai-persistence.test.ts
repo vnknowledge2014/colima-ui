@@ -7,14 +7,20 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
  * labels. These tests pin down when a message reaches the database.
  */
 
-const saved: { id: string; content: string }[] = [];
+const saved: { id: string; content: string; conversationId?: string }[] = [];
 const cleared: string[] = [];
 let history: { id: string; role: string; content: string }[] = [];
 
 vi.mock("../lib/api", () => ({
   aiApi: {
-    saveMessage: async (message: { id: string; content: string }) => {
-      saved.push({ id: message.id, content: message.content });
+    saveMessage: async (message: { id: string; content: string }, conversationId?: string) => {
+      saved.push({
+        id: message.id,
+        content: message.content,
+        ...(conversationId && conversationId !== "default" && conversationId !== "conv-123"
+          ? { conversationId }
+          : {}),
+      });
     },
     clearHistory: async (conversationId?: string) => {
       cleared.push(conversationId || "default");
@@ -109,6 +115,42 @@ describe("AI chat persistence", () => {
 
     expect(aiState.messages.map((m) => m.id)).toEqual(["old-1", "inflight-1"]);
   });
+
+  it("does not write immediately when options.persist is false", async () => {
+    await pushAiMessage({ id: "u1", role: "user", content: "hello" }, { persist: false });
+    expect(saved).toEqual([]);
+    expect(aiState.messages).toHaveLength(1);
+
+    await persistAiMessages(["u1"]);
+    expect(saved).toEqual([{ id: "u1", content: "hello" }]);
+  });
+
+  it("persists messages in aiState.messages visual array order even if ids are given out of order", async () => {
+    await pushAiMessage({ id: "m1", role: "user", content: "first" }, { persist: false });
+    await pushAiMessage({ id: "m2", role: "assistant", content: "second" }, { persist: false });
+    await pushAiMessage({ id: "m3", role: "user", content: "third" }, { persist: false });
+
+    // Pass ids in reverse order: m3, m1
+    await persistAiMessages(["m3", "m1"]);
+
+    expect(saved).toEqual([
+      { id: "m1", content: "first" },
+      { id: "m3", content: "third" },
+    ]);
+  });
+
+  it("persists all non-empty messages in array order when ids is omitted", async () => {
+    await pushAiMessage({ id: "m1", role: "user", content: "first" }, { persist: false });
+    await pushAiMessage({ id: "m2", role: "assistant", content: "" }, { persist: false });
+    await pushAiMessage({ id: "m3", role: "user", content: "third" }, { persist: false });
+
+    await persistAiMessages();
+
+    expect(saved).toEqual([
+      { id: "m1", content: "first" },
+      { id: "m3", content: "third" },
+    ]);
+  });
 });
 
 describe("truncateAiMessagesFrom", () => {
@@ -179,5 +221,25 @@ describe("truncateAiMessagesFrom", () => {
 
     expect(aiState.messages.map((m) => m.id)).toEqual(["u1", "a1"]);
     expect(saved).toEqual([{ id: "u1", content: "q1" }]);
+  });
+
+  it("persists turn snapshot to captured conversationId even if user switches threads mid-turn", async () => {
+    const turnSnapshot = [
+      { id: "u-turn", role: "user" as const, content: "Inspect VM" },
+      { id: "a-turn", role: "assistant" as const, content: "Partial streamed reply" },
+    ];
+    // Simulate user clicking New Chat mid-stream before finally{} runs
+    aiState.activeConversationId = "conv-new-thread";
+    aiState.messages = [];
+
+    await persistAiMessages(["u-turn", "a-turn"], {
+      conversationId: "conv-original-thread",
+      snapshot: turnSnapshot,
+    });
+
+    expect(saved).toEqual([
+      { id: "u-turn", content: "Inspect VM", conversationId: "conv-original-thread" },
+      { id: "a-turn", content: "Partial streamed reply", conversationId: "conv-original-thread" },
+    ]);
   });
 });
