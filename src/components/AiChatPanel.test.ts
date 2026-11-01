@@ -5,9 +5,16 @@ import { aiState } from "../store/ai.svelte";
 import { uiState, dashboardState } from "../store.svelte";
 import { globalToast } from "../lib/globalToast";
 
+let errorListener: ((err: string) => void) | null = null;
+
 vi.mock("../lib/globalToast", () => ({
   globalToast: vi.fn(),
-  onError: vi.fn(),
+  onError: vi.fn().mockImplementation((fn: (err: string) => void) => {
+    errorListener = fn;
+    return () => {
+      if (errorListener === fn) errorListener = null;
+    };
+  }),
 }));
 
 vi.mock("../store/confirm.svelte", () => ({
@@ -243,5 +250,59 @@ describe("AiChatPanel.svelte Integration", () => {
 
     expect(screen.getByText("Check CPU & memory")).toBeInTheDocument();
     expect(screen.getByText("View container logs")).toBeInTheDocument();
+  });
+
+  it("11. displays typing skeleton indicator with breathing dots when assistant is processing without cleanText", () => {
+    aiState.isProcessing = true;
+    aiState.messages = [
+      { id: "u1", role: "user", content: "Explain Kubernetes" },
+      { id: "a1", role: "assistant", content: "" },
+    ];
+
+    const { container } = render(AiChatPanel);
+
+    const typingEl = container.querySelector(".ai-msg-assistant.ai-msg-typing");
+    expect(typingEl).toBeInTheDocument();
+    expect(typingEl?.querySelectorAll(".typing-dot").length).toBe(3);
+    expect(screen.getByText(/generating reply/i)).toBeInTheDocument();
+  });
+
+  it("12. displays 1-touch error diagnostic banner when onError fires and auto-trigger is false, and diagnose button triggers analysis", async () => {
+    const { runAgent } = await import("../lib/agentCore");
+    render(AiChatPanel);
+
+    // Simulate system error emitted via onError callback
+    errorListener?.("Port 8080 bind failure");
+
+    // Banner must appear above chat input
+    await waitFor(() => {
+      expect(screen.getByText("Port 8080 bind failure")).toBeInTheDocument();
+    });
+    const diagnoseBtn = screen.getByRole("button", { name: /diagnose/i });
+    const dismissBtn = screen.getByRole("button", { name: /dismiss/i });
+    expect(diagnoseBtn).toBeInTheDocument();
+    expect(dismissBtn).toBeInTheDocument();
+
+    // Clicking diagnose triggers analysis and clears banner
+    await fireEvent.click(diagnoseBtn);
+
+    await waitFor(() => {
+      expect(runAgent).toHaveBeenCalled();
+    });
+    expect(screen.queryByText("Port 8080 bind failure")).not.toBeInTheDocument();
+  });
+
+  it("13. clears 1-touch error diagnostic banner when dismiss button is clicked", async () => {
+    render(AiChatPanel);
+
+    errorListener?.("Network timeout connecting to Colima daemon");
+    await waitFor(() => {
+      expect(screen.getByText("Network timeout connecting to Colima daemon")).toBeInTheDocument();
+    });
+
+    const dismissBtn = screen.getByRole("button", { name: /dismiss/i });
+    await fireEvent.click(dismissBtn);
+
+    expect(screen.queryByText("Network timeout connecting to Colima daemon")).not.toBeInTheDocument();
   });
 });

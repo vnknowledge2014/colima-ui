@@ -73,6 +73,8 @@ const SAFE_PREFIXES: &[&str] = &[
     "docker compose ps", "docker compose ls",
     "docker network ls", "docker network inspect",
     "docker volume ls", "docker volume inspect",
+    "docker context ls", "docker context show",
+    "docker context inspect", "docker context list",
     // Lima read-only
     "limactl list", "limactl info",
     // Kubernetes read-only (secrets and raw config are gated separately in classify())
@@ -95,6 +97,7 @@ const APPROVE_PREFIXES: &[&str] = &[
     "docker start ", "docker stop ", "docker restart ", "docker pull ",
     "docker rm ", "docker rmi ", "docker system prune",
     "docker volume rm", "docker network rm",
+    "docker context use ",
     "docker compose up", "docker compose down", "docker compose restart",
     // Process management
     "pkill ", "kill ", "killall ",
@@ -450,6 +453,18 @@ mod tests {
         let (out, truncated) = truncate_utf8(input, MAX_OUTPUT_BYTES);
         assert!(truncated);
         assert!(out.ends_with("...[output truncated]"));
+    }
+
+    #[test]
+    fn docker_context_rules() {
+        assert_eq!(classify("docker context ls").safety, CommandSafety::Safe);
+        assert_eq!(classify("docker context list").safety, CommandSafety::Safe);
+        assert_eq!(classify("docker context show").safety, CommandSafety::Safe);
+        assert_eq!(classify("docker context inspect colima").safety, CommandSafety::Safe);
+        assert_eq!(
+            classify("docker context use default").safety,
+            CommandSafety::NeedsApproval
+        );
     }
 }
 

@@ -88,6 +88,7 @@
   function handleCustomKeydown(e: KeyboardEvent) {
     if (e.key === "Enter" && customInput.trim() && canInteract) {
       e.preventDefault();
+      if (e.isComposing || e.keyCode === 229) return;
       if (isMulti) {
         handleMultiSubmit();
       } else {
@@ -146,7 +147,6 @@
   <!-- Options List -->
   <div
     class="choice-options"
-    tabindex="0"
     onkeydown={handleOptionsKeydown}
     role="presentation"
   >
@@ -170,6 +170,7 @@
         onkeydown={(e) => {
           if (e.key === "Enter" || e.key === " ") {
             e.preventDefault();
+            e.stopPropagation();
             if (isMulti) {
               handleToggleMulti(opt);
             } else {

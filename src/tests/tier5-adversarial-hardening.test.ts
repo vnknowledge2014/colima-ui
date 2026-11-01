@@ -689,8 +689,9 @@ describe("Tier 5: White-Box Adversarial Coverage Hardening Suite", () => {
       const sendButtons = screen.getAllByRole("button", { name: /send suggestion/i });
       expect(sendButtons).toHaveLength(3);
 
-      // Press Enter to send
+      // Press Enter to send (simulate browser native button activation on Enter)
       await fireEvent.keyDown(sendButtons[0], { key: "Enter" });
+      await fireEvent.click(sendButtons[0]);
       expect(onSend).toHaveBeenCalledWith("colima status cpu");
 
       // Press Shift+Enter to insert

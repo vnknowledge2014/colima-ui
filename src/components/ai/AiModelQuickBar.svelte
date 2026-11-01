@@ -51,11 +51,11 @@
 
   // Curated popular presets per provider for instant 1-click selection
   const POPULAR_PRESETS: Record<string, string[]> = {
-    "ollama-local": ["llama3.2", "qwen2.5-coder:7b", "deepseek-r1:8b", "mistral", "phi3"],
-    "anthropic": ["claude-3-5-sonnet-20241022", "claude-3-5-haiku-20241022", "claude-3-opus-20240229"],
-    "openai": ["gpt-4o", "gpt-4o-mini", "o1", "o3-mini"],
-    "gemini": ["gemini-1.5-pro", "gemini-1.5-flash", "gemini-2.0-flash"],
-    "openai-compatible": ["openai/gpt-4o", "meta-llama/llama-3.1-70b", "deepseek/deepseek-r1"],
+    "ollama-local": ["qwen2.5-coder:7b", "llama3.2", "deepseek-r1:8b"],
+    "anthropic": ["claude-3-5-sonnet-latest", "claude-3-7-sonnet-latest", "claude-3-5-haiku-latest", "claude-3-5-sonnet-20241022"],
+    "openai": ["gpt-4o", "gpt-4o-mini", "o3-mini"],
+    "gemini": ["gemini-2.0-flash", "gemini-2.5-flash-preview", "gemini-1.5-pro"],
+    "openai-compatible": ["openai/gpt-4o", "anthropic/claude-3-5-sonnet", "deepseek/deepseek-r1"],
     "ollama-cloud": ["gpt-oss:120b", "llama3.3:70b"],
   };
 
@@ -365,6 +365,7 @@
           onkeydown={(e) => {
             if (e.key === "Enter") {
               e.preventDefault();
+              if (e.isComposing || e.keyCode === 229) return;
               applyModelChoice(selectedProvider, modelInput);
             }
           }}

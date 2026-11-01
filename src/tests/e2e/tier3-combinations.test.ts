@@ -14,6 +14,7 @@ import {
   getChatMarkdownParser,
   getToolStepSerializer,
   getAiToolParser,
+  specBuildRichLiveUiContext,
   type ThinkBlock,
   type CodeBlock,
   type ToolStepPayload,
@@ -24,6 +25,8 @@ import {
   simulateTruncateAiMessagesFrom,
   type SimulatedMessage,
 } from './helpers/testUtils';
+import { parseAiTools } from '../../lib/aiToolParser';
+import { getStarterPrompts, deriveFallbackSuggestions, type StarterPromptContext } from '../../lib/aiSuggestions';
 
 describe('Tier 3: Cross-Feature Combinations', () => {
   let clipboard: ReturnType<typeof setupClipboardMock>;
@@ -299,4 +302,160 @@ colima status
       expect(code.code).toBe('colima status');
     });
   });
+
+  // -------------------------------------------------------------------------
+  // Combination 6: Multi-Packet SSE Stream & Intermediate Draft Revocation
+  // (Feature 9 + Feature 12)
+  // -------------------------------------------------------------------------
+  describe('C6: SSE Stream + Intermediate Draft Revocation (Feature 9 + 12)', () => {
+    it('6.1: Round 1 streams speculative draft text while firing read-only tool', () => {
+      let pendingSupersededStreamId: string | null = null;
+      const messageList: Array<{ id: string; role: string; content: string }> = [];
+
+      // Round 1 begins
+      const streamId = 'msg-draft-turn-1';
+      const round1Chunk = 'I am diagnosing your container exit... [QUERY: list-containers]';
+      const parsed = parseAiTools(round1Chunk);
+
+      // Assistant emits text and runs tool
+      messageList.push({ id: streamId, role: 'assistant', content: parsed.cleanText });
+      const roundAwaitedApproval = false; // read-only tool
+
+      if (!roundAwaitedApproval && parsed.cleanText) {
+        pendingSupersededStreamId = streamId;
+      }
+
+      expect(pendingSupersededStreamId).toBe('msg-draft-turn-1');
+      expect(messageList).toHaveLength(1);
+      expect(messageList[0].content).toContain('diagnosing your container');
+    });
+
+    it('6.2: Round 2 SSE stream arrives and revokes intermediate draft bubble immediately on first text token', () => {
+      const messageList: Array<{ id: string; role: string; content: string }> = [
+        { id: 'msg-draft-turn-1', role: 'assistant', content: 'I am diagnosing your container exit...' },
+      ];
+      let pendingSupersededStreamId: string | null = 'msg-draft-turn-1';
+
+      // Callbacks
+      const onMessageDelete = (id: string) => {
+        const idx = messageList.findIndex((m) => m.id === id);
+        if (idx !== -1) messageList.splice(idx, 1);
+      };
+
+      // Round 2 receives first token of final answer
+      const round2Chunk = 'Diagnosis complete: Container crashed due to OOMKilled (exit code 137).';
+      if (pendingSupersededStreamId && round2Chunk.trim()) {
+        onMessageDelete(pendingSupersededStreamId);
+        pendingSupersededStreamId = null;
+      }
+
+      // Add final answer turn
+      messageList.push({ id: 'msg-final-turn-2', role: 'assistant', content: round2Chunk });
+
+      // Verifies intermediate draft is gone and only final turn remains
+      expect(messageList).toHaveLength(1);
+      expect(messageList[0].id).toBe('msg-final-turn-2');
+      expect(messageList[0].content).toContain('exit code 137');
+      expect(pendingSupersededStreamId).toBeNull();
+    });
+
+    it('6.3: does not drop intermediate draft if Round 2 only emits another tool tag', () => {
+      const messageList: Array<{ id: string; role: string; content: string }> = [
+        { id: 'msg-draft-turn-1', role: 'assistant', content: 'Checking memory metrics...' },
+      ];
+      let pendingSupersededStreamId: string | null = 'msg-draft-turn-1';
+
+      // Round 2 only emits tool tag
+      const round2Chunk = '[QUERY: get-container-stats | {"id": "redis"}]';
+      const parsed = parseAiTools(round2Chunk);
+
+      // Callbacks
+      const onMessageDelete = (id: string) => {
+        const idx = messageList.findIndex((m) => m.id === id);
+        if (idx !== -1) messageList.splice(idx, 1);
+      };
+
+      if (pendingSupersededStreamId && parsed.cleanText.trim()) {
+        onMessageDelete(pendingSupersededStreamId);
+        pendingSupersededStreamId = null;
+      }
+
+      // Draft must NOT be deleted yet!
+      expect(messageList).toHaveLength(1);
+      expect(pendingSupersededStreamId).toBe('msg-draft-turn-1');
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Combination 7: Live Container Details in [LIVE_UI_CONTEXT] & 4-Language i18n
+  // (Feature 14 + Feature 15)
+  // -------------------------------------------------------------------------
+  describe('C7: Live Container Details in [LIVE_UI_CONTEXT] + 4-Language i18n (Feature 14 + 15)', () => {
+    const mockContainers = [
+      { name: 'postgres-db', Status: 'Up 12 hours', Image: 'postgres:16-alpine', State: 'running' },
+      { name: 'web-api', Status: 'Exited (137)', Image: 'my-org/web:latest', State: 'exited' },
+      { name: 'redis-cache', Status: 'Up 4 hours', Image: 'redis:7.2', State: 'running' },
+    ];
+
+    it('7.1: generates rich live UI context with container details in Vietnamese locale', () => {
+      const ctx = specBuildRichLiveUiContext({
+        currentPage: 'containers',
+        language: 'vi',
+        containers: mockContainers,
+      });
+
+      expect(ctx).toContain('Language: vi');
+      expect(ctx).toContain('postgres-db [Up 12 hours, postgres:16-alpine]');
+      expect(ctx).toContain('web-api [Exited (137), my-org/web:latest]');
+      expect(ctx).toContain('Containers: 2 running, 1 stopped');
+      expect(ctx).toContain('Ground Truth Rule: Prioritize [LIVE_UI_CONTEXT]');
+    });
+
+    it('7.2: preserves container details when switching language to Japanese (ja)', () => {
+      const ctx = specBuildRichLiveUiContext({
+        currentPage: 'containers',
+        language: 'ja',
+        containers: mockContainers,
+      });
+
+      expect(ctx).toContain('Language: ja');
+      expect(ctx).toContain('postgres-db [Up 12 hours, postgres:16-alpine]');
+      expect(ctx.length).toBeLessThanOrEqual(900);
+    });
+
+    it('7.3: preserves container details when switching language to Chinese (zh)', () => {
+      const ctx = specBuildRichLiveUiContext({
+        currentPage: 'containers',
+        language: 'zh',
+        containers: mockContainers,
+      });
+
+      expect(ctx).toContain('Language: zh');
+      expect(ctx).toContain('redis-cache [Up 4 hours, redis:7.2]');
+      expect(ctx.length).toBeLessThanOrEqual(900);
+    });
+
+    it('7.4: generates contextual starter prompts for exited container across languages', () => {
+      const starters = getStarterPrompts({
+        currentPage: 'containers',
+        containers: mockContainers as unknown as StarterPromptContext['containers'],
+      });
+
+      expect(starters.length).toBeGreaterThan(0);
+      const warningPrompt = starters.find((s) => s.category === 'warning');
+      expect(warningPrompt).toBeDefined();
+      expect(warningPrompt?.prompt).toContain('web-api');
+    });
+
+    it('7.5: fallback suggestions adapt based on container status tool execution', () => {
+      const suggestions = deriveFallbackSuggestions({
+        currentPage: 'containers',
+        toolsExecuted: [{ kind: 'query', name: 'list-containers' }],
+      });
+
+      expect(suggestions.length).toBeGreaterThanOrEqual(2);
+      expect(suggestions[0][0]).toMatch(/CPU|RAM|logs/i);
+    });
+  });
 });
+

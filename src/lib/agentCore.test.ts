@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import * as aiEventBus from "./aiEventBus";
 import * as llmProviders from "./llmProviders";
 import {
+  buildCleanConversationWindow,
   capToolOutput,
   isApprovalRequiredError,
   MAX_SEARCH_ROUNDS,
@@ -265,6 +266,338 @@ describe("agentCore helpers (DeepSeek-Harness & Harness2 patterns)", () => {
     ]);
     expect(secondTransitions[0]?.safety).toBe("DANGEROUS");
     expect(secondTransitions[0]?.warning).toBeTruthy();
+
+    vi.restoreAllMocks();
+  });
+});
+
+describe("buildCleanConversationWindow (Milestone 3)", () => {
+  it("deduplicates userMessage if caller already pushed it to the end of chatHistory", () => {
+    const history = [
+      { role: "user", content: "hello" },
+      { role: "assistant", content: "Hi! How can I help?" },
+      { role: "user", content: "show containers" },
+    ];
+    const result = buildCleanConversationWindow(history, "show containers", 10);
+    expect(result).toEqual([
+      { role: "user", content: "hello" },
+      { role: "assistant", content: "Hi! How can I help?" },
+      { role: "user", content: "show containers" },
+    ]);
+  });
+
+  it("appends userMessage if caller did not push it to chatHistory", () => {
+    const history = [
+      { role: "user", content: "hello" },
+      { role: "assistant", content: "Hi! How can I help?" },
+    ];
+    const result = buildCleanConversationWindow(history, "show containers", 10);
+    expect(result).toEqual([
+      { role: "user", content: "hello" },
+      { role: "assistant", content: "Hi! How can I help?" },
+      { role: "user", content: "show containers" },
+    ]);
+  });
+
+  it("merges consecutive messages with the same role using \\n\\n for strict alternation", () => {
+    const history = [
+      { role: "user", content: "part 1" },
+      { role: "user", content: "part 2" },
+      { role: "assistant", content: "ans 1" },
+      { role: "assistant", content: "ans 2" },
+      { role: "user", content: "part 3" },
+    ];
+    const result = buildCleanConversationWindow(history, "part 3", 10);
+    expect(result).toEqual([
+      { role: "user", content: "part 1\n\npart 2" },
+      { role: "assistant", content: "ans 1\n\nans 2" },
+      { role: "user", content: "part 3" },
+    ]);
+  });
+
+  it("removes leading assistant messages after slicing so first message is guaranteed to have role user (Anthropic requirement)", () => {
+    const history = [
+      { role: "user", content: "U1" },
+      { role: "assistant", content: "A1" },
+      { role: "user", content: "U2" },
+      { role: "assistant", content: "A2" },
+      { role: "user", content: "U3" },
+      { role: "assistant", content: "A3" },
+      { role: "user", content: "U4" },
+      { role: "assistant", content: "A4" },
+    ];
+
+    // maxTurns = 4: Slicing 4 turns would yield [A3, U4, A4, U5].
+    // Leading assistant message A3 must be removed so that the first message sent to Anthropic is U4!
+    const result = buildCleanConversationWindow(history, "U5", 4);
+    expect(result[0].role).toBe("user");
+    expect(result).toEqual([
+      { role: "user", content: "U4" },
+      { role: "assistant", content: "A4" },
+      { role: "user", content: "U5" },
+    ]);
+  });
+
+  it("skips system messages, empty messages, and cleans old tool tags from assistant turns", () => {
+    const history = [
+      { role: "system", content: "System context" },
+      { role: "user", content: "start container" },
+      { role: "assistant", content: "Starting it now.\n[SUGGEST: view logs | show logs]\n[ASK_CHOICE: Which one? | a | b]" },
+      { role: "assistant", content: "[QUERY: docker:ps]" }, // only tool tag -> cleanText empty -> skipped
+      { role: "user", content: "   " }, // empty user message -> skipped
+      { role: "assistant", content: "Done!" },
+    ];
+    const result = buildCleanConversationWindow(history, "thanks", 10);
+    expect(result).toEqual([
+      { role: "user", content: "start container" },
+      { role: "assistant", content: "Starting it now.\n\nDone!" },
+      { role: "user", content: "thanks" },
+    ]);
+  });
+
+  it("returns single user turn if history is empty or only had assistant messages", () => {
+    const resultEmpty = buildCleanConversationWindow([], "hello", 10);
+    expect(resultEmpty).toEqual([{ role: "user", content: "hello" }]);
+
+    const resultOnlyAssistant = buildCleanConversationWindow(
+      [{ role: "assistant", content: "Welcome to Colima AI!" }],
+      "help me",
+      10,
+    );
+    expect(resultOnlyAssistant).toEqual([{ role: "user", content: "help me" }]);
+  });
+});
+
+describe("agentCore intermediate draft bubble revocation (Milestone 3)", () => {
+  it("revokes intermediate draft bubble from read-only tool round when subsequent round produces prose", async () => {
+    let round = 0;
+    vi.spyOn(llmProviders, "chatStream").mockImplementation(
+      async (_prov, _model, _key, _hist, _endpoint, onChunk) => {
+        round += 1;
+        if (round === 1) {
+          // Read-only query round with draft prose
+          onChunk("Inspecting docker environment...\n[QUERY: docker:containers | {}]");
+        } else {
+          // Round 2 produces real prose response
+          onChunk("Found 2 running containers.");
+        }
+      },
+    );
+
+    vi.spyOn(aiEventBus, "getCategory").mockImplementation(() => "SAFE");
+    vi.spyOn(aiEventBus, "executeEvent").mockResolvedValue('[{"id":"c1"},{"id":"c2"}]');
+
+    const messages = new Map<string, string>();
+    const deletedIds = new Set<string>();
+    const callbacks: AgentCallbacks = {
+      onStatus: () => {},
+      onMessage: (m) => {
+        messages.set(m.id, m.content);
+      },
+      onMessageUpdate: (id, content) => {
+        messages.set(id, content);
+      },
+      onMessageDelete: (id) => {
+        deletedIds.add(id);
+        messages.delete(id);
+      },
+      onApprovalRequired: async () => true,
+      onNavigate: () => {},
+      onTimerSchedule: () => {},
+      onCronSchedule: () => {},
+      onScheduleCancel: () => {},
+    };
+
+    await runAgent(
+      "Check containers",
+      { provider: "ollama-local", model: "qwen2.5", apiKey: "", endpoint: "http://127.0.0.1:11434" },
+      callbacks,
+      [],
+      "",
+      [],
+    );
+
+    // Round 1 draft streamId was deleted when Round 2 emitted real prose
+    expect(deletedIds.size).toBe(1);
+    const remainingContents = [...messages.values()];
+    // The speculative text was revoked and replaced
+    expect(remainingContents).not.toContain("Inspecting docker environment...");
+    expect(remainingContents).toContain("Found 2 running containers.");
+
+    vi.restoreAllMocks();
+  });
+
+  it("preserves pending draft bubble when intermediate round has only tool tags, and revokes when prose arrives", async () => {
+    let round = 0;
+    vi.spyOn(llmProviders, "chatStream").mockImplementation(
+      async (_prov, _model, _key, _hist, _endpoint, onChunk) => {
+        round += 1;
+        if (round === 1) {
+          // Round 1: prose + read-only tool
+          onChunk("Checking status...\n[QUERY: docker:containers | {}]");
+        } else if (round === 2) {
+          // Round 2: ONLY tool tag, no prose at all
+          onChunk("[QUERY: docker:containers | {}]");
+        } else {
+          // Round 3: real prose arrives
+          onChunk("All containers healthy.");
+        }
+      },
+    );
+
+    vi.spyOn(aiEventBus, "getCategory").mockImplementation(() => "SAFE");
+    vi.spyOn(aiEventBus, "executeEvent").mockResolvedValue("[]");
+
+    const messages = new Map<string, string>();
+    const deletedIds = new Set<string>();
+    const callbacks: AgentCallbacks = {
+      onStatus: () => {},
+      onMessage: (m) => {
+        messages.set(m.id, m.content);
+      },
+      onMessageUpdate: (id, content) => {
+        messages.set(id, content);
+      },
+      onMessageDelete: (id) => {
+        deletedIds.add(id);
+        messages.delete(id);
+      },
+      onApprovalRequired: async () => true,
+      onNavigate: () => {},
+      onTimerSchedule: () => {},
+      onCronSchedule: () => {},
+      onScheduleCancel: () => {},
+    };
+
+    await runAgent(
+      "Check status",
+      { provider: "ollama-local", model: "qwen2.5", apiKey: "", endpoint: "http://127.0.0.1:11434" },
+      callbacks,
+      [],
+      "",
+      [],
+    );
+
+    // Round 2's empty streamId was deleted immediately because it had no prose.
+    // Round 1's draft was NOT overwritten with Round 2's deleted id, so Round 1's draft
+    // was correctly deleted when Round 3 emitted prose!
+    expect(deletedIds.size).toBe(2);
+    const remainingContents = [...messages.values()];
+    expect(remainingContents).not.toContain("Checking status...");
+    expect(remainingContents).toContain("All containers healthy.");
+
+    vi.restoreAllMocks();
+  });
+
+  it("does not revoke draft message when round awaited user approval", async () => {
+    let round = 0;
+    vi.spyOn(llmProviders, "chatStream").mockImplementation(
+      async (_prov, _model, _key, _hist, _endpoint, onChunk) => {
+        round += 1;
+        if (round === 1) {
+          // Round 1: awaits approval
+          onChunk('I will delete container c1 now.\n[EVENT_APPROVE: docker:remove | {"id":"c1"}]');
+        } else {
+          // Round 2: final confirmation
+          onChunk("Container c1 was deleted successfully.");
+        }
+      },
+    );
+
+    vi.spyOn(aiEventBus, "getCategory").mockImplementation(() => "NORMAL");
+    vi.spyOn(aiEventBus, "executeEvent").mockResolvedValue("deleted c1");
+
+    const messages = new Map<string, string>();
+    const deletedIds = new Set<string>();
+    const callbacks: AgentCallbacks = {
+      onStatus: () => {},
+      onMessage: (m) => {
+        messages.set(m.id, m.content);
+      },
+      onMessageUpdate: (id, content) => {
+        messages.set(id, content);
+      },
+      onMessageDelete: (id) => {
+        deletedIds.add(id);
+        messages.delete(id);
+      },
+      onApprovalRequired: async () => true,
+      onNavigate: () => {},
+      onTimerSchedule: () => {},
+      onCronSchedule: () => {},
+      onScheduleCancel: () => {},
+    };
+
+    await runAgent(
+      "Delete c1",
+      { provider: "ollama-local", model: "qwen2.5", apiKey: "", endpoint: "http://127.0.0.1:11434" },
+      callbacks,
+      [],
+      "",
+      [],
+    );
+
+    // Round 1 required approval, so its assistant text is an interactive prompt and must NOT be revoked!
+    expect(deletedIds.size).toBe(0);
+    const remainingContents = [...messages.values()];
+    expect(remainingContents).toContain("I will delete container c1 now.");
+    expect(remainingContents).toContain("Container c1 was deleted successfully.");
+
+    vi.restoreAllMocks();
+  });
+
+  it("instructs subsequent round to provide a self-contained answer and revokes interactive-only read-only draft bubbles", async () => {
+    const capturedHistories: unknown[][] = [];
+    let round = 0;
+    vi.spyOn(llmProviders, "chatStream").mockImplementation(
+      async (_prov, _model, _key, hist, _endpoint, onChunk) => {
+        capturedHistories.push(JSON.parse(JSON.stringify(hist)));
+        round += 1;
+        if (round === 1) {
+          onChunk("[SUGGEST: Check logs | docker logs]\n[QUERY: docker:containers | {}]");
+        } else {
+          onChunk("Complete self-contained summary of 2 running containers.");
+        }
+      },
+    );
+
+    vi.spyOn(aiEventBus, "getCategory").mockImplementation(() => "SAFE");
+    vi.spyOn(aiEventBus, "executeEvent").mockResolvedValue('[{"id":"c1"},{"id":"c2"}]');
+
+    const messages = new Map<string, string>();
+    const deletedIds = new Set<string>();
+    const callbacks: AgentCallbacks = {
+      onStatus: () => {},
+      onMessage: (m) => {
+        messages.set(m.id, m.content);
+      },
+      onMessageUpdate: (id, content) => {
+        messages.set(id, content);
+      },
+      onMessageDelete: (id) => {
+        deletedIds.add(id);
+        messages.delete(id);
+      },
+      onApprovalRequired: async () => true,
+      onNavigate: () => {},
+      onTimerSchedule: () => {},
+      onCronSchedule: () => {},
+      onScheduleCancel: () => {},
+    };
+
+    await runAgent(
+      "Check containers",
+      { provider: "ollama-local", model: "qwen2.5", apiKey: "", endpoint: "http://127.0.0.1:11434" },
+      callbacks,
+      [],
+      "",
+      [],
+    );
+
+    expect(deletedIds.size).toBe(1);
+    const round2History = capturedHistories[1] as Array<{ role: string; content: string }>;
+    const lastPrompt = round2History[round2History.length - 1];
+    expect(lastPrompt.content).toContain("self-contained response");
 
     vi.restoreAllMocks();
   });

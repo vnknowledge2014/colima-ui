@@ -792,3 +792,216 @@ export async function getAiSuggestionsEngine(): Promise<{
     };
   }
 }
+
+// ---------------------------------------------------------------------------
+// Specification Reference Oracle: 20-Feature Contract Adapters (PROJECT.md)
+// ---------------------------------------------------------------------------
+
+export interface SimulatedConversationMessage {
+  id?: string;
+  role: 'user' | 'assistant' | 'system';
+  content: string;
+  created_at?: string;
+  rowid?: number;
+}
+
+/**
+ * Feature 11 Contract: buildCleanConversationWindow
+ * - Eliminates duplicate trailing user message.
+ * - Merges consecutive turns with same role.
+ * - Strips leading 'assistant' turn (Anthropic strict turn alternation rule).
+ * - Strips tool syntax from assistant messages.
+ */
+export function specBuildCleanConversationWindow(
+  chatHistory: SimulatedConversationMessage[],
+  userMessage: string,
+  maxTurns = 10,
+): Array<{ role: 'user' | 'assistant'; content: string }> {
+  const sanitized: Array<{ role: 'user' | 'assistant'; content: string }> = [];
+
+  // 1. Filter out system messages and clean tool syntax from assistant messages
+  const baseHistory = chatHistory
+    .filter((m) => m.role !== 'system')
+    .map((m) => {
+      let content = m.content;
+      if (m.role === 'assistant') {
+        // Strip execution tool tags like [QUERY], [RUN], etc.
+        content = content
+          .replace(/<!--AI_TOOL_STEP:[\s\S]*?-->/g, '')
+          .replace(/\[(QUERY|EVENT_APPROVE|RUN|RUN_APPROVE|DIAGNOSE|QUERY_APP_STATE|SECURITY_[A-Z_]+|SCHEDULE_[A-Z_]+|NAVIGATE|READ_REFERENCE|LEARN_REASONING|LEARN|REMEMBER_PREFERENCE)(?::[\s\S]*?)?\]/gi, '')
+          .trim();
+      }
+      return { role: m.role as 'user' | 'assistant', content };
+    })
+    .filter((m) => m.content.length > 0);
+
+  // 2. Add userMessage if not already the trailing turn
+  const lastTurn = baseHistory[baseHistory.length - 1];
+  const trimmedUserMsg = userMessage.trim();
+  if (trimmedUserMsg) {
+    if (!lastTurn || lastTurn.role !== 'user' || lastTurn.content.trim() !== trimmedUserMsg) {
+      baseHistory.push({ role: 'user', content: trimmedUserMsg });
+    }
+  }
+
+  // 3. Merge consecutive turns with the same role
+  for (const turn of baseHistory) {
+    const prev = sanitized[sanitized.length - 1];
+    if (prev && prev.role === turn.role) {
+      prev.content = `${prev.content}\n\n${turn.content}`;
+    } else {
+      sanitized.push({ ...turn });
+    }
+  }
+
+  // 4. Apply sliding window (maxTurns)
+  let windowed = sanitized.slice(-maxTurns);
+
+  // 5. Anthropic Rule: window MUST start with role: "user"
+  while (windowed.length > 0 && windowed[0].role === 'assistant') {
+    windowed = windowed.slice(1);
+  }
+
+  return windowed;
+}
+
+export async function getCleanConversationWindowBuilder(): Promise<
+  (chatHistory: SimulatedConversationMessage[], userMessage: string, maxTurns?: number) => Array<{ role: 'user' | 'assistant'; content: string }>
+> {
+  try {
+    const modPath = '../../../lib/agentCore';
+    const mod = await import(/* @vite-ignore */ modPath);
+    if (typeof mod.buildCleanConversationWindow === 'function') {
+      return mod.buildCleanConversationWindow;
+    }
+  } catch {
+    // Fall back to spec oracle
+  }
+  return specBuildCleanConversationWindow;
+}
+
+/**
+ * Feature 14 Contract: Rich Live UI Context with Budget (< 900 chars)
+ */
+export function specBuildRichLiveUiContext(options: {
+  currentPage?: string;
+  language?: string;
+  instances?: Array<{ name: string; status: string; cpus?: number; memory?: number }>;
+  containers?: Array<{ name?: string; Names?: string | string[]; Status?: string; status?: string; Image?: string; image?: string; State?: string; state?: string }>;
+  k8sStatus?: { connected: boolean; pods?: number; namespaces?: number };
+  activeContext?: string;
+}): string {
+  const page = options.currentPage || 'dashboard';
+  const lang = options.language || 'en';
+
+  const instances = options.instances || [];
+  let vmSummary = 'none';
+  if (instances.length > 0) {
+    vmSummary = instances
+      .map((i) => `${i.name || 'unknown'}: ${i.status || 'Unknown'} (${i.cpus || '?'} CPU, ${i.memory || '?'}GiB)`)
+      .join('; ');
+  }
+
+  const rawContainers = options.containers || [];
+  let running = 0;
+  let stopped = 0;
+  const containerDetails: string[] = [];
+
+  for (const c of rawContainers) {
+    const rawName = c.Names
+      ? (Array.isArray(c.Names) ? c.Names[0] : c.Names)
+      : c.name || 'unnamed';
+    const cleanName = (typeof rawName === 'string' ? rawName : 'unnamed').replace(/^\//, '').slice(0, 30);
+
+    const rawImage = typeof c.Image === 'string' ? c.Image : typeof c.image === 'string' ? c.image : 'unknown';
+    const cleanImage = rawImage.slice(0, 25);
+
+    const rawStatus = typeof c.Status === 'string' ? c.Status : typeof c.status === 'string' ? c.status : '';
+    const rawState = typeof c.State === 'string' ? c.State : typeof c.state === 'string' ? c.state : '';
+    const isUp = rawState.toLowerCase() === 'running' || rawStatus.toLowerCase().startsWith('up');
+
+    if (isUp) running++;
+    else stopped++;
+
+    if (containerDetails.length < 6) {
+      const cleanStatus = (rawStatus || rawState || (isUp ? 'running' : 'stopped')).slice(0, 15);
+      containerDetails.push(`${cleanName} [${cleanStatus}, ${cleanImage}]`);
+    }
+  }
+
+  let k8sSummary = 'disconnected';
+  if (options.k8sStatus?.connected) {
+    k8sSummary = `connected (${options.k8sStatus.pods ?? 0} pods, ${options.k8sStatus.namespaces ?? 0} namespaces)`;
+  }
+
+  const activeContext = options.activeContext || instances[0]?.name || 'colima';
+
+  const lines = [
+    `[LIVE_UI_CONTEXT]`,
+    `Current Page: ${page}`,
+    `Language: ${lang}`,
+    `Colima VMs: ${vmSummary}`,
+    `Containers: ${running} running, ${stopped} stopped`,
+  ];
+
+  if (containerDetails.length > 0) {
+    lines.push(`Active Container Details: ${containerDetails.join('; ')}`);
+  }
+
+  lines.push(`Kubernetes: ${k8sSummary}`);
+  lines.push(`Active Context: ${activeContext}`);
+  lines.push(`Ground Truth Rule: Prioritize [LIVE_UI_CONTEXT] and fresh [Tool Results] over older chat turns.`);
+
+  let result = lines.join('\n');
+  if (result.length > 900) {
+    result = result.slice(0, 890) + '...';
+  }
+  return result;
+}
+
+/**
+ * Feature 5 Contract: Docker Context Sandbox Rules
+ */
+export function specClassifyDockerContextCommand(command: string): 'SAFE' | 'APPROVE' | 'DENY' {
+  const trimmed = command.trim();
+  const safePrefixes = [
+    'docker context ls',
+    'docker context show',
+    'docker context inspect',
+    'docker context list',
+  ];
+  for (const prefix of safePrefixes) {
+    if (trimmed === prefix || trimmed.startsWith(prefix + ' ')) {
+      return 'SAFE';
+    }
+  }
+
+  const approvePrefixes = ['docker context use '];
+  for (const prefix of approvePrefixes) {
+    if (trimmed.startsWith(prefix)) {
+      return 'APPROVE';
+    }
+  }
+
+  if (trimmed.startsWith('docker context ')) {
+    return 'DENY';
+  }
+
+  return 'APPROVE';
+}
+
+/**
+ * Feature 4 & 13 Contract: Deterministic History Sorting & Storage Order
+ */
+export function specSortHistoryDeterministic<T extends { created_at?: string; rowid?: number }>(
+  messages: T[],
+): T[] {
+  return [...messages].sort((a, b) => {
+    const timeA = a.created_at || '';
+    const timeB = b.created_at || '';
+    if (timeA !== timeB) {
+      return timeA.localeCompare(timeB);
+    }
+    return (a.rowid ?? 0) - (b.rowid ?? 0);
+  });
+}

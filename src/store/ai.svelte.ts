@@ -111,7 +111,10 @@ export async function deleteConversation(id: string) {
   }
 }
 
-export async function pushAiMessage(msg: AiMessage) {
+export async function pushAiMessage(
+  msg: AiMessage,
+  options: { persist?: boolean } = {},
+) {
   // Defence in depth against a duplicate id from any source. The message list
   // is rendered by a keyed `{#each}`, which throws on duplicates, and the
   // backend upserts on id — so a collision would also overwrite the earlier
@@ -125,6 +128,10 @@ export async function pushAiMessage(msg: AiMessage) {
   // message belongs to the thread it was sent from.
   const conversationId = aiState.activeConversationId;
   aiState.messages.push(safe);
+
+  // If persistence is disabled for this turn (e.g. In-flight streaming or draft),
+  // skip writing to SQLite. Persistence will happen via persistAiMessages at turn end.
+  if (options.persist === false) return;
 
   // An assistant turn is pushed empty and filled by the stream. Saving it here
   // wrote `content = ''` to the history, and nothing ever rewrote it — so every
@@ -162,11 +169,25 @@ export function deleteAiMessage(id: string) {
  * Called once the agent settles rather than per streamed chunk: the backend
  * upserts on id, so a token-by-token save would be one write per token for the
  * same row. Messages still empty at this point are skipped.
+ *
+ * Iterates through `aiState.messages` (preserving visual UI display order)
+ * and filters by `ids` if provided, ensuring 100% array ordering fidelity.
  */
-export async function persistAiMessages(ids: Iterable<string>) {
-  const conversationId = aiState.activeConversationId;
-  for (const id of ids) {
-    const message = aiState.messages.find((m) => m.id === id);
+export async function persistAiMessages(
+  ids?: Iterable<string>,
+  options?: { conversationId?: string; snapshot?: AiMessage[] },
+) {
+  const conversationId = options?.conversationId ?? aiState.activeConversationId;
+  const source =
+    options?.snapshot && aiState.activeConversationId !== conversationId
+      ? options.snapshot
+      : aiState.messages;
+  const idSet = ids ? new Set(ids) : null;
+  const toSave = idSet
+    ? source.filter((m) => idSet.has(m.id))
+    : source;
+
+  for (const message of toSave) {
     if (!message?.content) continue;
     try {
       await aiApi.saveMessage(message, conversationId);

@@ -1,13 +1,17 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, afterEach } from "vitest";
 import {
   getStarterPrompts,
   deriveFallbackSuggestions,
   buildLiveUiContextSnapshot,
   createLiveUiContextSnapshot,
 } from "./aiSuggestions";
+import { setLanguage } from "./i18n.svelte";
 import type { ColimaInstance, DockerContainer } from "./api/types";
 
 describe("aiSuggestions", () => {
+  afterEach(() => {
+    setLanguage("en");
+  });
   describe("getStarterPrompts", () => {
     it("returns warning prompts first when Colima VM is stopped or unhealthy", () => {
       const instances: ColimaInstance[] = [
@@ -345,6 +349,144 @@ describe("aiSuggestions", () => {
       expect(text).toContain("Colima VMs: none");
       expect(text).toContain("Containers: 0 running, 0 stopped");
       expect(text).toContain("Kubernetes: disconnected");
+    });
+
+    it("includes rich container details with defensive length budgeting under 900 characters", () => {
+      const mockContainers: DockerContainer[] = [
+        {
+          Id: "c1-abcdef123456789",
+          Names: "/production-api-gateway-service-v2",
+          Image: "docker.internal.company.com/infrastructure/api-gateway:v2.5.1@sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          Status: "Up 48 hours (healthy)",
+          State: "running",
+          Ports: "0.0.0.0:8080->8080/tcp",
+          CreatedAt: "2026-10-20",
+          Size: "150MB",
+          Command: "server start",
+        },
+        {
+          Id: "c2-123456789abcdef",
+          Names: ["/postgresql-primary-database-instance"] as unknown as string,
+          Image: "postgres:16-alpine",
+          Status: "Up 3 days",
+          State: "running",
+          Ports: "5432/tcp",
+          CreatedAt: "2026-10-18",
+          Size: "280MB",
+          Command: "postgres",
+        },
+        {
+          Id: "c3-deadbeef1234567",
+          Names: "/redis-cache-cluster-node-1",
+          Image: "redis:7-alpine",
+          Status: "Exited (0) 10 minutes ago",
+          State: "exited",
+          Ports: "",
+          CreatedAt: "2026-10-25",
+          Size: "40MB",
+          Command: "redis-server",
+        },
+        {
+          Id: "c4-feedface1234567",
+          Names: "/background-worker-queue-processor",
+          Image: "worker:latest",
+          Status: "Restarting (1)",
+          State: "restarting",
+          Ports: "",
+          CreatedAt: "2026-10-29",
+          Size: "95MB",
+          Command: "npm run worker",
+        },
+        {
+          Id: "c5-cafebebe1234567",
+          Names: "/prometheus-node-exporter-metrics",
+          Image: "prom/node-exporter:v1.6.0",
+          Status: "Up 12 hours",
+          State: "running",
+          Ports: "9100/tcp",
+          CreatedAt: "2026-10-28",
+          Size: "25MB",
+          Command: "node_exporter",
+        },
+        {
+          Id: "c6-beefface1234567",
+          Names: "/jaeger-distributed-tracing-agent",
+          Image: "jaegertracing/all-in-one:1.48",
+          Status: "Up 5 hours",
+          State: "running",
+          Ports: "16686/tcp",
+          CreatedAt: "2026-10-29",
+          Size: "60MB",
+          Command: "jaeger",
+        },
+        {
+          Id: "c7-overflow-container-7",
+          Names: "/extra-container-that-exceeds-max-six",
+          Image: "alpine:3.18",
+          Status: "Up 1 hour",
+          State: "running",
+          Ports: "",
+          CreatedAt: "2026-10-30",
+          Size: "5MB",
+          Command: "sh",
+        },
+      ];
+
+      const snapshot = buildLiveUiContextSnapshot({
+        currentPage: "containers",
+        language: "en",
+        instances: [
+          { name: "colima-primary", status: "Running", arch: "aarch64", cpus: 8, memory: 16, disk: 100, runtime: "docker", address: "192.168.5.2", kubernetes: true },
+        ],
+        containers: mockContainers,
+        k8sStatus: { connected: true, pods: 24, namespaces: 6, kindClusters: 1 },
+      });
+
+      expect(snapshot).toContain("[LIVE_UI_CONTEXT]");
+      expect(snapshot).toContain("Current Page: containers");
+      expect(snapshot).toContain("Colima VMs: colima-primary: Running (8 CPU, 16GiB)");
+      expect(snapshot).toContain("Containers: 5 running, 2 stopped");
+      expect(snapshot).toContain("Kubernetes: connected (24 pods, 6 namespaces)");
+      expect(snapshot).toContain("Container Details:");
+      expect(snapshot).toContain("production-api-gateway-serv... [Up 48 hours ..., docker.internal.compan...]");
+      expect(snapshot).toContain("postgresql-primary-database... [Up 3 days, postgres:16-alpine]");
+      expect(snapshot).toContain("Ground Truth Rule: Prioritize [LIVE_UI_CONTEXT] and fresh [Tool Results] over older chat turns.");
+      // Strict length guarantee: total snapshot must be strictly less than 900 characters
+      expect(snapshot.length).toBeLessThan(900);
+      // Overflow container 7 must not be listed (capped at 6)
+      expect(snapshot).not.toContain("overflow-container-7");
+    });
+  });
+
+  describe("localization & language switching", () => {
+    it("returns Vietnamese translations when language is set to 'vi'", () => {
+      setLanguage("vi");
+
+      const prompts = getStarterPrompts({ currentPage: "dashboard" });
+      expect(prompts[0].title).toBe("Tổng quan hệ thống");
+      expect(prompts[0].prompt).toBe("Xem tổng quan hệ thống và các phiên bản đang hoạt động");
+
+      const containerSuggestions = deriveFallbackSuggestions({
+        toolsExecuted: [],
+        currentPage: "containers",
+      });
+      expect(containerSuggestions[0][0]).toBe("Danh sách container đang chạy");
+      expect(containerSuggestions[0][1]).toBe("Liệt kê tất cả các container đang hoạt động và ánh xạ cổng của chúng");
+
+      const vmWarning = getStarterPrompts({
+        instances: [{ name: "dev-vm", status: "Stopped" } as ColimaInstance],
+        instancesLoaded: true,
+      });
+      const warn = vmWarning.find((p) => p.category === "warning");
+      expect(warn).toBeDefined();
+      expect(warn?.title).toBe("Kiểm tra phiên bản dev-vm đang dừng");
+      expect(warn?.prompt).toContain("Tại sao phiên bản Colima dev-vm bị dừng?");
+    });
+
+    it("resets back to English after afterEach hook", () => {
+      const prompts = getStarterPrompts({ currentPage: "dashboard" });
+      expect(prompts[0].title).toBe("System overview");
+      expect(prompts[0].prompt).toBe("Show system overview and active instances");
     });
   });
 });

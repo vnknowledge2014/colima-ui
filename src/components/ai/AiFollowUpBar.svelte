@@ -35,14 +35,9 @@
 
   function handleKeyDown(e: KeyboardEvent, prompt: string) {
     if (disabled) return;
-    if (e.key === "Enter" || e.key === " ") {
-      if (e.shiftKey) {
-        e.preventDefault();
-        handleInsert(e, prompt);
-      } else {
-        e.preventDefault();
-        handleSend(prompt);
-      }
+    if ((e.key === "Enter" || e.key === " ") && e.shiftKey) {
+      e.preventDefault();
+      handleInsert(e, prompt);
     }
   }
 </script>

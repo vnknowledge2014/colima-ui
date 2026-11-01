@@ -17,6 +17,21 @@ async function getFetch(): Promise<typeof globalThis.fetch> {
   return _fetchFn;
 }
 
+export const DEFAULT_MODELS = {
+  anthropic: "claude-3-5-sonnet-latest",
+  openai: "gpt-4o-mini",
+  gemini: "gemini-2.0-flash",
+  "ollama-local": "llama3",
+  "ollama-cloud": "llama3",
+  "openai-compatible": "gpt-4o-mini",
+} as const;
+
+export const POPULAR_MODELS = {
+  anthropic: ["claude-3-5-sonnet-latest", "claude-3-7-sonnet-latest"],
+  openai: ["gpt-4o", "gpt-4o-mini"],
+  gemini: ["gemini-2.0-flash"],
+} as const;
+
 export async function chatStream(
   provider: string,
   model: string,
@@ -43,7 +58,7 @@ export async function chatStream(
     const base = endpoint ? normalizeOllamaBaseUrl(endpoint) : "http://localhost:11434";
     url = `${base}/api/chat`;
     if (apiKey) headers["Authorization"] = `Bearer ${apiKey}`;
-    body = { model, messages, stream: true };
+    body = { model: model || DEFAULT_MODELS["ollama-local"], messages, stream: true };
   } else if (isAnthropic) {
     url = "https://api.anthropic.com/v1/messages";
     headers["x-api-key"] = apiKey;
@@ -51,7 +66,7 @@ export async function chatStream(
     headers["anthropic-dangerous-direct-browser-access"] = "true";
     const sys = messages.filter(m => m.role === "system").map(m => m.content).join("\n\n");
     const msg = messages.filter(m => m.role !== "system");
-    body = { model: model || "claude-3-haiku-20240307", system: sys, messages: msg, max_tokens: 4096, stream: true };
+    body = { model: model || DEFAULT_MODELS.anthropic, system: sys, messages: msg, max_tokens: 4096, stream: true };
   } else if (isOpenAI) {
     // Normalized to a base here and by the same rules on the Rust side, so one
     // value configured in settings works for both the streaming and the
@@ -59,12 +74,12 @@ export async function chatStream(
     const base = endpoint ? normalizeOpenAiBaseUrl(endpoint) : "https://api.openai.com/v1";
     url = `${base}/chat/completions`;
     if (apiKey) headers["Authorization"] = `Bearer ${apiKey}`;
-    body = { model: model || "gpt-3.5-turbo", messages, stream: true };
+    body = { model: model || DEFAULT_MODELS.openai, messages, stream: true };
   } else if (isGemini) {
-    const m = model || "gemini-1.5-flash";
+    const m = model || DEFAULT_MODELS.gemini;
     // Key in a header, not the query string: a failing request surfaces its URL
     // in the error message, which the user then copies into a bug report.
-    url = `https://generativelanguage.googleapis.com/v1beta/models/${m}:streamGenerateContent`;
+    url = `https://generativelanguage.googleapis.com/v1beta/models/${m}:streamGenerateContent?alt=sse`;
     headers["x-goog-api-key"] = apiKey;
     const contents = messages.filter(m => m.role !== "system").map(m => ({
       role: m.role === "assistant" ? "model" : "user",
@@ -119,83 +134,146 @@ export async function chatStream(
   const reader = response.body.getReader();
   const decoder = new TextDecoder("utf-8");
 
-  if (isGemini) {
-    // Gemini stream format is an array of objects but chunks might be split
-    let buffer = "";
-    while (true) {
-      // Checked per chunk, not only on the fetch: Tauri's HTTP plugin can have
-      // the body in flight already, so a cancelled request would otherwise keep
-      // streaming text into a message the user has stopped.
-      if (signal?.aborted) {
-        await reader.cancel().catch(() => {});
-        break;
-      }
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      // Very naive json extraction for gemini stream which looks like: ",\r\n{\n  \"candidates\":..."
-      // But it's an array stream `[\n{\n...}\n,\n{\n...}\n]`
-      // We will just regex match text fields for simplicity, or parse correctly.
-      // A safe way for Gemini streaming JSON: extract "text": "..."
-      const matches = [...buffer.matchAll(/"text"\s*:\s*"((?:[^"\\]|\\.)*)"/g)];
-      if (matches.length > 0) {
-        let chunkText = "";
-        for (const m of matches) {
-           chunkText += m[1].replace(/\\n/g, "\n").replace(/\\"/g, "\"").replace(/\\\\/g, "\\");
-        }
-        if (chunkText) {
-          onChunk(chunkText);
-        }
-        // clear buffer to avoid reprocessing but we must be careful not to break mid-string
-        buffer = ""; // Highly naive, but works if we just want all text matches and clear.
-      }
+  let buffer = "";
+  let inThinking = false;
+
+  const handleThinking = (text: string) => {
+    if (!text) return;
+    const clean = text.replace(/<\/?think>/gi, "");
+    if (!clean) return;
+    if (!inThinking) {
+      onChunk("<think>");
+      inThinking = true;
     }
-  } else {
-    // SSE Format for OpenAI, Anthropic, Ollama
-    let buffer = "";
-    while (true) {
-      // Checked per chunk, not only on the fetch: Tauri's HTTP plugin can have
-      // the body in flight already, so a cancelled request would otherwise keep
-      // streaming text into a message the user has stopped.
-      if (signal?.aborted) {
-        await reader.cancel().catch(() => {});
-        break;
+    onChunk(clean);
+  };
+
+  const handleContent = (text: string) => {
+    if (!text) return;
+    if (inThinking) {
+      onChunk("</think>\n\n");
+      inThinking = false;
+    }
+    onChunk(text);
+  };
+
+  const processLine = (trimmed: string) => {
+    if (!trimmed) return;
+
+    if (isOllama) {
+      let dataStr = trimmed;
+      if (dataStr.startsWith("data: ")) {
+        dataStr = dataStr.slice(6).trim();
       }
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split("\n");
-      buffer = lines.pop() || ""; // Keep incomplete line in buffer
-
-      for (const line of lines) {
-        const trimmed = line.trim();
-        if (!trimmed) continue;
-
-        if (isOllama) {
-          try {
-            const data = JSON.parse(trimmed);
-            if (data.message?.content) onChunk(data.message.content);
-          } catch {
-            // A non-JSON line is not part of the Ollama stream; ignore it.
-          }
-        } else if (trimmed.startsWith("data: ")) {
-          const dataStr = trimmed.slice(6);
-          if (dataStr === "[DONE]") continue;
-          try {
-            const data = JSON.parse(dataStr);
-            if (isOpenAI) {
-              const content = data.choices?.[0]?.delta?.content;
-              if (content) onChunk(content);
-            } else if (isAnthropic) {
-              if (data.type === "content_block_delta" && data.delta?.text) {
-                onChunk(data.delta.text);
+      if (dataStr === "[DONE]") return;
+      try {
+        const data = JSON.parse(dataStr);
+        if (typeof data.message?.thinking === "string" && data.message.thinking) {
+          handleThinking(data.message.thinking);
+        }
+        if (typeof data.message?.content === "string" && data.message.content) {
+          handleContent(data.message.content);
+        }
+      } catch {
+        // A non-JSON line is not part of the Ollama stream; ignore it.
+      }
+    } else if (trimmed.startsWith("data: ")) {
+      const dataStr = trimmed.slice(6).trim();
+      if (dataStr === "[DONE]") return;
+      try {
+        const data = JSON.parse(dataStr);
+        if (isGemini) {
+          const parts = data.candidates?.[0]?.content?.parts;
+          if (Array.isArray(parts)) {
+            for (const part of parts) {
+              if (part.thought) {
+                if (typeof part.text === "string" && part.text) {
+                  handleThinking(part.text);
+                }
+              } else if (typeof part.text === "string" && part.text) {
+                handleContent(part.text);
               }
             }
-          } catch {
-            // SSE keep-alive lines and malformed frames are skipped.
           }
+        } else if (isOpenAI) {
+          const delta = data.choices?.[0]?.delta;
+          if (delta) {
+            const reasoning = delta.reasoning_content ?? delta.reasoning;
+            if (typeof reasoning === "string" && reasoning) {
+              handleThinking(reasoning);
+            }
+            if (typeof delta.content === "string" && delta.content) {
+              handleContent(delta.content);
+            }
+          }
+        } else if (isAnthropic) {
+          if (data.type === "content_block_delta") {
+            const thinking =
+              data.delta?.type === "thinking_delta"
+                ? data.delta?.thinking
+                : (data.delta?.thinking ?? data.delta?.thinking_delta);
+            if (typeof thinking === "string" && thinking) {
+              handleThinking(thinking);
+            }
+            const text = data.delta?.text;
+            if (typeof text === "string" && text) {
+              handleContent(text);
+            }
+          }
+        }
+      } catch {
+        // SSE keep-alive lines and malformed frames are skipped.
+      }
+    } else if (isGemini) {
+      // Fallback in case a proxy strips alt=sse and returns raw JSON objects
+      let jsonStr = trimmed;
+      if (jsonStr.startsWith(", {") || jsonStr.startsWith(",{")) {
+        jsonStr = jsonStr.slice(jsonStr.indexOf("{"));
+      }
+      if (jsonStr.startsWith("{")) {
+        try {
+          const data = JSON.parse(jsonStr);
+          const parts = data.candidates?.[0]?.content?.parts;
+          if (Array.isArray(parts)) {
+            for (const part of parts) {
+              if (part.thought) {
+                if (typeof part.text === "string" && part.text) {
+                  handleThinking(part.text);
+                }
+              } else if (typeof part.text === "string" && part.text) {
+                handleContent(part.text);
+              }
+            }
+          }
+        } catch {
+          // Incomplete or non-JSON chunk
         }
       }
     }
+  };
+
+  while (true) {
+    if (signal?.aborted) {
+      await reader.cancel().catch(() => {});
+      break;
+    }
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split("\n");
+    buffer = lines.pop() || ""; // Keep incomplete line in buffer
+
+    for (const line of lines) {
+      processLine(line.trim());
+    }
+  }
+
+  if (buffer.trim()) {
+    processLine(buffer.trim());
+  }
+
+  if (inThinking) {
+    onChunk("</think>\n\n");
+    inThinking = false;
   }
 }

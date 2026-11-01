@@ -441,35 +441,49 @@ pub async fn host_specs() -> Result<HostSpecs, crate::error::ColimaError> {
     .await.map_err(|e: String| crate::error::ColimaError::from(e))
 }
 
-/// Read the bundled CONTEXT.md file and return its contents.
+pub fn read_reference_from_dir(base_dir: &std::path::Path, rel_path: &str) -> Result<String, String> {
+    let canon_base = base_dir
+        .canonicalize()
+        .map_err(|e| format!("Cannot resolve base resources dir {:?}: {e}", base_dir))?;
+
+    let clean_rel = rel_path.trim().trim_start_matches('/');
+    let clean_rel = clean_rel.strip_prefix("resources/").unwrap_or(clean_rel);
+
+    let target_path = canon_base.join(clean_rel);
+    let canon_target = target_path
+        .canonicalize()
+        .map_err(|e| format!("Failed to canonicalize reference path {:?}: {e}", target_path))?;
+
+    if !canon_target.starts_with(&canon_base) {
+        return Err("Access outside resources directory is denied".to_string());
+    }
+
+    if !canon_target.is_file() {
+        return Err(format!("Reference target {:?} is not a file", canon_target));
+    }
+
+    std::fs::read_to_string(&canon_target)
+        .map_err(|e| format!("Failed to read reference from {:?}: {e}", canon_target))
+}
+
+/// Read the bundled reference file and return its contents.
 /// Used by the AI agent to inject authoritative ColimaUI + Colima knowledge
 /// into the chat context (Tier 1 injection).
 #[tauri::command]
 pub async fn read_reference(app: tauri::AppHandle, path: String) -> Result<String, crate::error::ColimaError> {
     async move {
-    use tauri::Manager;
-    let resource_path = app
-        .path()
-        .resource_dir()
-        .map_err(|e| format!("Cannot resolve resource dir: {e}"))?
-        .join("resources")
-        .join(&path);
-    std::fs::read_to_string(&resource_path)
-        .map_err(|e| format!("Failed to read reference from {:?}: {e}", resource_path))
+        use tauri::Manager;
+        let resources_dir = app
+            .path()
+            .resource_dir()
+            .map_err(|e| format!("Cannot resolve resource dir: {e}"))?
+            .join("resources");
+        read_reference_from_dir(&resources_dir, &path)
     }
     .await.map_err(|e: String| crate::error::ColimaError::from(e))
 }
 
-#[tauri::command]
-pub async fn get_app_context(app: tauri::AppHandle) -> Result<String, crate::error::ColimaError> {
-    async move {
-    use tauri::Manager;
-    let resources_dir = app
-        .path()
-        .resource_dir()
-        .map_err(|e| format!("Cannot resolve resource dir: {e}"))?
-        .join("resources");
-
+pub fn build_app_context_from_dir(resources_dir: &std::path::Path, home_dir: Option<std::path::PathBuf>) -> String {
     let mut context = String::new();
 
     if let Ok(sys) = std::fs::read_to_string(resources_dir.join("system_prompt.md")) {
@@ -482,35 +496,28 @@ pub async fn get_app_context(app: tauri::AppHandle) -> Result<String, crate::err
         context.push_str("\n\n");
     }
 
-    let skills_dir = resources_dir.join("skills");
-    if let Ok(entries) = std::fs::read_dir(skills_dir) {
-        for entry in entries.flatten() {
-            if entry.path().is_dir() {
-                let skill_file = entry.path().join("SKILL.md");
-                if let Ok(skill_content) = std::fs::read_to_string(&skill_file) {
-                    context.push_str(&skill_content);
-                    context.push_str("\n\n");
-                }
-            }
-        }
+    let core_skill = resources_dir.join("skills").join("colima_ui").join("SKILL.md");
+    if let Ok(skill_content) = std::fs::read_to_string(&core_skill) {
+        context.push_str(&skill_content);
+        context.push_str("\n\n");
     }
 
-    if let Ok(home) = app.path().home_dir() {
+    if let Some(home) = home_dir {
         let plugins_file = home.join(".colima-ui").join("plugins.yaml");
         if let Ok(content) = std::fs::read_to_string(&plugins_file) {
             if let Ok(config) = serde_yml::from_str::<PluginsConfig>(&content) {
                 if !config.plugins.is_empty() {
                     context.push_str("## Custom User Plugins / Skills\n\n");
                     context.push_str("The user has defined the following custom skills/shortcuts in their `~/.colima-ui/plugins.yaml`. You MUST prioritize them when applicable.\n\n");
-                    
+
                     for (name, plugin) in config.plugins {
                         context.push_str(&format!("### {}\n", name));
                         context.push_str(&format!("- **Description**: {}\n", plugin.description));
-                        
+
                         if let Some(prompt) = plugin.prompt {
                             context.push_str(&format!("- **Prompt/Trigger**: {}\n", prompt));
                         }
-                        
+
                         if let Some(cmd) = plugin.command {
                             let parts: Vec<&str> = cmd.split_whitespace().collect();
                             if !parts.is_empty() {
@@ -518,7 +525,7 @@ pub async fn get_app_context(app: tauri::AppHandle) -> Result<String, crate::err
                                 let a: Vec<String> = parts[1..].iter().map(|s| format!("\"{}\"", s)).collect();
                                 let args_str = format!("[{}]", a.join(", "));
                                 context.push_str(&format!(
-                                    "- **Action**: `{}` (Run via `[EVENT_APPROVE: cli-exec | {{\"command\": \"{}\", \"args\": {}}}]`)\n", 
+                                    "- **Action**: `{}` (Run via `[EVENT_APPROVE: cli-exec | {{\"command\": \"{}\", \"args\": {}}}]`)\n",
                                     cmd, c, args_str
                                 ));
                             }
@@ -530,7 +537,20 @@ pub async fn get_app_context(app: tauri::AppHandle) -> Result<String, crate::err
         }
     }
 
-    Ok(context)
+    context
+}
+
+#[tauri::command]
+pub async fn get_app_context(app: tauri::AppHandle) -> Result<String, crate::error::ColimaError> {
+    async move {
+        use tauri::Manager;
+        let resources_dir = app
+            .path()
+            .resource_dir()
+            .map_err(|e| format!("Cannot resolve resource dir: {e}"))?
+            .join("resources");
+        let home_dir = app.path().home_dir().ok();
+        Ok(build_app_context_from_dir(&resources_dir, home_dir))
     }
     .await.map_err(|e: String| crate::error::ColimaError::from(e))
 }
@@ -611,3 +631,78 @@ pub fn start_resource_saver_daemon(state: Arc<RwLock<ResourceSaverState>>) {
         }
     });
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+
+    #[test]
+    fn test_read_reference_from_dir_security_and_stripping() {
+        let temp = std::env::temp_dir().join(format!("colima_ui_test_ref_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&temp);
+        fs::create_dir_all(&temp).unwrap();
+
+        let sub_dir = temp.join("subdir");
+        fs::create_dir_all(&sub_dir).unwrap();
+
+        let test_file = temp.join("sample.md");
+        fs::write(&test_file, "Sample reference content").unwrap();
+
+        // 1. Normal relative path
+        let content = read_reference_from_dir(&temp, "sample.md").unwrap();
+        assert_eq!(content, "Sample reference content");
+
+        // 2. Path with resources/ prefix
+        let content = read_reference_from_dir(&temp, "resources/sample.md").unwrap();
+        assert_eq!(content, "Sample reference content");
+
+        // 3. Path with leading slash and resources/ prefix
+        let content = read_reference_from_dir(&temp, "/resources/sample.md").unwrap();
+        assert_eq!(content, "Sample reference content");
+
+        // 4. Directory traversal attempt
+        let err = read_reference_from_dir(&temp, "../outside.txt").unwrap_err();
+        assert!(err.contains("Access outside resources directory is denied") || err.contains("Failed to canonicalize"));
+
+        // 5. Target is a directory, not a file
+        let err = read_reference_from_dir(&temp, "subdir").unwrap_err();
+        assert!(err.contains("is not a file"));
+
+        let _ = fs::remove_dir_all(&temp);
+    }
+
+    #[test]
+    fn test_build_app_context_from_dir_deterministic_loading() {
+        let temp = std::env::temp_dir().join(format!("colima_ui_test_ctx_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&temp);
+        fs::create_dir_all(temp.join("skills").join("colima_ui")).unwrap();
+        fs::create_dir_all(temp.join("skills").join("random_skill")).unwrap();
+
+        fs::write(temp.join("system_prompt.md"), "PROMPT_HEADER").unwrap();
+        fs::write(temp.join("router.md"), "ROUTER_HEADER").unwrap();
+        fs::write(temp.join("skills").join("colima_ui").join("SKILL.md"), "COLIMA_UI_CORE_SKILL").unwrap();
+        fs::write(temp.join("skills").join("random_skill").join("SKILL.md"), "SHOULD_NOT_BE_LOADED").unwrap();
+
+        let home_temp = std::env::temp_dir().join(format!("colima_ui_test_home_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&home_temp);
+        fs::create_dir_all(home_temp.join(".colima-ui")).unwrap();
+        fs::write(
+            home_temp.join(".colima-ui").join("plugins.yaml"),
+            "plugins:\n  my_plugin:\n    description: Custom tool\n    command: my-tool run\n",
+        ).unwrap();
+
+        let context = build_app_context_from_dir(&temp, Some(home_temp.clone()));
+
+        assert!(context.contains("PROMPT_HEADER"));
+        assert!(context.contains("ROUTER_HEADER"));
+        assert!(context.contains("COLIMA_UI_CORE_SKILL"));
+        assert!(!context.contains("SHOULD_NOT_BE_LOADED"));
+        assert!(context.contains("Custom User Plugins / Skills"));
+        assert!(context.contains("my_plugin"));
+
+        let _ = fs::remove_dir_all(&temp);
+        let _ = fs::remove_dir_all(&home_temp);
+    }
+}
+

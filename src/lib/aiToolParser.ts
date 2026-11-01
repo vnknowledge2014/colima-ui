@@ -404,7 +404,12 @@ export function stripStreamingPartialTags(text: string): StreamingPartialTagResu
   else if (rawTagName === "NAVIGATE" || rawTagName === "READ_REFERENCE") pendingTagKind = "navigate";
   else pendingTagKind = "memory";
 
-  const cleanText = workingText.slice(0, tagStart).trimEnd();
+  let cleanText = workingText.slice(0, tagStart);
+  // Strip any trailing unmatched opening backtick immediately before tagStart
+  cleanText = cleanText.replace(/(?<!`)`\s*$/, "");
+  // Strip any trailing empty bullet marker immediately before tagStart
+  cleanText = cleanText.replace(/(?:\r?\n|^)\s*(?:[-*+]|\d+\.)\s*$/, "");
+  cleanText = cleanText.trimEnd();
   return { cleanText, pendingTagKind };
 }
 
@@ -456,6 +461,33 @@ export function rebuildAssistantTurnContent(
   }
 
   return out;
+}
+
+/**
+ * Cleans syntax remnants (empty backticks, orphaned list bullets) left behind
+ * when tool tags are stripped from prose, while strictly preserving code blocks.
+ */
+export function cleanToolSyntaxRemnants(text: string): string {
+  if (!text) return "";
+
+  // Fence-aware: separate text into code blocks and prose.
+  // Matches ```...``` and ~~~...~~~ blocks.
+  const codeBlockRegex = /(```[\s\S]*?```|~~~[\s\S]*?~~~)/g;
+  const parts = text.split(codeBlockRegex);
+
+  for (let i = 0; i < parts.length; i++) {
+    // Even indices are prose outside code blocks; odd indices are code blocks
+    if (i % 2 === 0) {
+      // Step 1: Strip empty backtick pairs first (outside code fences)
+      parts[i] = parts[i].replace(/(?<!`)`\s*`(?!`)/g, "");
+      // Step 2: Strip orphaned bullet / list marker lines
+      parts[i] = parts[i].replace(/^\s*(?:[-*+]|\d+\.)\s*$/gm, "");
+      // Step 3: Collapse redundant blank lines
+      parts[i] = parts[i].replace(/\n{3,}/g, "\n\n");
+    }
+  }
+
+  return parts.join("").trim();
 }
 
 export function parseAiTools(responseText: string): ParsedTools {
@@ -572,7 +604,7 @@ export function parseAiTools(responseText: string): ParsedTools {
     choicePrompt = extracted.choicePrompt;
   }
 
-  const cleanText = stripSpans(responseText, spans).trim();
+  const cleanText = cleanToolSyntaxRemnants(stripSpans(responseText, spans));
 
   const hasTools =
     queries.length > 0 ||

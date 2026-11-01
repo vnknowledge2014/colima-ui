@@ -4,6 +4,7 @@ import {
   extractChoicePrompt,
   stripStreamingPartialTags,
   rebuildAssistantTurnContent,
+  cleanToolSyntaxRemnants,
 } from "./aiToolParser";
 
 describe("aiToolParser", () => {
@@ -375,5 +376,138 @@ describe("rebuildAssistantTurnContent", () => {
     expect(rebuilt).not.toContain("[QUERY:");
     expect(rebuilt).toContain("Execution output:  done.");
     expect(rebuilt).toContain("[SUGGEST: Next]");
+  });
+});
+
+describe("cleanToolSyntaxRemnants & syntax cleaning", () => {
+  it("leaves clean text with no empty backticks when tag was backtick-wrapped", () => {
+    const input = "I will run this: `[EVENT_APPROVE: compose-up | my-app]` for you.";
+    const parsed = parseAiTools(input);
+
+    expect(parsed.eventApprovals).toHaveLength(1);
+    expect(parsed.cleanText).not.toContain("`");
+    expect(parsed.cleanText).toBe("I will run this:  for you.");
+  });
+
+  it("leaves clean text with no empty bullet when tag was list-wrapped", () => {
+    const input = "Here are suggestions:\n- [SUGGEST: Check logs | show logs]\nEnd of suggestions.";
+    const parsed = parseAiTools(input);
+
+    expect(parsed.suggests).toHaveLength(1);
+    expect(parsed.cleanText).not.toMatch(/^[ \t]*-[ \t]*$/m);
+    expect(parsed.cleanText).toBe("Here are suggestions:\n\nEnd of suggestions.");
+  });
+
+  it("leaves clean text when tag is both list-wrapped and backtick-wrapped", () => {
+    const input = "- `[QUERY: list-containers]`";
+    const parsed = parseAiTools(input);
+
+    expect(parsed.queries).toHaveLength(1);
+    expect(parsed.cleanText).toBe("");
+  });
+
+  it("preserves valid list items and only removes the orphaned bullet line", () => {
+    const input = [
+      "Here are the actions:",
+      "- Keep first item",
+      "- [EVENT_APPROVE: compose-down | my-app]",
+      "- Keep third item",
+    ].join("\n");
+    const parsed = parseAiTools(input);
+
+    expect(parsed.eventApprovals).toHaveLength(1);
+    expect(parsed.cleanText).toBe(
+      "Here are the actions:\n- Keep first item\n\n- Keep third item"
+    );
+  });
+
+  it("strictly preserves markdown code blocks including empty bullets or backticks inside them", () => {
+    const input = [
+      "Here is the yaml configuration:",
+      "```yaml",
+      "- item 1",
+      "- ",
+      "```",
+      "- `[QUERY: list-instances]`",
+      "All done.",
+    ].join("\n");
+    const parsed = parseAiTools(input);
+
+    expect(parsed.queries).toHaveLength(1);
+    // Inside ```yaml ... ```, '- item 1' and '- ' must remain intact
+    expect(parsed.cleanText).toContain("```yaml\n- item 1\n- \n```");
+    // Outside the block, the dangling '- `[QUERY: ...]`' is cleanly removed
+    expect(parsed.cleanText).not.toContain("[QUERY:");
+    expect(parsed.cleanText).toBe(
+      "Here is the yaml configuration:\n```yaml\n- item 1\n- \n```\nAll done."
+    );
+  });
+
+  it("preserves code block with backtick strings inside code fence", () => {
+    const input = [
+      "Code snippet:",
+      "```bash",
+      "echo ``",
+      "```",
+      "`[QUERY: test]`",
+    ].join("\n");
+    const parsed = parseAiTools(input);
+
+    expect(parsed.cleanText).toBe("Code snippet:\n```bash\necho ``\n```");
+  });
+
+  it("directly tests cleanToolSyntaxRemnants utility", () => {
+    expect(cleanToolSyntaxRemnants("")).toBe("");
+    expect(cleanToolSyntaxRemnants("``")).toBe("");
+    expect(cleanToolSyntaxRemnants("`  `")).toBe("");
+    expect(cleanToolSyntaxRemnants("- ``")).toBe("");
+    expect(cleanToolSyntaxRemnants("* ` `")).toBe("");
+    expect(cleanToolSyntaxRemnants("1. ``")).toBe("");
+    expect(cleanToolSyntaxRemnants("Normal text without tags")).toBe("Normal text without tags");
+    expect(cleanToolSyntaxRemnants("Text\n\n\n\nMore text")).toBe("Text\n\nMore text");
+  });
+});
+
+describe("stripStreamingPartialTags anti-flicker", () => {
+  it("strips trailing dangling bullet marker before tagStart without leaving trailing '-'", () => {
+    const input = "\n- [QUERY: list-containers";
+    const { cleanText, pendingTagKind } = stripStreamingPartialTags(input);
+
+    expect(cleanText).toBe("");
+    expect(cleanText).not.toContain("-");
+    expect(pendingTagKind).toBe("query");
+  });
+
+  it("strips trailing bullet and preceding newline before tagStart", () => {
+    const input = "I will check the status:\n- [QUERY: list-instances";
+    const { cleanText, pendingTagKind } = stripStreamingPartialTags(input);
+
+    expect(cleanText).toBe("I will check the status:");
+    expect(pendingTagKind).toBe("query");
+  });
+
+  it("strips trailing unmatched backtick before tagStart", () => {
+    const input = "Action to take: `[EVENT_APPROVE: compose-up";
+    const { cleanText, pendingTagKind } = stripStreamingPartialTags(input);
+
+    expect(cleanText).toBe("Action to take:");
+    expect(cleanText).not.toContain("`");
+    expect(pendingTagKind).toBe("event_approve");
+  });
+
+  it("strips both trailing bullet and trailing backtick before tagStart", () => {
+    const input = "Executing query:\n- `[QUERY: list-vms";
+    const { cleanText, pendingTagKind } = stripStreamingPartialTags(input);
+
+    expect(cleanText).toBe("Executing query:");
+    expect(pendingTagKind).toBe("query");
+  });
+
+  it("preserves previous bullet items when streaming an unclosed tag on a new line", () => {
+    const input = "Tasks:\n- Task 1 completed\n- [QUERY: next-task";
+    const { cleanText, pendingTagKind } = stripStreamingPartialTags(input);
+
+    expect(cleanText).toBe("Tasks:\n- Task 1 completed");
+    expect(pendingTagKind).toBe("query");
   });
 });
