@@ -79,7 +79,7 @@ describe("isSafeExternalUrl", () => {
 describe("isAllowedAnnouncementLink", () => {
   it("allows the vendor's own hosts", () => {
     expect(isAllowedAnnouncementLink("https://github.com/x/y/releases")).toBe(true);
-    expect(isAllowedAnnouncementLink("https://polar.sh/portal")).toBe(true);
+    expect(isAllowedAnnouncementLink("https://www.github.com/vnknowledge2014/colima-ui/releases")).toBe(true);
   });
 
   it("refuses a host that is merely similar", () => {
@@ -88,6 +88,7 @@ describe("isAllowedAnnouncementLink", () => {
     expect(isAllowedAnnouncementLink("https://github.com.evil.test/x")).toBe(false);
     expect(isAllowedAnnouncementLink("https://evil.test/github.com")).toBe(false);
     expect(isAllowedAnnouncementLink("https://github.com@evil.test/x")).toBe(false);
+    expect(isAllowedAnnouncementLink("https://polar.sh/portal")).toBe(false);
   });
 
   it("refuses credentials and a port on an allowed host", () => {

@@ -331,7 +331,8 @@ pub fn build_router() -> Router {
     // `/api/auth/token` used to live here and no longer does. CORS restricts
     // browsers, not local processes, so an open token endpoint handed the whole
     // API to anything running on the machine. Clients now get the token through
-    // `auth::api_token` (IPC) or a URL fragment from the app; see `auth`.
+    // `auth::api_token` (IPC), `~/.colima-ui/api_token` (local CLI/agents, mode
+    // 0600), or a `#token=…` URL fragment in dev builds; see `auth`.
     let public_routes = Router::new().route("/api/health", get(api_health));
 
     // Merge: public routes have no auth, protected routes require Bearer token
@@ -353,12 +354,11 @@ pub fn start_api_server() {
         tokio::spawn(sse_instance_publisher());
 
         // Fix #12: Try ports 11420-11429 as fallback when primary port is taken
-        // TODO(port-shadowing): a second instance silently lands on 11421+ here.
-        // The frontend port-scans so the webview is fine, but the `cui` CLI
-        // hardcodes 11420 (bin/cui.rs) and will talk to a stale first instance;
-        // a newer instance never rebinds 11420 when the holder exits. Consider
-        // notifying the user when bound_port != 11420 and re-scanning on failure
-        // of the holder.
+        // TODO(port-shadowing): a second instance lands on 11421+ here. `api_port`
+        // now records `bound_port` in `~/.colima-ui/api_port` so `cui` and external
+        // host agents probe the active instance first before scanning 11420-11429,
+        // though a newer instance still stays on `bound_port` if the 11420 holder
+        // later exits. Consider notifying the user when `bound_port != 11420`.
         let mut listener_opt = None;
         let mut bound_port = 11420u16;
         'port_scan: for port in 11420..=11429 {
@@ -387,6 +387,12 @@ pub fn start_api_server() {
         match listener_opt {
             Some(listener) => {
                 println!("HTTP API server running on http://127.0.0.1:{}", bound_port);
+                if let Err(e) = crate::auth::persist_session_credentials(bound_port) {
+                    eprintln!(
+                        "[API Server] Warning: could not persist session credentials: {}",
+                        e
+                    );
+                }
 
                 // Browser mode needs the token out-of-band now that the public
                 // endpoint is gone. In a dev build, print the ready-made URL:
@@ -418,6 +424,7 @@ pub fn start_api_server() {
                             }
                         }
                     }
+                    crate::auth::cleanup_session_credentials();
                 };
                 cleanup.await;
             }

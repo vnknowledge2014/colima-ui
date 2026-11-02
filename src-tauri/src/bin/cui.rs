@@ -6,6 +6,14 @@ use std::path::PathBuf;
 use std::io::{self, Write};
 use rusqlite::{Connection, Result as SqlResult};
 
+fn app_data_dir() -> PathBuf {
+    let home = env::var("HOME")
+        .ok()
+        .filter(|h| !h.is_empty())
+        .unwrap_or_else(|| "/tmp".to_string());
+    PathBuf::from(home).join(".colima-ui")
+}
+
 #[derive(Clone)]
 struct I18n {
     lang: String,
@@ -14,11 +22,10 @@ struct I18n {
 impl I18n {
     fn new() -> Self {
         let mut lang = env::var("LANG").unwrap_or_else(|_| "en".to_string());
-        
+
         // Try reading from SQLite knowledge.db
-        let home = env::var("HOME").unwrap_or_else(|_| ".".to_string());
-        let db_path = PathBuf::from(&home).join(".colima-ui").join("knowledge.db");
-        
+        let db_path = app_data_dir().join("knowledge.db");
+
         if db_path.exists() {
             if let Ok(conn) = Connection::open(&db_path) {
                 let stmt = conn.prepare("SELECT value FROM settings WHERE key = ?1");
@@ -30,19 +37,21 @@ impl I18n {
                 }
             }
         }
-        
+
         // Normalize language
         if lang.starts_with("vi") {
             lang = "vi".to_string();
         } else if lang.starts_with("zh") {
             lang = "zh".to_string();
+        } else if lang.starts_with("ja") {
+            lang = "ja".to_string();
         } else {
             lang = "en".to_string();
         }
-        
+
         Self { lang }
     }
-    
+
     fn t<'a>(&self, key: &'a str) -> &'a str {
         match (self.lang.as_str(), key) {
             ("vi", "usage") => "Sử dụng: cui <lệnh...>",
@@ -65,6 +74,16 @@ impl I18n {
             ("zh", "err_conn") => "连接错误",
             ("zh", "err_port") => "在端口 11420-11429 上找不到 Colima UI 后端。应用正在运行吗?",
 
+            ("ja", "usage") => "使い方: cui <プロンプト...>",
+            ("ja", "example") => "例: cui 実行中のコンテナ一覧を表示して",
+            ("ja", "err_token") => "エラー: ~/.colima-ui/api_token から API トークンを読み取れませんでした。",
+            ("ja", "err_running") => "Colima UI がバックグラウンドで実行されていることを確認してください。",
+            ("ja", "thinking") => "思考中... ",
+            ("ja", "err_parse") => "成功しましたが、結果を解析できませんでした:",
+            ("ja", "err_api") => "API エラー",
+            ("ja", "err_conn") => "接続エラー",
+            ("ja", "err_port") => "ポート 11420-11429 で応答する Colima UI バックエンドが見つかりません。アプリは起動していますか?",
+
             // Default fallback (English)
             (_, "usage") => "Usage: cui <prompt...>",
             (_, "example") => "Example: cui Please list running containers",
@@ -75,7 +94,7 @@ impl I18n {
             (_, "err_api") => "API Error",
             (_, "err_conn") => "Connection Error",
             (_, "err_port") => "No Colima UI backend answered on ports 11420-11429. Is the app running?",
-            
+
             (_, _) => key,
         }
     }
@@ -89,26 +108,51 @@ impl I18n {
 /// reporting "is the backend running?" while it plainly was.
 const PORT_RANGE: std::ops::RangeInclusive<u16> = 11420..=11429;
 
-/// Find the port the app is actually serving on.
+/// Parse a port string and accept it only when it lies inside [`PORT_RANGE`].
+fn parse_recorded_port(raw: &str) -> Option<u16> {
+    raw.trim()
+        .parse::<u16>()
+        .ok()
+        .filter(|port| PORT_RANGE.contains(port))
+}
+
+/// Read the active session's bound port recorded in `~/.colima-ui/api_port`.
+fn read_recorded_port() -> Option<u16> {
+    let port_path = app_data_dir().join("api_port");
+    let raw = fs::read_to_string(port_path).ok()?;
+    parse_recorded_port(&raw)
+}
+
+async fn probe_health(client: &Client, port: u16) -> bool {
+    let url = format!("http://127.0.0.1:{}/api/health", port);
+    // Short timeout: a closed local port fails immediately, but a filtered
+    // one would otherwise hang the CLI for the OS default.
+    client
+        .get(&url)
+        .timeout(std::time::Duration::from_millis(300))
+        .send()
+        .await
+        .is_ok_and(|r| r.status().is_success())
+}
+
+/// Find the port the active app instance is serving on.
 ///
-/// `/api/health` is unauthenticated precisely so a client can do this before it
-/// has a credential — the webview already scans the same way. Returns the first
-/// port that answers.
-///
-/// What this does **not** solve: with two instances running, the lowest port
-/// wins, and that may be the older one. Choosing between live instances needs
-/// the app to publish which one is current; see the TODO in `api_server.rs`.
+/// Probes `~/.colima-ui/api_port` first via `/api/health` so `cui` reaches the
+/// instance that wrote `~/.colima-ui/api_token` even when a stale process still
+/// occupies port 11420, then falls back to scanning `PORT_RANGE`.
 async fn discover_port(client: &Client) -> Option<u16> {
+    let recorded = read_recorded_port();
+    if let Some(port) = recorded {
+        let healthy = probe_health(client, port).await;
+        if healthy {
+            return Some(port);
+        }
+    }
     for port in PORT_RANGE {
-        let url = format!("http://127.0.0.1:{}/api/health", port);
-        // Short timeout: a closed local port fails immediately, but a filtered
-        // one would otherwise hang the CLI for the OS default.
-        let probe = client
-            .get(&url)
-            .timeout(std::time::Duration::from_millis(300))
-            .send()
-            .await;
-        if probe.is_ok_and(|r| r.status().is_success()) {
+        if recorded == Some(port) {
+            continue;
+        }
+        if probe_health(client, port).await {
             return Some(port);
         }
     }
@@ -116,10 +160,9 @@ async fn discover_port(client: &Client) -> Option<u16> {
 }
 
 fn get_api_token() -> String {
-    let home = env::var("HOME").unwrap_or_else(|_| ".".to_string());
-    let token_path = PathBuf::from(home).join(".colima-ui").join("api_token");
+    let token_path = app_data_dir().join("api_token");
     fs::read_to_string(&token_path)
-        .unwrap_or_else(|_| "".to_string())
+        .unwrap_or_default()
         .trim()
         .to_string()
 }
@@ -197,4 +240,44 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_recorded_port_accepts_in_range_and_rejects_invalid() {
+        assert_eq!(parse_recorded_port("11420"), Some(11420));
+        assert_eq!(parse_recorded_port(" 11425\n"), Some(11425));
+        assert_eq!(parse_recorded_port("11429"), Some(11429));
+        assert_eq!(parse_recorded_port("11419"), None);
+        assert_eq!(parse_recorded_port("11430"), None);
+        assert_eq!(parse_recorded_port(""), None);
+        assert_eq!(parse_recorded_port("not-a-port"), None);
+    }
+
+    #[test]
+    fn japanese_locale_covers_all_cli_messages() {
+        let ja = I18n {
+            lang: "ja".to_string(),
+        };
+        let en = I18n {
+            lang: "en".to_string(),
+        };
+        for key in [
+            "usage",
+            "example",
+            "err_token",
+            "err_running",
+            "thinking",
+            "err_parse",
+            "err_api",
+            "err_conn",
+            "err_port",
+        ] {
+            assert_ne!(ja.t(key), key, "missing ja translation for {key}");
+            assert_ne!(ja.t(key), en.t(key), "ja translation for {key} fell back to en");
+        }
+    }
 }

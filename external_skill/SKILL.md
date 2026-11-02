@@ -5,32 +5,70 @@ description: Trợ lý AI điều khiển toàn diện hệ thống Container, K
 
 # ColimaUI Orchestration Skill
 
-Bạn là một Orchestrator đang điều khiển **ColimaUI** - một Nền tảng AI thống nhất chuyên quản lý Docker, Kubernetes, và Lima VMs.
+Bạn là một Orchestrator đang điều khiển **ColimaUI** — nền tảng AI thống nhất quản lý Docker, Docker Compose, Kubernetes (K3s/Kind), Lima VMs và bảo mật runtime trên macOS.
+
+## Xác thực & Kết nối (Authentication)
+
+ColimaUI tự động chọn cổng trống đầu tiên trong dải `11420–11429` trên `127.0.0.1` và lưu thông tin phiên làm việc tại thư mục `~/.colima-ui/` với quyền `0600` (chỉ chủ sở hữu mới đọc được):
+
+```bash
+PORT=11420
+[ -f ~/.colima-ui/api_port ] && read -r PORT < ~/.colima-ui/api_port
+read -r TOKEN < ~/.colima-ui/api_token
+```
+
+- **Lưu ý bảo mật quan trọng**: Endpoint cấp token qua HTTP đã bị loại bỏ hoàn toàn vì lý do bảo mật để ngăn các tiến trình cục bộ trái phép đọc trộm token.
+- **Public route duy nhất**: Chỉ `GET /api/health` không yêu cầu xác thực (dùng để kiểm tra trạng thái sống của server).
+- **REST API**: Mọi request khác bắt buộc gửi kèm header `Authorization: Bearer ${TOKEN}` (và `Content-Type: application/json` khi gửi body JSON).
+- **Luồng SSE thời gian thực**: Riêng 2 endpoint SSE là `GET /api/events` và `GET /api/k8s/pods/logs/stream` xác thực qua query param `?token=${TOKEN}` (do `EventSource` không gắn được custom header).
 
 ## Cách thức tương tác
 
 ColimaUI cung cấp 2 chế độ điều khiển:
 
 1. **Giao tiếp qua AI Chat (Delegation Mode)**
-   Thay vì tự bạn (Orchestrator) phải phân tích hệ thống, bạn có thể gửi một mệnh lệnh bằng ngôn ngữ tự nhiên (Prompt) cho AI của ColimaUI. AI của ColimaUI sẽ tự động gọi các tool nội bộ của nó để hoàn thành tác vụ và trả về kết quả cho bạn.
-   - Lệnh CLI: `curl -H "Authorization: Bearer <TOKEN>" -X POST http://127.0.0.1:11420/api/cli/chat -d '{"prompt": "Hãy kiểm tra xem có container nào đang bị exit không và xóa chúng."}'`
-   - Use Case: Khi tác vụ phức tạp, cần suy luận nhiều bước về hệ thống, hoặc bạn muốn ủy quyền hoàn toàn cho ColimaUI AI.
+   Thay vì tự bạn (Orchestrator) phải phân tích từng bước, bạn có thể gửi yêu cầu bằng ngôn ngữ tự nhiên (Prompt) cho AI của ColimaUI qua `POST /api/cli/chat`. AI nội bộ sẽ tự thực thi chuỗi công cụ và trả về `{"result": "..."}`.
+   ```bash
+   PORT=11420
+   [ -f ~/.colima-ui/api_port ] && read -r PORT < ~/.colima-ui/api_port
+   read -r TOKEN < ~/.colima-ui/api_token
+
+   curl -s -X POST "http://127.0.0.1:${PORT}/api/cli/chat" \
+     -H "Authorization: Bearer ${TOKEN}" \
+     -H "Content-Type: application/json" \
+     -d '{"prompt": "Hãy kiểm tra trạng thái Colima và liệt kê các container đang bị exited."}'
+   ```
+   - **Use Case**: Tác vụ đa bước, cần chẩn đoán ngữ cảnh hệ thống hoặc muốn ủy quyền trọn gói cho ColimaUI AI.
 
 2. **Gọi API Trực tiếp (Direct Control Mode)**
-   Nếu bạn đã biết chính xác hành động cần làm, bạn có thể gọi trực tiếp REST API của ColimaUI để thực thi nhanh hơn (không phải chờ LLM của ColimaUI suy luận).
-   - Lệnh CLI: Sử dụng `curl` để gửi GET/POST tới `http://127.0.0.1:11420/api/...` kèm header `Authorization: Bearer <TOKEN>`
-   - Đọc chi tiết danh sách API trong `references/api_reference.md`.
-
-## Xác thực (Authentication)
-Tất cả các API calls đều yêu cầu xác thực bằng Bearer token.
-- Lấy token: Đọc nội dung file `~/.colimaui/api_token` hoặc gọi `GET /api/auth/token` (nếu không bật auth middleware).
-- Gửi token: Thêm header `Authorization: Bearer <TOKEN>` vào mọi request.
+   Khi bạn đã biết chính xác hành động cần thực hiện, hãy gọi thẳng REST API của ColimaUI để đạt tốc độ phản hồi tức thì (không tốn vòng lặp suy luận LLM).
+   ```bash
+   curl -s -H "Authorization: Bearer ${TOKEN}" "http://127.0.0.1:${PORT}/api/containers"
+   ```
+   - Xem chi tiết toàn bộ danh mục endpoint tại `references/api_reference.md`.
 
 ## Tính năng tự nhận thức (Meta-Capabilities)
 
-ColimaUI có khả năng tự thay đổi bộ não AI của chính nó (Ví dụ: Chuyển từ OpenAI sang Ollama). 
-Bạn có thể ra lệnh cho ColimaUI cấu hình lại AI:
-- Bằng cách gọi API: `POST /api/settings`
-- Hoặc thông qua AI Chat: `curl -H "Authorization: Bearer <TOKEN>" -X POST http://127.0.0.1:11420/api/cli/chat -d '{"prompt": "Hãy chuyển sang dùng model claude-3-haiku-20240307 của anthropic."}'`
+ColimaUI có khả năng tự đọc và thay đổi cấu hình bộ não AI của chính nó (ví dụ chuyển đổi giữa Anthropic, OpenAI, Google Gemini, Ollama, OpenRouter, DeepSeek...):
+- Cập nhật trực tiếp qua REST API:
+  ```bash
+  curl -s -X POST "http://127.0.0.1:${PORT}/api/settings" \
+    -H "Authorization: Bearer ${TOKEN}" \
+    -H "Content-Type: application/json" \
+    -d '{"key": "ai_model", "value": "claude-sonnet-4-6"}'
+  ```
+- Hoặc ra lệnh qua AI Chat:
+  ```bash
+  curl -s -X POST "http://127.0.0.1:${PORT}/api/cli/chat" \
+    -H "Authorization: Bearer ${TOKEN}" \
+    -H "Content-Type: application/json" \
+    -d '{"prompt": "Hãy chuyển sang dùng model gpt-4o của openai."}'
+  ```
 
-Hãy đọc thêm về danh sách khả năng của ColimaUI tại `references/capabilities.md`.
+Hãy đọc thêm danh sách đầy đủ năng lực và các `ai_provider` hỗ trợ tại `references/capabilities.md`.
+
+## Anti-Patterns
+
+- **Không bao giờ gọi API lấy token qua HTTP**: Không tồn tại endpoint cấp token công khai; luôn đọc trực tiếp từ `~/.colima-ui/api_token` (`0600`).
+- **Không dùng `Authorization` header cho SSE**: Với `/api/events` và `/api/k8s/pods/logs/stream`, bắt buộc truyền `?token=${TOKEN}` trên query string.
+- **Không bịa đặt tên sự kiện hoặc endpoint nằm ngoài danh mục**: Luôn đối chiếu `references/api_reference.md` và `references/capabilities.md` trước khi gọi.

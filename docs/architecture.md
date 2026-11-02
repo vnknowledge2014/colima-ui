@@ -8,7 +8,7 @@ ColimaUI uses a **dual-mode, event-driven architecture** that works as both a na
 graph TD
     subgraph Frontend["Frontend — Svelte 5 + TypeScript"]
         APP["App.svelte"]
-        PAGES["Pages (16)"]
+        PAGES["Pages (19)"]
         STORE["Rune Stores"]
         API["api.ts (dual-mode)"]
     end
@@ -227,8 +227,8 @@ Engine-wide figures are deliberately absent from the sample stream:
 expensive call this app makes, for a number the collector already holds as a sum.
 The Activity page fetches `/api/system/engine-resources` once when it opens.
 
-The collector imports nothing from `pro`/`subscription` — a unit test asserts it —
-so the paid build's involvement is one `set_metric_writer` call at startup.
+The collector is decoupled from storage: persistent metric history plugs in via a
+single `set_metric_writer` registration at startup.
 
 ### Secret Redaction
 
@@ -252,27 +252,29 @@ diagnostics listener — i.e. off to a third-party LLM.
 The HTTP API uses **Bearer token** authentication:
 
 1. Token is auto-generated at startup with a CSPRNG (`auth::get_api_token`)
-2. The desktop webview obtains it over IPC (`auth::api_token`). Browser clients receive it out-of-band in a URL fragment (`#token=…`), which the frontend consumes once and strips from the address bar
+2. Three out-of-band handoffs deliver credentials to legitimate local clients:
+   - **Desktop webview (Tauri):** Obtains the token over IPC (`auth::api_token`)
+   - **`cui` CLI & local host agents:** Read `~/.colima-ui/api_token` paired with `~/.colima-ui/api_port` (`0600` permissions inside `0700` `~/.colima-ui`), written via `O_NOFOLLOW` + atomic rename from a temp sibling and unlinked on exit after ownership/token verification
+   - **Development browser UI:** Debug builds (`npm run tauri dev`) print `http://localhost:1420/#token=…` to stdout; the frontend consumes the URL fragment once and strips it from the address bar
 3. All endpoints require `Authorization: Bearer <token>`, compared in constant time
-4. `/api/health` is the only unauthenticated route; the list is explicit in `api_server.rs`, not pattern-matched
-5. SSE endpoints authenticate via `?token=` because `EventSource` cannot set headers. The set of such endpoints is an explicit allowlist (`auth::QUERY_TOKEN_PATHS`) — a route is never switched to query-token auth just because its path ends in `/stream`
+4. `/api/health` is the only unauthenticated route (allowing port discovery across `11420–11429`); the list is explicit in `api_server.rs`, not pattern-matched
+5. SSE endpoints authenticate via `?token=` because `EventSource` cannot set headers. The set of such endpoints is an explicit allowlist (`auth::QUERY_TOKEN_PATHS`: `/api/events`, `/api/k8s/pods/logs/stream`) — a route is never switched to query-token auth just because its path ends in `/stream`
 
-**No endpoint hands the token out.** `GET /api/auth/token` used to, from the
+**No HTTP endpoint hands the token out.** `GET /api/auth/token` used to, from the
 public router, claiming CORS as its protection — which restricts browsers and
-nothing else. Any local process could read the token and then use the entire
-API, including `GET /api/settings` and its configured AI key.
+nothing else. Any unprivileged process or cross-process probe could fetch the
+token over HTTP without filesystem user isolation.
 
-The consequence is intended: a browser tab opened by hand has no credential and
-no way to obtain one.
+The consequence is intended: an arbitrary browser tab opened on `:11420` has no
+credential and no way to obtain one, while same-UID CLI tools (`cui`) and host
+agents read the `0600` file under `~/.colima-ui/`.
 
-**Browser mode is a development surface.** Neither router mounts a `ServeDir`,
-so no build serves the frontend over HTTP — the only page that can reach the API
-is the vite dev server on 1420, which is why that origin is in the CORS list. So
-the handoff is sized to match: a debug build prints the ready-made
+**Browser UI mode is a development surface.** Neither router mounts a `ServeDir`,
+so release builds serve no static frontend over HTTP — the only web UI that talks
+to the API in a browser is the Vite dev server on `1420`, which is why that origin
+is in the CORS list. Debug builds print the ready-made
 `http://localhost:1420/#token=…` URL to stdout when the server binds, and there
-is no in-app "open in browser" affordance because there is nothing to open. If a
-packaged build ever serves its own frontend, `auth::api_token` is the seam where
-a real handoff belongs.
+is no in-app "open in browser" button in production builds.
 
 ### Accepted risks
 
@@ -304,5 +306,5 @@ fix costs a feature the product needs. Revisit it if the threat model changes
 | `ResourceSaverState` | `tauri::State` (managed) | Resource saver mode timer |
 | `SYSTEM_INFO_CACHE` | `LazyLock<Mutex<TimedCache>>` | Cached system info (colima/docker versions) |
 | `SSE_TX` | `LazyLock<broadcast::Sender>` | SSE event broadcaster |
-| `API_TOKEN` | `LazyLock<String>` | Random auth token |
+| `API_TOKEN` | `OnceLock<String>` | CSPRNG Bearer auth token |
 | `PORT_FORWARDS` | `LazyLock<Mutex<HashMap>>` | Active K8s port forwards |

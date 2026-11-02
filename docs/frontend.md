@@ -13,7 +13,7 @@ src/
 ├── setupTests.ts               # Test setup (jsdom)
 ├── store.svelte.ts             # Global reactive state
 ├── pages/                      # 19 page components
-├── components/                 # 43 components (incl. activity/, security/, topology/, notifications/, settings/, transfer/, diagnostics/)
+├── components/                 # 69 components (incl. ai/, activity/, compose/, security/, topology/, notifications/, settings/, transfer/, diagnostics/)
 ├── store/                      # Domain-specific state modules
 ├── lib/                        # Utilities, API layer, AI bus
 ├── styles/                     # CSS design system
@@ -38,7 +38,9 @@ src/
 | Models | `Models.svelte` | Ollama AI model management |
 | Terminal | `Terminal.svelte` | Integrated xterm.js terminal |
 | Terminal Instance | `TerminalInstance.svelte` | Individual terminal tab |
-| Settings | `Settings.svelte` | System info, disk usage, prune |
+| Settings | `Settings.svelte` | System info, AI provider config, privacy/telemetry, notifications, disk usage, prune |
+| Security | `Security.svelte` | Local Trivy vulnerability scanning, `/100` provenance score breakdown, config rules, base-image alternatives, Falco runtime stream, and container Detonation |
+| Help | `Help.svelte` | Offline FTS5-searchable troubleshooting & setup guides across 4 locales (`en`, `ja`, `vi`, `zh`) |
 | X-Ray | `XRay.svelte` | Kubernetes diagnostics |
 | Cluster Topology | `ClusterTopology.svelte` | Cluster visualization |
 
@@ -46,7 +48,14 @@ src/
 
 | Component | Purpose |
 |-----------|---------|
-| `AiChatPanel.svelte` | AI diagnostic agent chat panel with tool execution and feedback |
+| `AiChatPanel.svelte` | Command Center AI panel: multi-thread chat, live context toggle, 1-touch error diagnostic banner, schedule timers |
+| `ai/AiMessageBody.svelte` | Streaming `<think>` disclosure, GFM tables, and XSS-safe Markdown AST renderer |
+| `ai/CodeBlock.svelte` | Code block viewer with Copy, Insert-to-chat, and safe paste-without-Enter Terminal handoff |
+| `ai/ToolStepCard.svelte` | Unified in-place card for queries, approvals (`SAFE`/`NORMAL`/`DANGEROUS`), sandbox commands, diagnostics & security tasks |
+| `ai/InteractiveChoiceCard.svelte` | Consultant-mode `[ASK_CHOICE]` single/multi-select card with custom reply input |
+| `ai/AiFollowUpBar.svelte` | Horizontal `[SUGGEST]` follow-up chip bar (with context-aware fallback chips) |
+| `ai/AiEmptyState.svelte` | Warning-prioritized starter prompts and zero-config onboarding |
+| `ai/AiModelQuickBar.svelte` | Inline AI provider/model switcher and `[LIVE_UI_CONTEXT]` toggle |
 | `ConfirmDialog.svelte` | Reusable confirmation dialog (destructive actions) |
 | `ContextMenu.svelte` | Right-click context menus |
 | `ErrorBoundary.svelte` | Error boundary wrapper |
@@ -149,18 +158,23 @@ es.addEventListener('instances', (e) => {
 
 | Module | Purpose |
 |--------|---------|
-| `aiEventBus.ts` | AI agent event bus with domain-specific tool registrations |
-| `aiToolParser.ts` | Parse AI tool-call XML from LLM responses |
-| `llmProviders.ts` | Multi-provider LLM integration config |
+| `agentCore.ts` | 5-round Command Center AI orchestrator, conversation window hygiene, 80%/20% tool output pruner, repeat-tool guard |
+| `aiEventBus.ts` | AI agent event bus with 92+ domain-specific tool registrations (`SAFE` / `NORMAL` / `DANGEROUS`) |
+| `aiToolParser.ts` | Bracket-balanced colon tags (`[TAG: ...]`) & streaming partial-tag parser (`stripStreamingPartialTags`, `cleanToolSyntaxRemnants`) |
+| `chatMarkdown.ts` (`aiMessageParser`) | XSS-sanitized Markdown & streaming `<think>` reasoning block / GFM table / shell code AST parser |
+| `aiToolStep.ts` | Structured state machine & serializer for inline `ToolStepCard` entries |
+| `aiSuggestions.ts` | Warning-prioritized empty-state starters, fallback follow-up chips, and `[LIVE_UI_CONTEXT]` snapshot builder |
+| `aiProviderConfig.ts` | Per-provider credential/model storage and OpenAI/Ollama base URL normalization |
+| `llmProviders.ts` | Multi-provider SSE streaming client (9 provider ecosystems + multi-packet `<think>` normalization) |
 | `formatters.ts` | Display formatting (bytes, dates, durations) |
 | `normalizers.ts` | Data normalization utilities |
-| `markdown.ts` | Markdown rendering for AI responses |
+| `markdown.ts` | General Markdown rendering utilities (Help articles, notes) |
 | `k8sUtils.ts` | Kubernetes resource utilities |
-| `globalToast.ts` | Transient toasts; every toast also becomes a notification entry |
+| `globalToast.ts` | Transient redacted toasts; feeds both the notification store and AI error diagnostic listener |
 | `transferEvents.ts` | Transfer event subscription, reconnect, and desync signal |
 | `transferNotifications.ts` | Wires transfer events into the notification store |
 | `osNotify.ts` | Operating-system notifications, desktop only |
-| `i18n.svelte.ts` | Internationalization with reactive locale |
+| `i18n.svelte.ts` | Internationalization with reactive locale (`en`, `ja`, `vi`, `zh`) |
 | `settingsStore.svelte.ts` | SQLite-backed persistent settings |
 | `presetStateManager.ts` | Instance configuration preset management |
 
@@ -266,11 +280,12 @@ Vanilla CSS with a modular token-based architecture:
 ## Testing
 
 ```bash
-# Unit tests (Vitest + jsdom)
-npx vitest run
+# Unit & component tests (Vitest + jsdom)
+npm test
 
-# Type checking
-npm run check    # svelte-check
+# Type & Svelte rune checking
+npm run typecheck
+npm run check
 ```
 
 Test files follow the `*.test.ts` convention alongside source files:

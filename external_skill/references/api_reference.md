@@ -1,67 +1,153 @@
 # ColimaUI API Reference
 
-Đây là tài liệu tham khảo các REST API chính mà Orchestrator có thể gọi trực tiếp để điều khiển ColimaUI.
-Cổng mặc định của API Server là `11420`. Tất cả các request đều yêu cầu header `Authorization: Bearer <TOKEN>`.
-Token có thể lấy bằng cách đọc file `~/.colimaui/api_token` hoặc gọi `GET /api/auth/token`.
+Tài liệu tham khảo đầy đủ các REST API và luồng SSE mà Orchestrator có thể gọi trực tiếp để điều khiển **ColimaUI** (đồng bộ với `src-tauri/src/api_server.rs`).
 
-## 1. AI, Trợ lý ảo & Cấu hình (AI Agent & Settings API)
-- `POST /api/cli/chat`: Tương tác với ColimaUI AI bằng Prompt. Body: `{"prompt": "...", "provider": "...", "model": "..."}`.
-- `GET /api/settings`: Lấy toàn bộ cấu hình.
-- `POST /api/settings`: Đọc và cập nhật các cấu hình. Ví dụ: `{"key": "ai_provider", "value": "anthropic"}`.
-- `GET /api/auth/token`: Lấy Bearer token để xác thực các request khác.
+## Cơ chế Cổng & Xác thực (Port & Auth)
 
-## 2. Docker & Container API
-- `GET /api/containers`: Lấy danh sách toàn bộ containers.
-- `POST /api/containers/start`, `stop`, `restart`, `remove`, `pause`, `unpause`: Quản lý trạng thái container. Body: `{"id": "..."}`.
-- `GET /api/containers/logs`: Lấy logs. Truyền `?id=...&lines=...`.
-- `GET /api/containers/inspect`, `stats`, `top`: Lấy thông tin chi tiết. Truyền `?id=...`.
-- `POST /api/containers/exec`: Chạy lệnh trong container. Body: `{"id": "...", "cmd": ["..."]}`.
-- `POST /api/containers/run`: Chạy container mới từ image.
-- `GET /api/images`: Lấy danh sách Docker images.
-- `POST /api/images/pull`, `remove`, `prune`, `tag`: Quản lý images.
-- `GET /api/images/inspect`: Thông tin image. Truyền `?id=...`.
-- `GET /api/networks`: Lấy danh sách networks.
-- `POST /api/networks/create`, `remove`, `prune`: Quản lý networks.
-- `GET /api/volumes`: Lấy danh sách volumes.
-- `POST /api/volumes/create`, `remove`, `prune`: Quản lý volumes.
-- `GET /api/docker/df`: Xem dung lượng đĩa docker.
-- `POST /api/docker/prune`: Dọn dẹp system prune.
+```bash
+PORT="$(cat ~/.colima-ui/api_port 2>/dev/null || echo 11420)"
+TOKEN="$(cat ~/.colima-ui/api_token)"
+```
 
-## 3. Kubernetes API
-- `GET /api/k8s/contexts`: Lấy danh sách các K8s cluster contexts.
-- `GET /api/k8s/contexts/current`: Lấy context hiện tại.
-- `POST /api/k8s/contexts/set`: Chuyển context. Body: `{"context": "..."}`.
-- `GET /api/k8s/namespaces`, `pods`, `services`, `deployments`, `nodes`, `events`, `crds`: Lấy danh sách tài nguyên.
-- `GET /api/k8s/resources`: Lấy danh sách tài nguyên tổng quát. Truyền `?kind=...&namespace=...`.
-- `POST /api/k8s/apply`: Apply một resource YAML vào cụm K8s. Body: `{"yaml": "..."}` hoặc đường dẫn file.
-- `POST /api/k8s/scale`, `scale-generic`: Thay đổi replica. Body: `{"namespace": "...", "name": "...", "replicas": ...}`.
-- `POST /api/k8s/resources/delete`, `resources/restart`: Quản lý tài nguyên chung.
-- `GET /api/k8s/pods/logs`, `pods/container-logs`: Đọc logs.
-- `POST /api/k8s/port-forward/start`, `stop`: Mở cổng local.
-- `GET /api/k8s/port-forward/list`: Danh sách cổng đang forward.
-- `POST /api/k8s/exec`: Mở phiên lệnh vào pod.
+- **Cổng hoạt động**: Mặc định `11420` trên `127.0.0.1` (tự động dò cổng trống trong dải `11420–11429` và ghi vào `~/.colima-ui/api_port`).
+- **Bearer Token**: Đọc trực tiếp từ file `~/.colima-ui/api_token` (quyền `0600`).
+- **Không cấp token qua HTTP**: Endpoint cấp token qua HTTP trước đây đã bị loại bỏ hoàn toàn vì lý do bảo mật.
+- **Phân loại xác thực**:
+  - **Public (không cần token)**: Duy nhất `GET /api/health`.
+  - **SSE Streams (xác thực qua query `?token=<TOKEN>`)**: `GET /api/events` và `GET /api/k8s/pods/logs/stream`.
+  - **Tất cả REST endpoints còn lại**: Bắt buộc có header `Authorization: Bearer <TOKEN>` (kèm `Content-Type: application/json` cho các lệnh `POST` có JSON body).
 
-## 4. Colima / Lima VMs API
-- `GET /api/instances`: Lấy danh sách các máy ảo Colima.
-- `POST /api/instances/start`, `stop`, `delete`: Quản lý máy ảo Colima.
-- `GET /api/instances/status`: Lấy trạng thái chi tiết. Truyền `?profile=...`.
-- `GET /api/lima`: Lấy danh sách máy ảo Lima.
-- `POST /api/lima/start`, `stop`, `delete`, `create`: Quản lý Lima VM.
-- `POST /api/lima/shell`: Chạy lệnh trong Lima VM. Body: `{"name": "...", "command": "..."}`.
+---
 
-## 5. System API
-- `GET /api/system/check`, `version`, `host-specs`, `platform`: Lấy thông tin hệ thống.
-- `GET /api/system/check-tool`: Kiểm tra công cụ được cài đặt. Truyền `?tool=...`.
-- `POST /api/system/install`: Cài đặt dependencies (như docker, colima).
+## 1. Health, Capabilities & Realtime SSE
+- `GET /api/health`: Kiểm tra trạng thái sống của API server (public, không cần token).
+- `GET /api/capabilities`: Lấy schema năng lực dành cho AI Agent / Orchestrator.
+- `GET /api/announcements`: Lấy thông báo hệ thống mới nhất.
+- `GET /api/events?token=<TOKEN>&topics=docker-state,instances,metrics.sample`: Đăng ký luồng sự kiện thời gian thực (SSE). Tham số `topics` tùy chọn (tối đa 16 topics).
 
-## 6. Docker Compose API
-- `GET /api/compose`: Danh sách projects.
-- `POST /api/compose/up`, `down`, `restart`: Quản lý compose.
-- `GET /api/compose/logs`, `ps`: Xem logs và process.
+## 2. AI Chat, Đa hội thoại (Multi-Conversation History) & Settings
+- `POST /api/cli/chat`: Ủy quyền tác vụ cho Headless AI Agent. Body: `{"prompt": "...", "provider": "...", "model": "..."}` → trả về `{"result": "..."}`.
+- `POST /api/ai/chat`: Gửi hội thoại trực tiếp tới LLM đang cấu hình (`provider`, `model`, `api_key`, `endpoint`, `messages`).
+- `POST /api/ai/models`: Liệt kê danh sách model khả dụng từ provider.
+- `POST /api/ai/search`, `POST /api/ai/fetch-page`: Tìm kiếm tài liệu web (SearXNG) và trích xuất trang thành Markdown.
+- `GET /api/ai/context`: Đọc ngữ cảnh hệ thống (`system_prompt.md`, `router.md`, core skill & plugins).
+- `GET /api/ai/conversations`: Lấy danh sách các cuộc hội thoại AI.
+- `POST /api/ai/conversations`: Tạo cuộc hội thoại mới (`{"id": "...", "title": "..."}`).
+- `POST /api/ai/conversations/rename`: Đổi tên cuộc hội thoại (`{"id": "...", "title": "..."}`).
+- `POST /api/ai/conversations/delete`: Xóa cuộc hội thoại (`{"id": "..."}`).
+- `GET /api/ai/history`: Tải lịch sử tin nhắn (truyền `?conversationId=...`).
+- `POST /api/ai/history`: Lưu tin nhắn vào lịch sử (`{"conversationId": "...", "message": {"id": "...", "role": "...", "content": "..."}}`).
+- `POST /api/ai/history/clear`: Xóa lịch sử của một cuộc hội thoại (`{"conversationId": "..."}`).
+- `GET /api/models`, `POST /api/models/pull`, `POST /api/models/serve`, `POST /api/models/delete`: Quản lý AI models chạy cục bộ.
+- `GET /api/settings`, `POST /api/settings`: Đọc toàn bộ cài đặt hoặc cập nhật từng khóa (`{"key": "ai_provider", "value": "anthropic"}`).
 
-## 7. Knowledge Bank & Sandbox API
-- `POST /api/kb/query`, `search`: Truy vấn Knowledge Bank.
-- `GET /api/kb/memories`, `POST /api/kb/memories/update`, `delete`: Quản lý bộ nhớ AI.
-- `POST /api/sandbox/execute`, `execute-approved`: Thực thi lệnh bash an toàn (sandbox).
+## 3. Docker, Topology & Background Transfers
+- **Containers**:
+  - `GET /api/containers`: Liệt kê toàn bộ containers (`?all=true`).
+  - `POST /api/containers/start`, `stop`, `restart`, `remove`, `pause`, `unpause`, `rename`: Quản lý vòng đời container.
+  - `GET /api/containers/logs`, `inspect`, `stats`, `top`: Tra cứu chi tiết container (`?containerId=...&lines=...`).
+  - `GET /api/containers/stats/all`: Thống kê tài nguyên toàn bộ containers đang chạy.
+  - `POST /api/containers/exec`: Thực thi lệnh trong container.
+  - `POST /api/containers/run`: Khởi chạy container mới từ image.
+- **Images, Volumes, Networks & Disk**:
+  - `GET /api/images`, `POST /api/images/pull`, `remove`, `prune`, `tag`, `GET /api/images/inspect`: Quản lý Docker images.
+  - `GET /api/volumes`, `POST /api/volumes/create`, `remove`, `prune`, `GET /api/volumes/inspect`: Quản lý Docker volumes.
+  - `GET /api/networks`, `POST /api/networks/create`, `remove`, `prune`, `GET /api/networks/inspect`: Quản lý Docker networks.
+  - `GET /api/docker/df`, `POST /api/docker/prune`: Kiểm tra dung lượng và dọn rác Docker.
+- **Topology Graph**:
+  - `GET /api/topology`: Lấy đồ thị liên kết giữa containers, networks và volumes.
+- **Background Transfers** (trả về `jobId` ngay lập tức, tiến độ phát qua SSE `/api/events`):
+  - `POST /api/images/save`: Xuất image ra file `.tar` (`{"images": [...], "destDir": "...", "fileName": "..."}`).
+  - `POST /api/images/load`: Nạp image từ file `.tar` (`{"tarPath": "..."}`).
+  - `POST /api/containers/cp/to`: Sao chép file/thư mục từ máy chủ vào container (`{"containerId": "...", "hostPath": "...", "containerPath": "..."}`).
+  - `POST /api/containers/cp/from`: Sao chép dữ liệu từ container ra máy chủ (`{"containerId": "...", "containerPath": "...", "destDir": "...", "fileName": "..."}`).
+  - `GET /api/transfers`: Liệt kê trạng thái các tiến trình truyền tải nền.
+  - `POST /api/transfers/cancel`: Hủy tiến trình truyền tải (`{"jobId": "..."}`).
 
-*Ghi chú: Để gọi chính xác nhất, hãy tham khảo các payload trong `capabilities.md` và ánh xạ sang API tương ứng, hoặc dùng chế độ AI Chat (Delegation Mode) để ColimaUI tự gọi API.*
+## 4. Docker Compose, Diagnose & AI Autofix
+- `GET /api/compose`: Liệt kê các dự án Docker Compose.
+- `POST /api/compose/up`, `down`, `restart`, `stop`, `start`: Quản lý vòng đời dự án Compose.
+- `GET /api/compose/logs`, `GET /api/compose/ps`: Đọc logs và danh sách tiến trình (`?projectName=...`).
+- `POST /api/compose/diagnose`: Phân tích cấu trúc schema + đối chiếu Knowledge Bank cho file Compose (`{"filePath": "/path/to/docker-compose.yml"}`).
+- `POST /api/compose/autofix/propose`: Sinh đề xuất bản vá AI Autofix kèm giải thích (`{"filePath": "..."}`).
+- `POST /api/compose/autofix/apply`: Áp dụng bản vá Compose an toàn có kiểm soát xóa khóa (`{"filePath": "...", "newContent": "...", "explanation": "...", "declaredRemovals": [...]}`).
+- `POST /api/compose/autofix/undo`: Hoàn tác bản vá Autofix theo `{"fixId": "..."}`.
+- `GET /api/compose/autofix/history`: Xem lịch sử các lần áp dụng/hoàn tác Autofix.
+
+## 5. Bảo mật Container, Trivy, SBOM, Falco & Detonation
+- **Image Scanning, SBOM & Policy (`Trivy`)**:
+  - `POST /api/security/scan`, `POST /api/security/scan/cancel`: Quét lỗ hổng CVE trên image (`{"scanId": "...", "imageRef": "...", "refresh": false}`).
+  - `POST /api/security/sbom`: Xuất SBOM cho image.
+  - `POST /api/security/audit`: Quét kết hợp đánh giá bộ quy tắc (L1/L2) và chấm điểm bảo mật có truy xuất nguồn gốc.
+  - `POST /api/security/triage`: Xếp hạng ưu tiên các vi phạm bảo mật từ kết quả audit.
+  - `POST /api/security/autofix/propose`: Đề xuất hướng khắc phục cấu hình / nâng cấp image.
+  - `GET /api/security/history`: Lịch sử các lần quét bảo mật.
+  - `GET /api/security/policy`, `POST /api/security/policy`, `POST /api/security/policy/delete`: Quản lý chính sách bảo mật.
+  - `GET /api/security/watch`, `POST /api/security/watch`: Xem/bật chế độ theo dõi quét tự động.
+  - `GET /api/security/rules`, `GET /api/security/alternatives`: Lấy rule pack cấu hình và danh mục base image thay thế an toàn hơn.
+- **Falco Runtime Security**:
+  - `GET /api/security/falco/state`, `GET /api/security/falco/events`: Kiểm tra trạng thái Falco và đọc sự kiện runtime bất thường.
+  - `GET /api/security/falco/watch`, `POST /api/security/falco/watch`: Cấu hình theo dõi Falco runtime.
+  - `POST /api/security/falco/explain`: Giải thích sự kiện Falco bằng AI.
+- **Container Detonation Sandbox**:
+  - `POST /api/detonation/start`, `POST /api/detonation/cancel`: Khởi chạy / hủy phiên kích nổ kiểm thử hành vi image cô lập (timeline phát qua SSE).
+  - `POST /api/detonation/session`, `GET /api/detonation/list`, `POST /api/detonation/export`: Truy vấn chi tiết, liệt kê danh sách và xuất báo cáo phiên Detonation.
+
+## 6. Observability (Activity, Metrics, Alerts & Self-Heal)
+- **Activity**:
+  - `GET /api/activity`, `GET /api/activity/feed`, `POST /api/activity/export`: Truy vấn nhật ký hoạt động, luồng sự kiện hợp nhất và xuất báo cáo.
+- **Metrics**:
+  - `POST /api/metrics/interval`: Điều chỉnh chu kỳ lấy mẫu (`{"ms": 2000}`, mẫu phát qua SSE topic `metrics.sample`).
+  - `GET /api/metrics/history`, `GET /api/metrics/health`: Lịch sử chuỗi thời gian và sức khỏe bộ thu thập metrics.
+- **Alerts**:
+  - `GET /api/alerts/rules`, `POST /api/alerts/rules`, `POST /api/alerts/rules/delete`: Quản lý quy tắc cảnh báo ngưỡng tài nguyên.
+  - `GET /api/alerts/events`, `POST /api/alerts/backtest`: Xem cảnh báo đã kích hoạt và kiểm thử quy tắc trên dữ liệu lịch sử.
+- **Self-Heal**:
+  - `GET /api/self-heal/rules`, `POST /api/self-heal/rules`: Quản lý quy tắc tự phục hồi container.
+  - `GET /api/self-heal/log`: Nhật ký các hành động tự phục hồi.
+  - `GET /api/self-heal/enabled`, `POST /api/self-heal/enabled`: Kiểm tra / bật tắt cơ chế tự phục hồi toàn cục.
+
+## 7. Kubernetes & Kind API
+- `GET /api/k8s/check`, `GET /api/k8s/cluster-health`: Kiểm tra kết nối `kubectl` và sức khỏe cụm.
+- `GET /api/k8s/contexts`, `GET /api/k8s/contexts/current`, `POST /api/k8s/contexts/set`: Quản lý K8s contexts.
+- `GET /api/k8s/namespaces`, `pods`, `services`, `deployments`, `nodes`, `nodes/json`, `events`, `events/json`, `crds`, `crds/resources`: Liệt kê tài nguyên cụm.
+- `GET /api/k8s/resources`, `GET /api/k8s/describe`, `GET /api/k8s/resources/yaml`: Truy vấn tài nguyên tổng quát, mô tả chi tiết và đọc manifest YAML.
+- `POST /api/k8s/apply`: Triển khai manifest YAML.
+- `POST /api/k8s/scale`, `POST /api/k8s/scale-generic`: Điều chỉnh số lượng replicas.
+- `POST /api/k8s/pods/delete`, `POST /api/k8s/resources/delete`, `POST /api/k8s/resources/restart`, `POST /api/k8s/nodes/action`: Xóa pod/tài nguyên, rolling restart và cordon/drain node.
+- `GET /api/k8s/pods/logs`, `GET /api/k8s/pods/containers`, `GET /api/k8s/pods/container-logs`: Đọc logs pod/container.
+- `GET /api/k8s/pods/logs/stream?token=<TOKEN>&namespace=...&pod=...&tail=100`: Stream logs pod trực tiếp qua SSE.
+- `POST /api/k8s/port-forward/start`, `POST /api/k8s/port-forward/stop`, `GET /api/k8s/port-forward/list`: Quản lý port-forwarding.
+- `POST /api/k8s/exec`, `POST /api/k8s/benchmark`: Mở phiên lệnh vào pod và chạy benchmark HTTP.
+- `GET /api/kind`, `POST /api/kind/create`, `POST /api/kind/delete`: Quản lý cụm Kind (Kubernetes in Docker).
+
+## 8. Colima Instances, Colima Config (`colima.yaml`) & Lima VMs
+- **Colima Instances**:
+  - `GET /api/instances`, `GET /api/instances/status` (`?profile=default`), `GET /api/instances/ssh`: Tra cứu máy ảo Colima.
+  - `POST /api/instances/start`, `stop`, `delete`, `k8s`: Khởi động, dừng, xóa instance hoặc thao tác K3s trên instance.
+- **Colima Config (`colima.yaml`)**:
+  - `GET /api/instances/config`: Đọc cấu hình `colima.yaml` hiện hành của profile.
+  - `POST /api/instances/config/preview`: Xem trước bản so sánh thay đổi (`diff`) cấu hình `colima.yaml`.
+  - `POST /api/instances/config/apply`: Lưu và áp dụng cấu hình `colima.yaml` an toàn.
+- **Lima VMs**:
+  - `GET /api/lima`, `GET /api/lima/info`, `GET /api/lima/templates`: Danh sách máy ảo, thông tin Lima và kho template.
+  - `POST /api/lima/create`, `start`, `stop`, `delete`, `shell`: Quản lý vòng đời và chạy lệnh one-shot trong Lima VM.
+
+## 9. System, Reference, Diagnostics, Knowledge Bank & Sandbox
+- **System & Reference**:
+  - `GET /api/system/check`, `version`, `homebrew`, `check-tool` (`?name=...`), `capabilities`, `platform`, `host-specs`, `engine-resources`, `df`: Thông tin phần cứng, công cụ và dung lượng hệ thống.
+  - `GET /api/system/reference`: Đọc tài liệu tham chiếu nội bộ trong `resources/` (`?path=skills/docker/SKILL.md`, có bảo vệ chống path traversal).
+  - `POST /api/system/install`, `POST /api/system/prune`: Cài đặt công cụ phụ thuộc và dọn dẹp toàn hệ thống.
+  - `GET /api/system/autostart`, `POST /api/system/autostart`: Trạng thái và cấu hình tự khởi động cùng macOS.
+- **Diagnostics**:
+  - `GET /api/diagnostics/logs`: Thu thập nhanh nhật ký chẩn đoán hệ thống.
+  - `POST /api/diagnostics/bundle`, `POST /api/diagnostics/save`: Tạo và xuất gói chẩn đoán lỗi (đã tự động che giấu thông tin nhạy cảm).
+- **Knowledge Bank & Help Articles**:
+  - `GET /api/kb/articles`, `GET /api/kb/articles/get`, `GET /api/kb/articles/search`: Duyệt và tìm kiếm bài viết hướng dẫn tích hợp.
+  - `POST /api/kb/query`, `feedback`, `learn`, `search`: Truy vấn mẫu lỗi, đánh giá giải pháp và ghi nhận tri thức mới.
+  - `GET /api/kb/memories`, `POST /api/kb/memories/add`, `update`, `delete`: Quản lý bộ nhớ dài hạn (LTM) của AI.
+- **Shell Sandbox**:
+  - `POST /api/sandbox/execute`: Kiểm tra chính sách sandbox và thực thi ngay nếu lệnh thuộc nhóm an toàn (`{"command": "docker ps"}`).
+  - `POST /api/sandbox/execute-approved`: Thực thi lệnh đã được người dùng/orchestrator phê duyệt tường minh (`{"command": "..."}`).
+
+*Ghi chú: Để đối chiếu các sự kiện Event Bus tương ứng của AI Agent, hãy xem thêm `capabilities.md`.*

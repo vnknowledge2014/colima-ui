@@ -63,3 +63,8 @@ Only for operations NOT covered by the App API:
 ### Node NotReady
 1. `[QUERY: k8s-nodes]` — check which node is NotReady.
 2. `[QUERY: k8s-events | {"namespace": "all"}]` — look for node-level events.
+
+## Anti-Patterns
+
+- **Never shell out to `kubectl get`, `describe`, `logs`, `scale`, or `delete` via `cli-exec`** — all 26 core Kubernetes operations are natively supported via `[QUERY]` and `[EVENT_APPROVE]`.
+- **Never run `k8s-delete` or `k8s-node-action` (`drain`/`cordon`) without explaining blast radius first**.

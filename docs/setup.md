@@ -1,139 +1,137 @@
-# Setup Runbook — Polar Billing (Historical Reference)
+# Developer Setup & Build Runbook
 
-> **Note:** All Pro features are unlocked by default in the free open-source edition (`07a2dbc`), and the in-app Sign-in / Account stack has been removed. This runbook is retained only as historical reference for the optional Polar billing functions.
-
-Deep-dive docs are linked per step — this file is the ordered checklist, not a
-replacement for them:
-
-| Deep-dive | Covers |
-|---|---|
-| [polar-billing-setup.md](./polar-billing-setup.md) | Console click-by-click: Polar products, benefits, token, test purchase |
+Canonical checklist for setting up a ColimaUI development environment, running CI-equivalent quality gates, packaging desktop bundles, and compiling the standalone CLI binaries.
 
 ---
 
-## Phase 0 — Prerequisites
+## 1. Prerequisites
 
-- [ ] `supabase` CLI installed (v2+) if deploying legacy Edge Functions
-  ```bash
-  # Homebrew, or: npm install -g supabase
-  brew install supabase/tap/supabase
-  ```
-- [ ] Accounts ready:
-  - [ ] [Polar](https://polar.sh) account — start in the **sandbox**
-        ([sandbox.polar.sh](https://sandbox.polar.sh/start), separate org)
-- [ ] Repo cloned + `npm install` done
+### Toolchain
+- **Node.js `>= 22.22.2`** with **`npm`** (`.nvmrc` pins the release line; `jsdom` and `undici` in the test stack require Node 22.22.2+).
+- **Rust stable toolchain** via [`rustup`](https://rustup.rs/) (`cargo`, `rustc`, `clippy`).
+- **Platform native dependencies**:
+  - **macOS**: Xcode Command Line Tools (`xcode-select --install`).
+  - **Ubuntu / Debian Linux**:
+    ```bash
+    sudo apt-get update
+    sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+    ```
 
----
-
-## Phase 2 — Polar: org, products, token
-
-**Deep-dive:** [polar-billing-setup.md](./polar-billing-setup.md) steps 1–4 and 6
-
-- [ ] Create a **sandbox** org (e.g. `colimaui`)
-- [ ] Create **two seat-based** monthly subscriptions, $6/seat:
-      | | Pro | Pro Teams |
-      |---|---|---|
-      | Seats | 1 | minimum 2 |
-- [ ] Attach a **Custom benefit** (`ColimaUI Pro`) to **both** products —
-      this is what grants entitlement to seat members
-- [ ] Copy both **product IDs** (UUIDs)
-- [ ] Create an **Organization Access Token**
-      (**Organization Settings → Developers → New Token**):
-      - Scopes: `customers:read`, `checkouts:write` — nothing more
-      - Copy it now; it is shown once
-- [ ] Set your org slug in `src/lib/external-links.ts`:
-      ```ts
-      export const POLAR_ORG_SLUG = "colimaui";
-      ```
-
-> Billing cycle and pricing model are locked at creation — wrong pick = new
-> product.
+### Runtime Tools
+- **Required for container workflows**: `colima`, `docker`, `limactl`
+- **Optional (feature-scoped)**:
+  - `kubectl` and `kind` — Kubernetes resource browser, pod exec, port forwarding, and Kind cluster management
+  - `trivy` — Local container vulnerability scanning and SBOM generation on the Security page
+  - `ollama` — Local LLM inference and the Models management page
 
 ---
 
-## Phase 3 — Edge functions: secrets + deploy
+## 2. Install & Git Hooks
 
-This is where a purchase becomes Pro. The two functions
-(`entitlement`, `checkout`) hold `POLAR_ACCESS_TOKEN` — it never ships in the app.
+Clone the repository and install Node dependencies with `npm`:
 
-- [ ] Log in and link the CLI to the project (one-time):
-      ```bash
-      supabase login
-      supabase link --project-ref <project-ref>
-      # e.g. supabase link --project-ref nakwwkderqjfsxajduwj
-      ```
-      (No login = `Access token not provided` on deploy.)
-- [ ] Set the secrets:
-      ```bash
-      supabase secrets set \
-        POLAR_ACCESS_TOKEN=polar_oat_… \
-        POLAR_ENV=sandbox \
-        POLAR_PRODUCT_PRO=<product-uuid> \
-        POLAR_PRODUCT_PRO_TEAMS=<product-uuid> \
-        OFFLINE_GRACE_DAYS=30
-      ```
-- [ ] Deploy both functions:
-      ```bash
-      supabase functions deploy entitlement
-      supabase functions deploy checkout
-      ```
-- [ ] Verify:
-      ```bash
-      supabase functions list          # both functions: DEPLOYED
-      supabase secrets list            # names visible, values masked
-      ```
+```bash
+git clone https://github.com/vnknowledge2014/colima-ui.git
+cd colima-ui
+npm install
+```
 
-> `POLAR_ENV=sandbox` is the safe default. When you move to production you must
-> swap the token **and** the two product IDs at the same time — a production
-> token is rejected by the sandbox API and vice versa.
+`npm install` automatically triggers the `prepare` lifecycle script (`bash scripts/setup-hooks.sh`), which sets `git config core.hooksPath .githooks` and activates the pre-push lint gate.
 
 ---
 
-## Phase 4 — App config (fallbacks)
+## 3. Development Mode
 
-- [ ] Optional: while `checkout` is undeployed, keep `CHECKOUT_LINK_URL` in
-      `src/lib/external-links.ts` so the buy button still opens *something* —
-      the app **warns** that such a purchase will not unlock Pro.
-- [ ] Optional: local testing of the functions without deploying:
-      put the same secrets in `supabase/.env` (git-ignored) and run
-      `supabase functions serve`
+Launch the full desktop application (Rust backend + native Tauri webview + Vite HMR):
 
----
+```bash
+npm run tauri dev
+```
 
-## Phase 5 — Verify Polar checkout link (debug bundle)
+What starts in development mode:
+1. **Native Desktop Window** — Uses Tauri IPC (`invoke` + Tauri events) directly.
+2. **Local HTTP & SSE API Server** — Binds `127.0.0.1:11420` (falling back across `11420–11429` if occupied).
+3. **Browser UI Development Surface** — Debug builds print a ready-to-open URL to stdout:
+   ```text
+   Browser mode: http://localhost:1420/#token=colima-...
+   ```
+   Opening that URL boots the Vite frontend against the live Rust backend; the frontend reads `#token=...` once and strips the fragment from the address bar. (Release builds do **not** serve static frontend assets on `:11420` and never print the token to stdout.)
+4. **Local CLI Session Credentials** — On startup, the app writes `~/.colima-ui/api_token` and `~/.colima-ui/api_port` with `0600` permissions inside `~/.colima-ui` (`0700`) so `cui` and authorized same-user local agents can authenticate with `Authorization: Bearer <token>`, then removes them cleanly on exit.
 
-**Deep-dive:** [polar-billing-setup.md](./polar-billing-setup.md) step 8
+To work on frontend layout/styles alone without compiling Rust:
 
-- [ ] Build the debug bundle and launch:
-      ```bash
-      npx tauri build --debug
-      open src-tauri/target/debug/bundle/macos/ColimaUI.app
-      ```
-- [ ] Pay with Stripe test card `4242 4242 4242 4242`, any expiry/CVC
-- [ ] **Stay on Polar's confirmation page** until it finishes (that is where your
-      seat is claimed)
-
-**Failure cheatsheet:** see the table in
-[polar-billing-setup.md](./polar-billing-setup.md) — the top causes are: seat
-not claimed (success URL), token/env mismatch, or a pending (not claimed) team
-seat.
+```bash
+npm run dev
+```
 
 ---
 
-## Phase 6 — Go to production (only when ready)
+## 4. Quality Gates (CI Parity)
 
-- [ ] Create the **production** org + products in [polar.sh](https://polar.sh)
-      (not the sandbox) — repeat Phase 2 there
-- [ ] Create a production **Organization Access Token**
-- [ ] Swap secrets:
-      ```bash
-      supabase secrets set \
-        POLAR_ACCESS_TOKEN=polar_oat_… \
-        POLAR_ENV=production \
-        POLAR_PRODUCT_PRO=<prod-uuid> \
-        POLAR_PRODUCT_PRO_TEAMS=<prod-uuid>
-      ```
-- [ ] Re-run Phase 5 against production (real card — the test card only works in
-      the sandbox)
-- [ ] Empty `CHECKOUT_LINK_URL` in `src/lib/external-links.ts` so the
-      un-attributable fallback can never be offered
+Run every gate below before opening a pull request. `.githooks/pre-push` and `.github/workflows/ci.yml` enforce the exact same checks:
+
+```bash
+npm run lint          # ESLint (--max-warnings=0): dead code, unused imports/vars, unsafe patterns
+npm run typecheck     # TypeScript compiler check (tsc --noEmit)
+npm run check         # Svelte 5 component & rune type check (svelte-check)
+npm run check:tokens  # CSS custom property audit (no undefined var() references)
+npm run check:i18n    # Locale parity across en, ja, vi, and zh
+npm test              # Vitest unit & component test suite
+npm run lint:rust     # cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --all-features -- -D warnings
+cargo test --manifest-path src-tauri/Cargo.toml --lib
+```
+
+> **Integration tests:** Rust tests that require a running Docker daemon or `trivy` binary are marked `#[ignore]` so `cargo test --lib` stays deterministic offline. Run them explicitly when those tools are active:
+> ```bash
+> cargo test --manifest-path src-tauri/Cargo.toml -- --ignored
+> ```
+
+---
+
+## 5. Production Packaging & CLI Binaries
+
+### Local Unsigned macOS `.app` Bundle
+
+`tauri.conf.json` enables updater artifacts by default, which requires `TAURI_SIGNING_PRIVATE_KEY`. To package a local `.app` bundle without a signing key, disable updater artifact generation inline:
+
+```bash
+npx tauri build --bundles app --config '{"bundle":{"createUpdaterArtifacts":false}}'
+```
+
+Output bundle: `src-tauri/target/release/bundle/macos/ColimaUI.app`.
+
+> **macOS Gatekeeper note:** Locally compiled `.app` bundles run directly on the build machine. When installing an unsigned `.dmg` downloaded from a browser onto macOS, clear the quarantine attribute after copying to `/Applications`:
+> ```bash
+> xattr -cr /Applications/ColimaUI.app
+> ```
+
+### Signed Release Builds
+
+When building distributable release artifacts with Tauri updater signatures (and optional Apple notarization), export the signing credentials before running `npm run tauri build`:
+
+| Variable | Purpose |
+|----------|---------|
+| `TAURI_SIGNING_PRIVATE_KEY` | Contents or path of the Tauri updater private key (required when `createUpdaterArtifacts` is `true`) |
+| `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | Password for `TAURI_SIGNING_PRIVATE_KEY` (if encrypted) |
+| `APPLE_SIGNING_IDENTITY` / `APPLE_CERTIFICATE` / `APPLE_CERTIFICATE_PASSWORD` | Optional Apple Developer ID code-signing identity & P12 certificate |
+| `APPLE_ID` / `APPLE_PASSWORD` / `APPLE_TEAM_ID` | Optional Apple notarization credentials |
+
+```bash
+npm run tauri build
+```
+
+### Standalone CLI Binaries
+
+ColimaUI ships two Rust CLI targets in `src-tauri/src/bin/`:
+
+1. **`cui`** — Natural-language headless AI client that reads `~/.colima-ui/api_token`, discovers the active backend port (`11420–11429`), and calls `POST /api/cli/chat`:
+   ```bash
+   cargo build --manifest-path src-tauri/Cargo.toml --bin cui --release
+   # Binary: src-tauri/target/release/cui
+   ```
+
+2. **`colimaui`** — Direct subcommand CLI (gated behind the `cli` Cargo feature for `clap`):
+   ```bash
+   cargo build --manifest-path src-tauri/Cargo.toml --bin colimaui --features cli --release
+   # Binary: src-tauri/target/release/colimaui
+   ```
