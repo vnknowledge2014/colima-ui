@@ -95,7 +95,7 @@
       <!-- Each tint is mixed from the colour it sits next to, so text and
            background can never come from two different palettes. Svelte's
            orange is a brand colour and stays a literal. -->
-      <span class="badge" style="background: color-mix(in srgb, var(--accent-blue) 12%, transparent); color: var(--accent-blue);">v0.1.0</span>
+      <span class="badge" style="background: color-mix(in srgb, var(--accent-blue) 12%, transparent); color: var(--accent-blue);">v0.2.0</span>
       <span class="badge" style="background: color-mix(in srgb, var(--accent-purple) 12%, transparent); color: var(--accent-purple);">Tauri v2</span>
       <span class="badge" style="background: color-mix(in srgb, #ff3e00 12%, transparent); color: #ff3e00;">Svelte 5</span>
       <span class="badge" style="background: color-mix(in srgb, var(--accent-green) 12%, transparent); color: var(--accent-green);">Rust</span>

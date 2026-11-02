@@ -5,7 +5,7 @@
 <h1 align="center">ColimaUI</h1>
 
 <p align="center">
-  A modern desktop & web GUI for <a href="https://github.com/abiosoft/colima">Colima</a> — manage Docker containers, Kubernetes clusters, Linux VMs, and AI models from a beautiful dark-themed interface.
+  A native desktop GUI & local CLI control plane for <a href="https://github.com/abiosoft/colima">Colima</a> — manage Docker containers, Kubernetes clusters, Linux VMs, security audits, and AI workflows from a fast dark-themed interface.
 </p>
 
 <p align="center">
@@ -25,7 +25,7 @@
 Grab the latest release from [**GitHub Releases**](https://github.com/vnknowledge2014/colima-ui/releases/latest):
 
 | Platform | File | Architecture |
-|----------|------|--------------| 
+|----------|------|--------------|
 | **macOS** (Apple Silicon) | `ColimaUI_*_aarch64.dmg` | M1 / M2 / M3 / M4 |
 | **macOS** (Intel) | `ColimaUI_*_x64.dmg` | x86_64 |
 | **Linux** (Debian/Ubuntu) | `ColimaUI_*_amd64.deb` | x86_64 |
@@ -35,53 +35,40 @@ Grab the latest release from [**GitHub Releases**](https://github.com/vnknowledg
 > *"ColimaUI.app is damaged and can't be opened"*, open **System Settings →
 > Privacy & Security** and click **Open Anyway**, or run
 > `xattr -cr /Applications/ColimaUI.app` after dragging the app to Applications.
-> This removes the download quarantine flag and is only needed for the
-> downloaded build, not for locally compiled apps.
+> This removes the download quarantine flag and is only needed for downloaded
+> builds, not locally compiled apps.
 
-> **Browser mode:** After launching the app, access the full web UI at `http://127.0.0.1:11420` from any browser.
+> **Local API & Dev Browser Mode:** Port `11420` (fallback `11420–11429`) hosts
+> the **Bearer-authenticated REST & SSE API** used by the `cui` CLI and local AI
+> agents via `~/.colima-ui/api_token` (`0600` permissions; paired with
+> `~/.colima-ui/api_port`). Release builds serve no static web frontend on
+> `:11420`. **Browser UI mode** is a development surface at
+> `http://localhost:1420/#token=<token>` printed to stdout by `npm run tauri dev`.
 
 ---
 
 ## ✨ Features
 
-### 🐳 Docker Management
-- **Containers** — List, start, stop, restart, pause, unpause, remove, rename, inspect, exec, view real-time stats and logs
-- **Images** — Pull, remove, prune, inspect, tag with batch operations
-- **Volumes** — Create, inspect, remove, prune
-- **Networks** — Create (bridge/overlay/macvlan/host), inspect, remove, prune
-- **Docker Compose** — List projects, view services, restart/stop projects, view logs
+| Pillar | Capabilities |
+|--------|--------------|
+| **Command Center AI** | Multi-provider agent (**9 providers**: Ollama, OpenAI, Anthropic, Google Gemini, OpenRouter, Groq, Together, Mistral, DeepSeek) with bracket-tag Event Bus tools, `<think>` reasoning blocks, **3-tier guided UX** (context-aware empty state, interactive choice cards, follow-up chips), safe Terminal command handoff, and multi-conversation SQLite history |
+| **Security & Runtime Auditing** | Local Trivy vulnerability scanning with provenance-backed scores, CycloneDX/SPDX SBOM export, configuration rule pack (`L1`–`L3`), local base-image alternatives catalog, Falco runtime event stream, and isolated container Detonation sandbox |
+| **Topology, Live Activity & Self-Healing** | Interactive Docker & Kubernetes topology graphs, low-overhead Bollard live metrics, alert rules with historical backtesting, self-healing rules with kill switch, Compose Diagnose & AI Autofix (preview/apply/undo), and background TAR/file transfers |
+| **100% Free & Open Source (MIT)** | All features unlocked out of the box with zero account or sign-in required and strict BYOK local-first privacy |
 
-### ☸️ Kubernetes
-- **Multi-resource browser** — Pods, Deployments, Services, ConfigMaps, Secrets, StatefulSets, DaemonSets, Jobs, CronJobs, Ingresses, PVCs, Namespaces, Nodes, Events
-- **CRD discovery** — Dynamically browse custom resources in the sidebar
-- **Resource actions** — Describe, view/edit YAML, view logs, delete, restart, scale
-- **Real-time log streaming** — Follow pod logs via SSE with auto-scroll
-- **HTTP Benchmark** — Benchmark K8s services with configurable concurrency and latency statistics (p50/p95/p99)
-- **Port forwarding** — Create and manage port forwards to services and pods
-- **Exec** — Shell into pod containers
-- **Cluster health** — Node status, resource pressure, component health
-- **Context switching** — Switch between multiple kubeconfig contexts
-- **Kind clusters** — Create and manage [Kind](https://kind.sigs.k8s.io/) clusters
+### 🐳 Docker & Compose
+- **Containers, Images, Volumes & Networks** — Full lifecycle CRUD, batch prune, real-time logs, stats, inspect, exec, and background image TAR export/import + container file copy (`cp`)
+- **Compose Diagnose & Autofix** — Project start/stop/restart/logs plus YAML schema diagnosis and previewable, undoable autofix patches
+- **Colima Instance & YAML Config** — Fast `<1ms` `~/.colima` config reader, diff preview & mtime-guarded `colima.yaml` apply, resource presets, and idle Resource Saver daemon
 
-### 🖥️ Linux VMs (Lima)
-- Create VMs from templates with custom CPU, memory, and disk settings
-- Start, stop, delete VMs; shell into VMs directly
+### ☸️ Kubernetes & Linux VMs
+- **Multi-resource K8s browser & CRDs** — Pods, Deployments, Services, ConfigMaps, Secrets, StatefulSets, DaemonSets, Jobs, CronJobs, Ingresses, PVCs, Namespaces, Nodes, Events, and dynamic CRD discovery
+- **Operations & Cluster Health** — Live SSE pod log streaming, `kubectl` apply/scale/restart, port forwarding, real PTY pod exec, HTTP service benchmarking (p50/p95/p99), X-Ray diagnostics, and Kind cluster lifecycle
+- **Lima Linux VMs** — Template-based VM creation with custom CPU/memory/disk, lifecycle controls, and integrated PTY SSH tabs
 
-### 🤖 AI Diagnostic Agent
-- **Self-learning AI** — Expert-level troubleshooting for Colima/Lima/Docker/Kubernetes errors
-- **5-tool agent loop** — Web search, page fetch, diagnostic log collection, safe command execution, user-approved commands
-- **Knowledge Bank** — SQLite-backed memory (`~/.colima-ui/knowledge.db`) with 22+ builtin solutions, user feedback via 👍/👎
-- **3-tier command sandbox** — Safe (auto-run), Approve (user click), Banned (Rust-level block). Prevents destructive commands even if AI hallucinates
-- **Multi-provider AI Chat** — Anthropic, OpenAI, Google, Ollama, OpenRouter, Groq, Together AI, Mistral, DeepSeek
-- **AI Models** — Pull, delete, and serve Ollama models directly
-
-### 📊 Dashboard & UI
-- System overview with running/stopped counts, CPU/memory allocation
-- Integrated xterm.js terminal with SSH into instances
-- Setup Wizard & Getting Started Tour for new users
-- Dark theme with glassmorphism effects and micro-animations
-- Context menus, keyboard shortcuts, global toast notifications
-- i18n support (English, Japanese, Vietnamese, Chinese)
+### 📊 Desktop Experience
+- Real pseudo-terminal (`portable-pty` + `xterm.js`) over Tauri IPC with per-profile shell history
+- Offline full-text searchable Help Center (`articles_fts`) and full UI localization across **4 languages** (`en`, `ja`, `vi`, `zh`)
 
 ---
 
@@ -89,61 +76,55 @@ Grab the latest release from [**GitHub Releases**](https://github.com/vnknowledg
 
 ### Prerequisites
 
-- **[Colima](https://github.com/abiosoft/colima)** — Container runtime manager
-- **[Docker CLI](https://docs.docker.com/engine/install/)** — Container engine client
-- **[Node.js](https://nodejs.org/) ≥ 22.22.2** — Frontend build and test suite (`.nvmrc` pins the line; jsdom and undici in the test stack need it, and an older Node fails as an unrelated-looking `markAsUncloneable` error rather than a version complaint)
-- **[Rust](https://www.rust-lang.org/tools/install)** — Backend build
-- **[kubectl](https://kubernetes.io/docs/tasks/tools/)** *(optional)* — Kubernetes features
-- **[Kind](https://kind.sigs.k8s.io/)** *(optional)* — Kind cluster management
-- **[Ollama](https://ollama.ai/)** *(optional)* — Local AI model management
+- **[Node.js](https://nodejs.org/) ≥ 22.22.2** (`npm`) — Frontend build and test suite (`.nvmrc` pins the line required by `jsdom`/`undici`)
+- **[Rust](https://www.rust-lang.org/tools/install)** (stable) — Tauri backend and CLI binaries
+- **[Colima](https://github.com/abiosoft/colima)** & **[Docker CLI](https://docs.docker.com/engine/install/)** — Container runtime & client
+- *Optional:* **[kubectl](https://kubernetes.io/docs/tasks/tools/)**, **[Kind](https://kind.sigs.k8s.io/)**, **[Trivy](https://trivy.dev/)** (image scanning), **[Ollama](https://ollama.com/)** (local AI models)
 
 ### Development
 
 ```bash
 git clone https://github.com/vnknowledge2014/colima-ui.git
 cd colima-ui
-npm install
+npm install          # Installs dependencies and configures .githooks
 
-# Desktop app (Tauri native window + Vite dev server)
+# Desktop app (Tauri native window + Vite dev server + Browser mode URL)
 npm run tauri dev
 
-# Web-only (frontend at http://localhost:1420)
+# Frontend-only Vite dev server (http://localhost:1420)
 npm run dev
 ```
 
 ### Lint & Quality Gates
 
-The repo enforces strict dead-code / unused-code rules on **every push** (pre-push
-hook, mirrored by CI). Agents and humans alike must run all four gates before
-committing:
+The repository enforces strict dead-code, token, and i18n checks on every push (`.githooks/pre-push`, mirrored by `.github/workflows/ci.yml`):
 
 ```bash
-pnpm lint          # ESLint: dead code, unused vars/imports, `any`, error-prone patterns
-pnpm typecheck     # TypeScript
-pnpm check         # Svelte check
-pnpm check:tokens  # No var() reading a CSS custom property nothing defines
-pnpm check:i18n    # All locales carry the same keys
-pnpm test          # Unit tests (vitest)
-pnpm lint:rust     # cargo clippy --all-targets -- -D warnings (dead code, unused imports)
+npm run lint          # ESLint: dead code, unused vars/imports, error-prone patterns
+npm run typecheck     # TypeScript (tsc --noEmit)
+npm run check         # Svelte type & template check (svelte-check)
+npm run check:tokens  # Verify every CSS var() references a defined token
+npm run check:i18n    # Verify all 4 locales (en, ja, vi, zh) carry identical keys
+npm test              # Unit & component tests (Vitest)
+npm run lint:rust     # cargo clippy --all-targets --all-features -- -D warnings
 ```
 
-The same set runs in CI (`.github/workflows/ci.yml`), which additionally runs
-`cargo test --lib`. Rust integration tests are marked `#[ignore]` because they
-need a real Docker daemon or Trivy; run them deliberately with
-`cargo test -- --ignored`.
-
-`git push --no-verify` / `SKIP_LINT_GATES=1` are emergency-only and need explicit
-approval.
+CI additionally runs `cargo test --manifest-path src-tauri/Cargo.toml --lib`. Rust integration tests requiring a live Docker daemon or Trivy are marked `#[ignore]`; run them explicitly with `cargo test --manifest-path src-tauri/Cargo.toml -- --ignored`.
 
 ### Production Build
 
 ```bash
-# Desktop app → src-tauri/target/release/bundle/
+# Local macOS .app bundle without an updater signing private key
+npx tauri build --bundles app --config '{"bundle":{"createUpdaterArtifacts":false}}'
+
+# Signed release bundle (when TAURI_SIGNING_PRIVATE_KEY is set)
 npm run tauri build
 
-# Web-only → dist/
+# Frontend static bundle → dist/
 npm run build
 ```
+
+See [`docs/setup.md`](docs/setup.md) for Linux system packages, standalone CLI builds (`cui` / `colimaui`), and release signing variables.
 
 ---
 
@@ -151,16 +132,16 @@ npm run build
 
 | Layer | Technology | Version |
 |-------|-----------|---------|
-| **Frontend** | Svelte 5 (Runes) | 5.56 |
-| **Language** | TypeScript | 5.8 |
+| **Frontend** | Svelte 5 (Runes) | 5.57 |
+| **Language** | TypeScript | 6.0 |
 | **Bundler** | Vite | 8.x |
 | **Desktop** | Tauri | 2.x |
 | **Backend** | Rust (Edition 2021) | — |
 | **HTTP Server** | Axum | 0.8 |
-| **Docker Client** | Bollard | 0.18 |
-| **Terminal** | xterm.js | 6.0 |
-| **Database** | SQLite (rusqlite) | — |
-| **Styling** | Vanilla CSS (dark theme) | — |
+| **Docker Client** | Bollard | 0.21 |
+| **Terminal** | xterm.js + portable-pty | 6.0 / 0.9 |
+| **Database** | SQLite (rusqlite + FTS5) | 0.40 |
+| **Styling** | Vanilla CSS (token design system) | — |
 
 ---
 
@@ -171,49 +152,50 @@ colima-ui/
 ├── src/                          # Frontend (Svelte 5 + TypeScript)
 │   ├── App.svelte                # Main shell, sidebar, event listeners
 │   ├── main.ts                   # Entry point
-│   ├── pages/                    # 16 page components
-│   ├── components/               # 8 shared components
-│   ├── store/                    # Svelte 5 rune-based state
-│   ├── lib/                      # API layer, AI bus, i18n, utilities
-│   ├── styles/                   # CSS design system (tokens, reset, layout, ...)
-│   └── locales/                  # i18n (en, vi, zh)
-├── src-tauri/                    # Backend (Rust + Tauri)
+│   ├── pages/                    # 19 .svelte page views
+│   ├── components/               # Shared & domain UI components (ai/, security/, activity/, compose/, topology/, ...)
+│   ├── store/                    # Svelte 5 rune-based state stores
+│   ├── lib/                      # Dual-mode API client, Command Center AI core, Event Bus, i18n, utilities
+│   ├── styles/                   # Modular CSS token design system
+│   └── locales/                  # 4 languages (en, ja, vi, zh)
+├── src-tauri/                    # Backend (Rust + Tauri v2)
 │   ├── src/
-│   │   ├── lib.rs                # App setup & command registration
-│   │   ├── api_server.rs         # Axum router & HTTP server (port 11420)
-│   │   ├── commands/             # 14 command modules (business logic)
-│   │   ├── routes/               # 14 HTTP route modules (thin delegation)
-│   │   ├── adapters/             # Unified DevOps adapter traits
-│   │   ├── services/             # High-level service layer
-│   │   ├── auth.rs               # API token & auth middleware
-│   │   ├── sse.rs                # SSE broadcast & event watchers
-│   │   ├── validation.rs         # Security validation (shell injection, etc.)
-│   │   ├── helpers.rs            # Response wrappers, CLI runner, caching
-│   │   ├── platform.rs           # OS/arch/package manager detection
-│   │   ├── docker_state.rs       # Bollard event stream for push updates
-│   │   ├── instance_reader.rs    # Colima config YAML parser
-│   │   ├── terminal_session.rs   # PTY session management
-│   │   └── poller.rs             # Background instance poller
-│   └── tauri.conf.json           # Tauri configuration
-├── scripts/release.sh            # Automated version bump + tag + push
-├── docs/                         # Technical documentation
-└── external_skill/               # AI orchestration skill for external agents
+│   │   ├── lib.rs                # App setup, state & Tauri IPC command registration
+│   │   ├── api_server.rs         # Axum router & localhost HTTP/SSE server (11420–11429)
+│   │   ├── auth.rs               # CSPRNG Bearer token, IPC & 0600 ~/.colima-ui/api_token handoff
+│   │   ├── commands/             # 53 command modules (Docker, K8s, Colima, Security, Metrics, AI, KB, ...)
+│   │   ├── routes/               # 26 HTTP route modules (thin delegation to commands/)
+│   │   ├── adapters/             # Unified DevOps CLI adapter traits
+│   │   ├── services/             # High-level orchestration layer
+│   │   ├── telemetry/            # Opt-in closed-vocabulary telemetry & redaction
+│   │   ├── bin/                  # Standalone CLI binaries (cui, colimaui)
+│   │   ├── sse.rs                # SSE broadcast & topic subscriber tracking
+│   │   ├── error.rs              # Structured ColimaError classification & remediation hints
+│   │   ├── redact.rs             # Credential & secret redaction
+│   │   ├── validation.rs         # Input & path-containment security checks
+│   │   ├── docker_state.rs       # Bollard real-time container event stream
+│   │   ├── instance_reader.rs    # Fast ~/.colima YAML config reader
+│   │   └── terminal_session.rs   # Real PTY session manager (Tauri IPC)
+│   └── tauri.conf.json           # Tauri bundle & capability configuration
+├── scripts/                      # Git hook installer, token/i18n gates, release script
+├── docs/                         # Technical documentation & setup runbook
+└── external_skill/               # AI orchestration skill for external host agents
 ```
 
-> See [`docs/`](docs/) for detailed technical documentation.
+> See [`docs/`](docs/) for architecture, API, Command Center AI, security, and telemetry documentation.
 
 ---
 
 ## 🔄 CI/CD & Releases
 
-- **CI** (`.github/workflows/ci.yml`) — TypeScript checking, `cargo check` + `cargo clippy` (macOS ARM64/x86, Linux), frontend build validation
-- **Release** (`.github/workflows/release.yml`) — Builds DMG/deb/AppImage on version tags, creates GitHub Release
+- **CI** (`.github/workflows/ci.yml`) — ESLint, TypeScript, `svelte-check`, CSS token & i18n gates, Vitest unit suite, `cargo check` + `cargo clippy` (macOS ARM64/x86, Linux), `cargo test --lib`, and frontend build verification
+- **Release** (`.github/workflows/release.yml`) — Builds DMG/deb/AppImage artifacts on version tags and publishes GitHub Releases
 
 ```bash
 # Bump version, commit, tag, and push
-./scripts/release.sh patch   # 0.1.1 → 0.1.2
-./scripts/release.sh minor   # 0.1.1 → 0.2.0
-./scripts/release.sh major   # 0.1.1 → 1.0.0
+./scripts/release.sh patch   # 0.2.0 → 0.2.1
+./scripts/release.sh minor   # 0.2.0 → 0.3.0
+./scripts/release.sh major   # 0.2.0 → 1.0.0
 ./scripts/release.sh 2.0.0   # explicit version
 ```
 
@@ -223,15 +205,15 @@ colima-ui/
 
 1. Fork the repository
 2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes following [Conventional Commits](https://www.conventionalcommits.org/)
-4. Push and open a Pull Request
+3. Run the quality gates (`npm run lint && npm run typecheck && npm run check && npm test && npm run lint:rust`)
+4. Commit your changes following [Conventional Commits](https://www.conventionalcommits.org/) and open a Pull Request
 
 ---
 
 ## 📄 License
 
-MIT License. Part of the [Colima](https://github.com/abiosoft/colima) ecosystem.
+MIT License — 100% free and open source. Part of the [Colima](https://github.com/abiosoft/colima) ecosystem.
 
 <p align="center">
-  Built with ❤️ using <a href="https://tauri.app">Tauri</a>, <a href="https://svelte.dev">Svelte</a>, and <a href="https://www.rust-lang.org">Rust</a>
+  Built with <a href="https://tauri.app">Tauri</a>, <a href="https://svelte.dev">Svelte</a>, and <a href="https://www.rust-lang.org">Rust</a>
 </p>

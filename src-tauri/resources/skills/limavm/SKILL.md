@@ -9,7 +9,7 @@ Manage Lima virtual machines (without Docker/K8s) through the App Event Bus.
 
 ## Core Rule: App-First
 
-**ALWAYS use `[QUERY]` for introspection and `[EVENT_APPROVE]` for lifecycle/shell.** Only use CLI for advanced `limactl` config editing.
+**ALWAYS use `[QUERY]` for introspection and `[EVENT_APPROVE]` for lifecycle and one-shot shell commands.** Only use `cli-exec` for non-interactive `limactl` inspection or template validation.
 
 ## 1. Introspection (Read-Only)
 
@@ -26,9 +26,20 @@ Manage Lima virtual machines (without Docker/K8s) through the App Event Bus.
 
 ## 3. Shell Access
 
-- **Run command in VM**: `[EVENT_APPROVE: lima-shell | {"name": "ubuntu", "command": "uname -a"}]`
+- **One-shot command in VM**: `[EVENT_APPROVE: lima-shell | {"name": "ubuntu", "command": "uname -a"}]`
+- **Interactive shell session**: Navigate to `[NAVIGATE: terminal]` to open a persistent PTY shell inside the Lima VM.
 
 ## 4. CLI Escape Hatch
 
-- **Direct shell**: `[EVENT_APPROVE: cli-exec | {"command": "limactl", "args": ["shell", "ubuntu"]}]`
-- **Edit VM config**: `[EVENT_APPROVE: cli-exec | {"command": "limactl", "args": ["edit", "ubuntu"]}]`
+> **Sandbox Warning**: NEVER run interactive shell or `$EDITOR`-based `limactl` subcommands via `cli-exec` — they require a TTY and will hang! Use `[EVENT_APPROVE: lima-shell | {"name": "ubuntu", "command": "uname -a"}]` for one-shot commands and `[NAVIGATE: terminal]` for interactive shell sessions.
+
+- **Detailed JSON VM listing**: `[EVENT_APPROVE: cli-exec | {"command": "limactl", "args": ["list", "--json"]}]`
+- **Validate a Lima YAML template**: `[EVENT_APPROVE: cli-exec | {"command": "limactl", "args": ["validate", "/absolute/path/to/template.yaml"]}]`
+
+## Advanced References
+- `[READ_REFERENCE: skills/limavm/references/vm_security.md]`
+
+## Anti-Patterns
+
+- **Never execute interactive `limactl shell` or `limactl edit` via `cli-exec`** — non-interactive subprocesses have no TTY/`$EDITOR` and hang; use `lima-shell` for one-shot commands or `[NAVIGATE: terminal]` for interactive sessions.
+- **Never pass shell operators (`&&`, `|`, `;`) inside `cli-exec` arguments**.

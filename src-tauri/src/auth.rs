@@ -4,38 +4,46 @@
 //!
 //! # How the token reaches a client
 //!
-//! There is deliberately **no unauthenticated HTTP endpoint** that hands the
-//! token out. There used to be (`GET /api/auth/token`, in the public router),
-//! guarded only by CORS — which restricts browsers and nothing else. Any local
-//! process could read the token and then use the whole API: writing arbitrary
-//! files to the host, applying compose patches, driving container lifecycle.
+//! There is deliberately **no HTTP endpoint** (`GET /api/auth/token` or
+//! otherwise) that hands the token out. An unauthenticated localhost HTTP route
+//! guarded only by CORS restricts browsers and nothing else: any process on the
+//! machine, a DNS-rebinding page, or a container sharing host networking could
+//! fetch the bearer token and gain full control over host file transfers,
+//! compose patches, and VM/container lifecycle.
 //!
-//! Clients get it without that endpoint:
+//! Legitimate clients receive credentials through three strictly scoped
+//! out-of-band channels:
 //!
-//! - **Desktop (Tauri):** [`api_token`] over IPC. The webview is the app; it is
-//!   already inside the trust boundary. Unrelated local processes are not.
-//! - **Browser:** out-of-band, in a URL fragment (`#token=…`). Fragments are
-//!   never sent to a server, so the token stays out of request logs and out of
-//!   `Referer`. The frontend reads it once and strips it from the address bar.
-//!
-//! On the browser side, "out-of-band" today means exactly one thing: a debug
-//! build prints the ready-made URL to stdout when the server binds. There is no
-//! in-app "open in browser" affordance, because there is no browser mode to
-//! open one for — this router serves no frontend (no `ServeDir` anywhere), so
-//! the only page that can reach it is the vite dev server on 1420. Browser mode
-//! is a development surface, and the handoff matches that.
-//!
-//! If a packaged build ever serves its own frontend, this is the seam that has
-//! to grow a real handoff; until then, promising one would be fiction.
-//!
-//! Either way a tab opened by hand has no credential and no way to obtain one.
-//! That is the point, and it is the fix `docs/architecture.md` already named.
+//! 1. **Desktop (Tauri):** [`api_token`] over Tauri IPC. The webview is part of
+//!    the application process trust boundary; arbitrary local processes cannot
+//!    invoke Tauri IPC commands.
+//! 2. **Local CLI (`cui`) & Host Agents:** `~/.colima-ui/api_token` (paired
+//!    with `~/.colima-ui/api_port`), written when the HTTP server binds inside
+//!    a `0700` directory with `0600` file permissions, `O_NOFOLLOW` symlink
+//!    defense, and atomic temp-file rename, then unlinked on shutdown after
+//!    constant-time verification that this process still owns the recorded
+//!    token. Unlike an HTTP endpoint, filesystem access is enforced by OS
+//!    kernel UID permissions: other local users, browser sandboxes, DNS
+//!    rebinding attacks, and containers without `~/.colima-ui` mounted cannot
+//!    read it.
+//! 3. **Dev Browser (`tauri dev`):** `#token=…` URL fragment printed to stdout
+//!    in debug builds only. URL fragments are never sent in HTTP requests or
+//!    `Referer` headers, and the frontend strips the fragment immediately after
+//!    reading it.
 
 use axum::{
     http::{header, StatusCode},
     middleware::Next,
 };
+use std::io;
+use std::path::Path;
 use std::sync::OnceLock;
+
+/// Filename under `~/.colima-ui` holding the active session's bearer token.
+pub const TOKEN_FILE_NAME: &str = "api_token";
+
+/// Filename under `~/.colima-ui` holding the TCP port the active HTTP server bound.
+pub const PORT_FILE_NAME: &str = "api_port";
 
 static API_TOKEN: OnceLock<String> = OnceLock::new();
 
@@ -153,11 +161,219 @@ pub async fn auth_middleware(
     }
 }
 
+/// Persist the current session's bearer token and bound HTTP port into
+/// `~/.colima-ui/` so the local `cui` CLI and host-side agents can authenticate
+/// without any HTTP token endpoint.
+pub fn persist_session_credentials(bound_port: u16) -> io::Result<()> {
+    persist_credentials_to_dir(
+        &crate::path_util::app_data_dir(),
+        &get_api_token(),
+        bound_port,
+    )
+}
+
+/// Remove `~/.colima-ui/api_token` and `~/.colima-ui/api_port` on shutdown if
+/// and only if `api_token` still belongs to this process.
+pub fn cleanup_session_credentials() {
+    cleanup_credentials_in_dir(&crate::path_util::app_data_dir(), &get_api_token());
+}
+
+fn persist_credentials_to_dir(dir: &Path, token: &str, bound_port: u16) -> io::Result<()> {
+    match std::fs::symlink_metadata(dir) {
+        Ok(meta) => {
+            if meta.file_type().is_symlink() || !meta.is_dir() {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "refusing symlink or non-directory credential directory",
+                ));
+            }
+        }
+        Err(e) if e.kind() == io::ErrorKind::NotFound => {
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::DirBuilderExt;
+                std::fs::DirBuilder::new()
+                    .recursive(true)
+                    .mode(0o700)
+                    .create(dir)?;
+            }
+            #[cfg(not(unix))]
+            {
+                std::fs::create_dir_all(dir)?;
+            }
+        }
+        Err(e) => return Err(e),
+    }
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let meta = std::fs::symlink_metadata(dir)?;
+        if meta.file_type().is_symlink() || !meta.is_dir() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "refusing symlink or non-directory credential directory",
+            ));
+        }
+        std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700))?;
+    }
+
+    write_secret_file_atomic(dir, TOKEN_FILE_NAME, token.as_bytes())?;
+    write_secret_file_atomic(dir, PORT_FILE_NAME, bound_port.to_string().as_bytes())
+}
+
+fn write_and_sync(mut file: std::fs::File, contents: &[u8]) -> io::Result<()> {
+    use std::io::Write;
+    file.write_all(contents)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        file.set_permissions(std::fs::Permissions::from_mode(0o600))?;
+    }
+    file.sync_all()
+}
+
+fn write_secret_file_atomic(dir: &Path, filename: &str, contents: &[u8]) -> io::Result<()> {
+    let dest = dir.join(filename);
+    match std::fs::symlink_metadata(&dest) {
+        Ok(meta) if meta.file_type().is_symlink() || meta.is_dir() => {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "refusing symlink or directory target",
+            ));
+        }
+        Ok(_) => {}
+        Err(e) if e.kind() == io::ErrorKind::NotFound => {}
+        Err(e) => return Err(e),
+    }
+
+    let mut rand_bytes = [0u8; 8];
+    rand::fill(&mut rand_bytes);
+    let rand_hex: String = rand_bytes.iter().map(|b| format!("{b:02x}")).collect();
+    let tmp_path = dir.join(format!(".{filename}.{}.{rand_hex}.tmp", std::process::id()));
+
+    let mut opts = std::fs::OpenOptions::new();
+    opts.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        opts.mode(0o600).custom_flags(libc::O_NOFOLLOW);
+    }
+
+    let file = opts.open(&tmp_path)?;
+    if let Err(e) = write_and_sync(file, contents) {
+        let _ = std::fs::remove_file(&tmp_path);
+        return Err(e);
+    }
+    if let Err(e) = std::fs::rename(&tmp_path, &dest) {
+        let _ = std::fs::remove_file(&tmp_path);
+        return Err(e);
+    }
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let meta = std::fs::symlink_metadata(&dest)?;
+        if meta.file_type().is_symlink() || !meta.file_type().is_file() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "post-rename target is not a regular file",
+            ));
+        }
+        if meta.permissions().mode() & 0o777 != 0o600 {
+            std::fs::set_permissions(&dest, std::fs::Permissions::from_mode(0o600))?;
+        }
+    }
+
+    Ok(())
+}
+
+fn cleanup_credentials_in_dir(dir: &Path, expected_token: &str) {
+    let Ok(dir_meta) = std::fs::symlink_metadata(dir) else {
+        return;
+    };
+    if dir_meta.file_type().is_symlink() || !dir_meta.is_dir() {
+        return;
+    }
+
+    let token_path = dir.join(TOKEN_FILE_NAME);
+    let Ok(token_meta) = std::fs::symlink_metadata(&token_path) else {
+        return;
+    };
+    if token_meta.file_type().is_symlink() || !token_meta.file_type().is_file() {
+        return;
+    }
+
+    let existing = {
+        use std::io::Read;
+        let mut opts = std::fs::OpenOptions::new();
+        opts.read(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            opts.custom_flags(libc::O_NOFOLLOW);
+        }
+        let Ok(mut file) = opts.open(&token_path) else {
+            return;
+        };
+        let mut buf = String::new();
+        if file.read_to_string(&mut buf).is_err() {
+            return;
+        }
+        buf
+    };
+
+    if !constant_time_eq(existing.trim(), expected_token) {
+        return;
+    }
+
+    let _ = std::fs::remove_file(&token_path);
+
+    let port_path = dir.join(PORT_FILE_NAME);
+    if std::fs::symlink_metadata(&port_path)
+        .is_ok_and(|m| !m.file_type().is_symlink() && m.file_type().is_file())
+    {
+        let _ = std::fs::remove_file(&port_path);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
 
     const TOKEN: &str = "colima-0123456789abcdef";
+
+    struct TempTestDir(PathBuf);
+
+    impl TempTestDir {
+        fn new(label: &str) -> Self {
+            let mut bytes = [0u8; 8];
+            rand::fill(&mut bytes);
+            let hex: String = bytes.iter().map(|b| format!("{b:02x}")).collect();
+            let path = std::env::temp_dir().join(format!(
+                "colima-ui-auth-test-{label}-{}-{hex}",
+                std::process::id()
+            ));
+            Self(path)
+        }
+
+        fn path(&self) -> &Path {
+            &self.0
+        }
+    }
+
+    impl Drop for TempTestDir {
+        fn drop(&mut self) {
+            if let Ok(meta) = std::fs::symlink_metadata(&self.0) {
+                if meta.file_type().is_symlink() || meta.file_type().is_file() {
+                    let _ = std::fs::remove_file(&self.0);
+                } else if meta.is_dir() {
+                    let _ = std::fs::remove_dir_all(&self.0);
+                }
+            }
+        }
+    }
 
     #[test]
     fn accepts_correct_bearer_header() {
@@ -229,5 +445,119 @@ mod tests {
         assert!(!constant_time_eq("abc", "ab"));
         assert!(!constant_time_eq("", "a"));
         assert!(constant_time_eq("", ""));
+    }
+
+    #[test]
+    fn persists_credentials_with_strict_0700_and_0600_permissions() {
+        let dir = TempTestDir::new("perms");
+        persist_credentials_to_dir(dir.path(), TOKEN, 11423)
+            .expect("initial credential persistence must succeed");
+
+        let token_path = dir.path().join(TOKEN_FILE_NAME);
+        let port_path = dir.path().join(PORT_FILE_NAME);
+        assert_eq!(std::fs::read_to_string(&token_path).unwrap(), TOKEN);
+        assert_eq!(std::fs::read_to_string(&port_path).unwrap(), "11423");
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let dir_mode = std::fs::symlink_metadata(dir.path())
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777;
+            let token_mode = std::fs::symlink_metadata(&token_path)
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777;
+            let port_mode = std::fs::symlink_metadata(&port_path)
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777;
+            assert_eq!(dir_mode, 0o700, "credential dir must be 0700");
+            assert_eq!(token_mode, 0o600, "api_token must be 0600");
+            assert_eq!(port_mode, 0o600, "api_port must be 0600");
+        }
+
+        // Overwriting an existing session's credentials must also replace atomically
+        // and keep strict permissions.
+        let second_token = "colima-fedcba9876543210";
+        persist_credentials_to_dir(dir.path(), second_token, 11424)
+            .expect("atomic overwrite must succeed");
+        assert_eq!(std::fs::read_to_string(&token_path).unwrap(), second_token);
+        assert_eq!(std::fs::read_to_string(&port_path).unwrap(), "11424");
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn refuses_symlinked_directory_and_symlinked_target_files() {
+        use std::os::unix::fs::symlink;
+
+        // 1. Symlinked credential directory must be rejected.
+        let real_dir = TempTestDir::new("real-dir");
+        std::fs::create_dir_all(real_dir.path()).unwrap();
+        let symlink_dir = TempTestDir::new("symlink-dir");
+        symlink(real_dir.path(), symlink_dir.path()).unwrap();
+
+        let err = persist_credentials_to_dir(symlink_dir.path(), TOKEN, 11420)
+            .expect_err("symlinked credential dir must be rejected");
+        assert_eq!(err.kind(), io::ErrorKind::InvalidInput);
+        assert!(!real_dir.path().join(TOKEN_FILE_NAME).exists());
+
+        // 2. Symlinked api_token pointing at a victim file must be rejected without
+        //    clobbering the victim file.
+        let victim_dir = TempTestDir::new("victim");
+        std::fs::create_dir_all(victim_dir.path()).unwrap();
+        let victim_file = victim_dir.path().join("victim.txt");
+        std::fs::write(&victim_file, "untouched-victim-content").unwrap();
+
+        let cred_dir = TempTestDir::new("symlink-target");
+        std::fs::create_dir_all(cred_dir.path()).unwrap();
+        symlink(&victim_file, cred_dir.path().join(TOKEN_FILE_NAME)).unwrap();
+
+        let err = persist_credentials_to_dir(cred_dir.path(), TOKEN, 11420)
+            .expect_err("symlinked api_token target must be rejected");
+        assert_eq!(err.kind(), io::ErrorKind::InvalidInput);
+        assert_eq!(
+            std::fs::read_to_string(&victim_file).unwrap(),
+            "untouched-victim-content"
+        );
+
+        // Cleanup must also refuse to follow a symlinked api_token even if the
+        // victim file happens to contain the matching token.
+        let token_victim = victim_dir.path().join("token-victim.txt");
+        std::fs::write(&token_victim, TOKEN).unwrap();
+        std::fs::remove_file(cred_dir.path().join(TOKEN_FILE_NAME)).unwrap();
+        symlink(&token_victim, cred_dir.path().join(TOKEN_FILE_NAME)).unwrap();
+        cleanup_credentials_in_dir(cred_dir.path(), TOKEN);
+        assert!(
+            token_victim.exists(),
+            "cleanup must never unlink the target of a symlink"
+        );
+    }
+
+    #[test]
+    fn cleanup_removes_owned_credentials_and_preserves_newer_instance_credentials() {
+        let dir = TempTestDir::new("cleanup");
+        let newer_token = "colima-newer-session-99999999";
+        persist_credentials_to_dir(dir.path(), newer_token, 11421).unwrap();
+
+        // Older exiting instance has a different token — must leave both files intact.
+        cleanup_credentials_in_dir(dir.path(), TOKEN);
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join(TOKEN_FILE_NAME)).unwrap(),
+            newer_token
+        );
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join(PORT_FILE_NAME)).unwrap(),
+            "11421"
+        );
+
+        // Matching owner exits — both files must be removed.
+        cleanup_credentials_in_dir(dir.path(), newer_token);
+        assert!(!dir.path().join(TOKEN_FILE_NAME).exists());
+        assert!(!dir.path().join(PORT_FILE_NAME).exists());
     }
 }

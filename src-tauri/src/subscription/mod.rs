@@ -1,27 +1,17 @@
-//! Pro entitlement via a Polar seat subscription, resolved through the account.
+//! Local entitlement state for the open-source edition.
 //!
-//! Replaces the license-key module. The shape of the answer is the same —
-//! "entitled: yes/no, judged offline from a local cache" — but where it comes
-//! from changed.
+//! All features are unlocked locally in the open-source build:
+//! [`subscription_state`] always reports `entitled: true` with no external
+//! billing lookup, cloud token, or remote service dependency.
 //!
-//! # Why there is no Polar client here
-//!
-//! `license/client.rs` called Polar directly, which worked because the
-//! key-validate endpoint needs no secret. Seat state does: it requires
-//! `POLAR_ACCESS_TOKEN`, an organization-wide credential that cannot ship in a
-//! desktop app. The lookup therefore happens in a Supabase Edge Function, which
-//! the frontend calls with the signed-in user's JWT — the JWT lives in the
-//! webview, so routing the call through Rust would buy nothing.
-//!
-//! That leaves this module with one job: **persist and judge**. The frontend
-//! hands over what the oracle said; everything after that — expiry, which user
-//! it belongs to, surviving a restart — is decided here.
+//! The offline cache (`subscription.json`) and IPC/HTTP state commands remain in
+//! place so callers and persisted state records keep a stable contract across
+//! restarts without ever consulting the network.
 //!
 //! # What must stay true
 //!
-//! Losing the network never downgrades a paying customer. The oracle being
-//! unreachable is not "not entitled"; it means the cache keeps standing until
-//! its own expiry. Only a definite answer from the oracle ends entitlement early.
+//! Entitlement evaluation is purely local and offline. Losing network access
+//! never downgrades features or surfaces an error to the UI.
 
 pub mod cache;
 
@@ -59,9 +49,9 @@ impl SubscriptionState {
 
     /// Judge a cached record for whoever is signed in.
     ///
-    /// `user_id` is the currently signed-in Supabase user, or `None` when nobody
+    /// `user_id` is the optional caller user identifier, or `None` when nobody
     /// is signed in — which still counts as entitled, because signing out must
-    /// not revoke Pro. A *different* user gets nothing from this record.
+    /// not revoke local state. A *different* user gets nothing from this record.
     fn from_cache(cache: Option<&CachedSubscription>, user_id: Option<&str>) -> Self {
         let Some(c) = cache else {
             return Self::none();
@@ -130,11 +120,11 @@ fn set_active_user_id(user_id: Option<&str>) {
 
 // ===== Tauri commands =====
 
-/// Current entitlement, judged offline from the cache.
+/// Current entitlement, evaluated locally offline.
 ///
-/// Infallible: any problem reads as "not entitled" rather than an error the UI
-/// would have to interpret. `user_id` is the signed-in user, omitted when signed
-/// out.
+/// In the open-source edition all features are unlocked locally (`entitled` is
+/// always `true`), while any cached metadata for `user_id` is preserved for
+/// display compatibility.
 #[tauri::command]
 pub async fn subscription_state(user_id: Option<String>) -> SubscriptionState {
     set_active_user_id(user_id.as_deref());
@@ -280,10 +270,9 @@ mod tests {
         assert!(s.known, "the UI should still be able to say when it lapsed");
     }
 
-    /// The whole point of the module: nothing here consults Supabase, an account
-    /// session, or the network. Entitlement is a pure function of the cached
-    /// record, the signed-in user id, and the clock — so an outage cannot
-    /// downgrade a paying customer.
+    /// The whole point of the module: nothing here consults an external billing
+    /// service, an account session, or the network. Cache evaluation is a pure
+    /// function of the cached record, the user id, and the clock.
     #[test]
     fn entitlement_is_offline_only() {
         let r = rec("user-a", true, "2030-01-01T00:00:00Z");

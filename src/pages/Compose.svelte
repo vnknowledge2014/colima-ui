@@ -241,21 +241,8 @@
       {/if}
 
       {#if detailTab === "diagnose"}
-        <!--
-          Diagnosis is free, and is not gated.
-
-          It was, behind a sidecar capability that nothing declares — so the tab
-          was locked for every user including paying ones, while the backend it
-          calls (`/api/compose/diagnose`) shipped and worked.
-
-          `docs/pricing-rationale.md` puts Free at "the whole app as it exists
-          today", and this exists today. It also costs nothing per use: Docker's
-          own validation plus a local Knowledge Bank lookup, no network. The AI
-          step inside the panel is the user's own key.
-
-          The Pro offer lives one level down, in `DiagnosePanel`: applying the
-          fix, not reading it.
-        -->
+        <!-- Compose diagnosis runs locally for free using Docker validation,
+             the local Knowledge Bank, and optional BYOK AI. -->
         <div style="max-height: 50vh; overflow: auto;">
           <DiagnosePanel configFiles={selectedProject.ConfigFiles} />
         </div>

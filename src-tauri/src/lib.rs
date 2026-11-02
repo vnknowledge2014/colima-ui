@@ -436,6 +436,7 @@ pub fn run() {
                 // from a window that is going away has nothing left to report to,
                 // and would otherwise keep writing a file nobody is waiting for.
                 streaming_cmd::kill_all_streams();
+                auth::cleanup_session_credentials();
             }
         });
 }

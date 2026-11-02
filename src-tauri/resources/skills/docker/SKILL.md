@@ -9,7 +9,7 @@ You manage Docker containers, images, and resources running inside the Colima VM
 
 ## Core Rule: App-First
 
-**ALWAYS use `[QUERY]` for read-only operations and `[EVENT_APPROVE]` for state changes.** Only use CLI via `cli-exec` for operations the App does not support (docker build, docker push, docker save/load).
+**ALWAYS use `[QUERY]` for read-only operations, `[EVENT_APPROVE]` for state changes, and `[NAVIGATE]` for rich built-in UI workflows.** Only use CLI via `cli-exec` for operations the App does not support (`docker build`, `docker push`).
 
 ## 1. Introspection (Read-Only — use [QUERY])
 
@@ -39,14 +39,22 @@ You manage Docker containers, images, and resources running inside the Colima VM
 - **Remove image**: `[EVENT_APPROVE: remove-image | {"id": "<image>"}]` ⚠️ DANGEROUS
 - **Prune images**: `[EVENT_APPROVE: prune-images]` ⚠️ DANGEROUS
 
-## 3. CLI Escape Hatch (Only for unsupported operations)
+## 3. Native UI Workflows (Transfers, Topology & Live Metrics)
 
-These operations are NOT available via the App API. Use `cli-exec`:
+Do NOT fall back to `cli-exec` for archive transfers or visual inspection — guide the user with `[NAVIGATE]`:
+- **Image TAR Save / Load**: Supported natively in `[NAVIGATE: images]` with non-blocking background transfer progress and cancellation.
+- **Container File Copy (`cp` to/from host)**: Supported natively in `[NAVIGATE: containers]` with background transfer progress and safe destination path confinement.
+- **Network & Volume Relationships**: Inspect container-network-volume connections visually via `[NAVIGATE: topology]`.
+- **Live Metrics, Activity & Alerts**: Monitor real-time CPU/memory/network charts, alert rules, and self-heal history via `[NAVIGATE: activity]`.
+
+## 4. CLI Escape Hatch (Only for unsupported operations)
+
+Only `docker build` and `docker push` require `cli-exec`. Pass concrete relative or absolute paths (never use `~` or unsplit whitespace in `args`):
 - **Build**: `[EVENT_APPROVE: cli-exec | {"command": "docker", "args": ["build", "-t", "myapp:latest", "."]}]`
+- **Build from path**: `[EVENT_APPROVE: cli-exec | {"command": "docker", "args": ["build", "-t", "myapp:latest", "/Users/alice/projects/myapp"]}]`
 - **Push**: `[EVENT_APPROVE: cli-exec | {"command": "docker", "args": ["push", "registry.io/myapp:v1"]}]`
-- **Save/Load**: `[EVENT_APPROVE: cli-exec | {"command": "docker", "args": ["save", "-o", "backup.tar", "myapp:latest"]}]`
 
-## 4. Common Troubleshooting
+## 5. Common Troubleshooting
 
 ### Container Exits Immediately (Crash Loop)
 1. `[QUERY: container-logs | {"id": "<container>", "lines": 50}]`
@@ -61,3 +69,9 @@ These operations are NOT available via the App API. Use `cli-exec`:
 ## Advanced References
 - `[READ_REFERENCE: skills/docker/references/rootless_security.md]`
 - `[READ_REFERENCE: skills/docker/references/network_isolation.md]`
+
+## Anti-Patterns
+
+- **Never invoke raw `docker ps`, `docker logs`, or `docker inspect` via `cli-exec`** — always use `[QUERY: list-containers]`, `[QUERY: container-logs | ...]`, and `[QUERY: inspect-container | ...]`.
+- **Never run `docker save`, `docker load`, or `docker cp` via `cli-exec`** — guide the user to `[NAVIGATE: images]` or `[NAVIGATE: containers]` for non-blocking background transfers.
+- **Never emit `system-prune` or `remove-container` without warning about data loss first**.

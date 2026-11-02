@@ -32,8 +32,10 @@ Each corresponds to one `TelemetryEvent` variant:
 | Activation | (none) | Did the user reach the first working container |
 | Feature used | feature id (enum, not free text) | Which features earn their keep |
 | Error occurred | `ErrorCode` (from the error contract), not the message | Which failures are common |
-| Pro gate reached | capability id | Which Pro features people want |
-| Checkout opened | (none) | Funnel measurement |
+| Pro gate reached | capability id | Legacy funnel definition *(never triggered in the free MIT edition — all features are unlocked)* |
+| Checkout opened | (none) | Legacy funnel definition *(never triggered in the free MIT edition — checkout/billing UI is removed)* |
+
+> **Open-source MIT edition note:** All features are unlocked out of the box and in-app billing/checkout surfaces have been removed, so `Pro gate reached` and `Checkout opened` are never emitted at runtime. Both variants remain in `TelemetryEvent` to preserve the closed-vocabulary enum contract tested in `src-tauri/src/telemetry/events.rs`.
 
 ## What is never collected
 
@@ -93,9 +95,9 @@ only a read" would be a word game. So:
 - **It can be switched off** — Settings → Notifications → "Show release notes and
   security advisories". Off means **no request is made**, not a request whose
   result is discarded.
-- **Filtering happens locally.** Which announcements apply to this install (paid
-  or free, app version) is decided after the file arrives. That question is never
-  asked over the network, so the answer never travels.
+- **Filtering happens locally.** Which announcements apply to this install (app
+  version and audience filter) is decided after the file arrives. That question is
+  never asked over the network, so the answer never travels.
 - **Content is treated as untrusted.** Text is rendered as plain text, never as
   HTML, and a link is only offered when its URL is `https:` on a short host
   allowlist (`src/lib/external-links.ts`).

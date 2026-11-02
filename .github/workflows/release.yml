@@ -168,7 +168,6 @@ jobs:
         uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          VITE_POLAR_CHECKOUT_URL: ${{ vars.VITE_POLAR_CHECKOUT_URL || secrets.VITE_POLAR_CHECKOUT_URL }}
           # Without these the bundles ship unsigned, `latest.json` carries no
           # valid signature, and every client's update check fails signature
           # verification — silently, on the user's side. The matching public key
@@ -209,8 +208,8 @@ jobs:
             - Go to **System Settings → Privacy & Security** and click **Open Anyway**.
             - Run `xattr -cr /Applications/ColimaUI.app` after dragging the app to Applications.
 
-            ### 🌐 Browser Mode
-            After launching the app, access the web UI at `http://127.0.0.1:11420`
+            ### 🔌 Local HTTP API & Headless CLI
+            While running, ColimaUI exposes a Bearer-protected local REST & SSE API on `http://127.0.0.1:11420` (session token stored with `0600` permissions at `~/.colima-ui/api_token` for `cui` CLI and local AI agents).
 
             ---
             *Full changelog: https://github.com/${{ github.repository }}/releases/tag/${{ needs.prepare.outputs.tag }}*

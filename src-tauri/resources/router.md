@@ -5,11 +5,11 @@ The following skills are available to you. Each skill documents App Event Bus op
 ## Available Skills
 
 1. **ColimaUI App Event Catalog (`skills/colima_ui/SKILL.md`)**
-   - **READ THIS FIRST.** Complete catalog of 92 events across 10 domains (Instances, Containers, Images, Volumes, Networks, Compose, K8s, Kind, Lima, Models, System).
-   - Includes payload schemas, category (SAFE/NORMAL/DANGEROUS), and usage examples for every event.
+   - **READ THIS FIRST.** Complete catalog of 92 events across 10 domains (Instances, Containers, Images, Volumes, Networks, Compose, K8s, Kind, Lima, Models, System) plus all 16 navigable UI tabs.
+   - Includes payload schemas, category (SAFE/NORMAL/DANGEROUS), Consultant Mode `[ASK_CHOICE]` / `[SUGGEST]` patterns, and usage examples for every event.
 
 2. **Colima VM Management (`skills/colima/SKILL.md`)**
-   - App-First instance lifecycle via Event Bus: create, start, stop, restart, delete.
+   - App-First instance lifecycle via Event Bus: create, start, stop, restart, delete, plus Consultant Mode hardware/mount/VM-type selection and `colima.yaml` config editing via `[NAVIGATE: settings]`.
    - References available:
      - `skills/colima/references/networking_and_dns.md`: SSHFS, VZ, DNS resolution.
      - `skills/colima/references/mount_volumes.md`: Mounting host directories.
@@ -18,14 +18,15 @@ The following skills are available to you. Each skill documents App Event Bus op
 
 3. **Docker Container & Image Management (`skills/docker/SKILL.md`)**
    - App-First container introspection and lifecycle via `[QUERY]` and `[EVENT_APPROVE]`.
-   - CLI escape only for: docker build, docker push, docker save/load.
+   - Native UI support for Image TAR Save/Load (`[NAVIGATE: images]`), Container File Copy (`[NAVIGATE: containers]`), visual network/volume graph (`[NAVIGATE: topology]`), and live metrics/alerts (`[NAVIGATE: activity]`).
+   - CLI escape only for: `docker build`, `docker push`.
    - References available:
      - `skills/docker/references/rootless_security.md`: Rootless mode, container breakout security.
      - `skills/docker/references/network_isolation.md`: Isolated bridge networks, iptables.
 
 4. **Docker Compose Management (`skills/docker_compose/SKILL.md`)**
-   - App-First Compose project lifecycle via Event Bus.
-   - CLI escape only for: compose up --build, compose config.
+   - App-First Compose project lifecycle via Event Bus, plus built-in **Compose Diagnose** (schema + Knowledge Bank validation) and **AI Autofix** (diff preview, apply, and undo) in `[NAVIGATE: compose]`.
+   - CLI escape only for: `compose up --build`, `compose config`.
    - References available:
      - `skills/docker_compose/references/secrets_management.md`: Managing secrets securely in compose.
 
@@ -37,7 +38,7 @@ The following skills are available to you. Each skill documents App Event Bus op
      - `skills/kubernetes/references/rbac_security.md`: Role-Based Access Control and Service Accounts.
 
 6. **Lima VM Management (`skills/limavm/SKILL.md`)**
-   - App-First Lima VM lifecycle and shell access via Event Bus.
+   - App-First Lima VM lifecycle and one-shot shell commands (`lima-shell`) via Event Bus; interactive shell via `[NAVIGATE: terminal]`.
    - References available:
      - `skills/limavm/references/vm_security.md`: Host-guest isolation.
 
@@ -45,15 +46,16 @@ The following skills are available to you. Each skill documents App Event Bus op
    - QUERY-first troubleshooting: try lightweight `[QUERY]` calls before resorting to `[DIAGNOSE]`.
    - References available:
      - `skills/diagnostics/references/read_logs.md`: Colima and macOS log locations.
+     - `skills/diagnostics/references/process_locks.md`: Stale `ha.sock` locks and zombie QEMU/VZ hypervisor processes.
 
-8. **Security Pipeline (`skills/security/SKILL.md`)**
-   - 4-stage security audit: Threat Model → Vuln Scan → Triage → Patch Gen.
-   - All stages are read-only — patches are inert diffs for human review.
+8. **Security & Source Audit (`skills/security/SKILL.md`)**
+   - **In-App Container & Runtime Security (`[NAVIGATE: security]`)**: Local Trivy image vulnerability scanning with provenance-backed security score, SBOM export, configuration rule-pack checks, curated base-image alternatives, Falco runtime event stream, and container Detonation sandbox.
+   - **4-Stage Source Security Pipeline**: Threat Model (`[SECURITY_THREAT_MODEL]`) → Vuln Scan (`[SECURITY_VULN_SCAN]`) → Triage (`[SECURITY_TRIAGE]`) → Patch Gen (`[SECURITY_PATCH_GEN]`). Read-only audit — candidate patches are inert diffs for human review.
 
 ## Routing Logic
 
 When the user asks a question:
-1. Check if the action maps to an event in the **App Event Catalog** (skill #1). If yes, use `[QUERY]` or `[EVENT_APPROVE]`.
+1. Check if the action maps to an event in the **App Event Catalog** (skill #1) or a built-in UI workflow (`[NAVIGATE: ...]`). If yes, use `[QUERY]`, `[EVENT_APPROVE]`, or `[NAVIGATE]`.
 2. If domain-specific knowledge is needed, load the relevant **SKILL.md** via `[READ_REFERENCE]`.
-3. If deep context is needed, load a **references/** file.
-4. Only fall back to CLI (`cli-exec`) if no App event exists for the operation.
+3. If deep context is needed (e.g., stale socket/process locks, rootless security, K3s quirks), load a **references/** file via `[READ_REFERENCE]`.
+4. Only fall back to CLI (`cli-exec`) if no App event or native UI feature exists for the operation.
