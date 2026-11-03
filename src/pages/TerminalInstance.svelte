@@ -16,12 +16,12 @@
     type TerminalHandle,
   } from "../lib/terminal-transport";
 
-  let { sessionId, kind, active, termTheme } = $props<{
+  let { sessionId, kind, active, termTheme }: {
     sessionId: string;
     kind: SessionKind;
     active: boolean;
     termTheme: NonNullable<ConstructorParameters<typeof XTerm>[0]>["theme"];
-  }>();
+  } = $props();
 
   let termRef = $state<HTMLDivElement | null>(null);
   let xterm: XTerm | null = null;

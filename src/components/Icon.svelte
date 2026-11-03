@@ -1,13 +1,13 @@
 <script lang="ts">
   import * as svgs from "./Icons.svelte";
   
-  let { name, size = 14, color = "currentColor", style = "", class: className = "" } = $props<{
+  let { name, size = 14, color = "currentColor", style = "", class: className = "" }: {
     name: string;
     size?: number;
     color?: string;
     style?: string;
     class?: string;
-  }>();
+  } = $props();
 </script>
 
 <span class="icon-wrapper {className}" style="display: inline-flex; align-items: center; justify-content: center; width: {size}px; height: {size}px; color: {color}; {style}">

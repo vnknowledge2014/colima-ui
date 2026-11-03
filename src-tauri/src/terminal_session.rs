@@ -22,7 +22,9 @@ use std::time::{Duration, Instant};
 
 use portable_pty::{CommandBuilder, NativePtySystem, PtyPair, PtySize, PtySystem};
 
-use crate::validation::{ensure_valid_profile, is_valid_k8s_name};
+use crate::validation::{
+    ensure_valid_profile, is_valid_container_id, is_valid_k8s_name, is_valid_resource_name,
+};
 
 /// Maximum buffered output per session (1 MB). A shell can produce output far
 /// faster than the UI drains it, so the buffer is bounded and drops from the
@@ -67,8 +69,8 @@ pub struct TerminalSession {
 
 /// What a session is attached to.
 ///
-/// All three spawn onto the same pty and share transport, resize, reaping and
-/// the session cap; only the argv differs. Adding a fourth target should mean
+/// All four spawn onto the same pty and share transport, resize, reaping and
+/// the session cap; only the argv differs. Adding another target should mean
 /// adding a variant here, not a parallel code path.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
@@ -80,6 +82,11 @@ pub enum SessionKind {
         pod: String,
         #[serde(default)]
         container: String,
+    },
+    DockerExec {
+        container: String,
+        #[serde(default)]
+        label: String,
     },
 }
 
@@ -112,7 +119,18 @@ fn history_preamble(name: &str) -> String {
 
 /// Build the command for a session kind. Pure, so the injection guards below
 /// are testable without opening a pty.
+#[cfg(test)]
 pub fn build_spawn(kind: &SessionKind, home: &str) -> Result<Spawn, String> {
+    build_spawn_with_dirs(kind, home, &format!("{home}/.colima/_lima"))
+}
+
+/// Build the command for a session kind with an explicit Colima Lima store
+/// directory (e.g. XDG `~/.config/colima/_lima`, `COLIMA_HOME/_lima`, or `LIMA_HOME`).
+pub fn build_spawn_with_dirs(
+    kind: &SessionKind,
+    home: &str,
+    colima_lima_dir: &str,
+) -> Result<Spawn, String> {
     match kind {
         SessionKind::Colima { profile } | SessionKind::Lima { instance: profile } => {
             ensure_valid_profile(profile)?;
@@ -129,8 +147,9 @@ pub fn build_spawn(kind: &SessionKind, home: &str) -> Result<Spawn, String> {
                     } else {
                         format!("colima-{name}")
                     };
+                    let base = colima_lima_dir.trim_end_matches('/');
                     (
-                        format!("{home}/.colima/_lima/{lima_name}/ssh.config"),
+                        format!("{base}/{lima_name}/ssh.config"),
                         format!("lima-{lima_name}"),
                     )
                 }
@@ -197,6 +216,31 @@ pub fn build_spawn(kind: &SessionKind, home: &str) -> Result<Spawn, String> {
                 args,
             })
         }
+
+        SessionKind::DockerExec { container, .. } => {
+            // Positional container argument in `docker exec -it <container> ...`:
+            // leading `-` would be interpreted as a docker flag (`-e`, `--privileged`),
+            // and path separators / `..` / whitespace / shell metacharacters are rejected.
+            if container.is_empty()
+                || container.starts_with('-')
+                || !is_valid_container_id(container)
+                || !is_valid_resource_name(container)
+            {
+                return Err(format!("Invalid container identifier: {container}"));
+            }
+
+            Ok(Spawn {
+                program: "docker".to_string(),
+                args: vec![
+                    "exec".into(),
+                    "-it".into(),
+                    container.clone(),
+                    "sh".into(),
+                    "-c".into(),
+                    "command -v bash >/dev/null 2>&1 && exec bash -l || exec sh".into(),
+                ],
+            })
+        }
     }
 }
 
@@ -223,9 +267,10 @@ impl SessionManager {
         on_output: Box<dyn Fn(String) + Send + 'static>,
     ) -> Result<(), String> {
         let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
-        // Validation lives in `build_spawn`, so it cannot be skipped by a caller
-        // that builds a command some other way.
-        let spawn = build_spawn(kind, &home)?;
+        let colima_lima_dir = crate::path_util::lima_home().to_string_lossy().into_owned();
+        // Validation lives in `build_spawn_with_dirs`, so it cannot be skipped by a
+        // caller that builds a command some other way.
+        let spawn = build_spawn_with_dirs(kind, &home, &colima_lima_dir)?;
 
         // Idempotent: a remount must not leave the previous pty orphaned.
         if self.sessions.contains_key(session_id) {
@@ -255,9 +300,20 @@ impl SessionManager {
 
         // Built as argv, never as a shell string — nothing here is re-parsed by
         // a shell, so there is no quoting to get wrong.
-        let mut cmd = CommandBuilder::new(&spawn.program);
+        let program = crate::path_util::resolve_binary(&spawn.program);
+        let mut cmd = CommandBuilder::new(&program);
         cmd.args(&spawn.args);
         cmd.env("TERM", "xterm-256color");
+        if matches!(kind, SessionKind::DockerExec { .. })
+            && std::env::var("DOCKER_HOST")
+                .ok()
+                .filter(|s| !s.trim().is_empty())
+                .is_none()
+        {
+            if let Some((docker_host, _)) = crate::path_util::detect_docker_host() {
+                cmd.env("DOCKER_HOST", docker_host);
+            }
+        }
 
         let PtyPair { master, slave } = pair;
 
@@ -760,6 +816,90 @@ mod tests {
         assert!(
             carry.is_empty(),
             "invalid bytes must not be pushed back, or the stream stalls"
+        );
+    }
+
+    #[test]
+    fn docker_exec_builds_argv_not_a_shell_string() {
+        let spawn = build_spawn(
+            &SessionKind::DockerExec {
+                container: "a1b2c3d4e5f6".into(),
+                label: "my-redis".into(),
+            },
+            HOME,
+        )
+        .unwrap();
+
+        assert_eq!(spawn.program, "docker");
+        assert_eq!(
+            spawn.args,
+            vec![
+                "exec",
+                "-it",
+                "a1b2c3d4e5f6",
+                "sh",
+                "-c",
+                "command -v bash >/dev/null 2>&1 && exec bash -l || exec sh",
+            ]
+        );
+    }
+
+    #[test]
+    fn rejects_hostile_docker_container_names() {
+        for bad in [
+            "",
+            "-it",
+            "--privileged",
+            "; rm -rf /",
+            "my container",
+            "../etc/passwd",
+        ] {
+            let kind = SessionKind::DockerExec {
+                container: bad.to_string(),
+                label: String::new(),
+            };
+            let err = build_spawn(&kind, HOME).unwrap_err();
+            assert!(
+                err.contains("Invalid container identifier"),
+                "expected {bad:?} to be rejected, got: {err}"
+            );
+        }
+    }
+
+    #[test]
+    fn colima_spawn_honors_custom_colima_lima_dir_for_xdg() {
+        let xdg_lima = "/home/tester/.config/colima/_lima";
+
+        let default_spawn = build_spawn_with_dirs(
+            &SessionKind::Colima {
+                profile: "default".into(),
+            },
+            HOME,
+            xdg_lima,
+        )
+        .unwrap();
+        assert!(
+            default_spawn
+                .args
+                .contains(&"/home/tester/.config/colima/_lima/colima/ssh.config".to_string()),
+            "expected XDG ssh.config for default profile, got: {:?}",
+            default_spawn.args
+        );
+
+        let named_spawn = build_spawn_with_dirs(
+            &SessionKind::Colima {
+                profile: "dev".into(),
+            },
+            HOME,
+            xdg_lima,
+        )
+        .unwrap();
+        assert!(
+            named_spawn
+                .args
+                .contains(&"/home/tester/.config/colima/_lima/colima-dev/ssh.config".to_string()),
+            "expected XDG ssh.config for named profile, got: {:?}",
+            named_spawn.args
         );
     }
 }

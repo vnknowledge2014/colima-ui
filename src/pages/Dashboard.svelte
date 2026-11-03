@@ -4,11 +4,11 @@
   import { dashboardState, dockerState, resourceState } from "../store.svelte";
   import { t } from "../lib/i18n.svelte";
 
-  let { systemInfo, loading, onNavigate } = $props<{
+  let { systemInfo, loading, onNavigate }: {
     systemInfo: SystemInfo | null;
     loading: boolean;
     onNavigate: (page: string) => void;
-  }>();
+  } = $props();
 
   const STALE_MS = 30_000;
 

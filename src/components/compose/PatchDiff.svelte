@@ -16,7 +16,7 @@
   import Icon from "../Icon.svelte";
   import UnifiedDiffView from "../UnifiedDiffView.svelte";
 
-  let { composeFile } = $props<{ composeFile: string }>();
+  let { composeFile }: { composeFile: string } = $props();
 
   let proposing = $state(false);
   let applying = $state(false);

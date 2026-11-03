@@ -25,7 +25,7 @@
 
   let {
     children,
-  } = $props<{
+  }: {
     id?: string;
     capability?: string;
     feature?: string;
@@ -33,7 +33,7 @@
     variant?: "affordance" | "preview";
     preview?: Snippet;
     children: Snippet;
-  }>();
+  } = $props();
 </script>
 
 {@render children()}

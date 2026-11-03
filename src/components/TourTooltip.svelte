@@ -9,7 +9,7 @@
     onComplete,
     handlePrev,
     handleNext
-  } = $props<{
+  }: {
     step: { title: string; body: string };
     currentStep: number;
     totalSteps: number;
@@ -17,7 +17,7 @@
     onComplete: () => void;
     handlePrev: () => void;
     handleNext: () => void;
-  }>();
+  } = $props();
 </script>
 
 <div

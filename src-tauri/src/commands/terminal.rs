@@ -37,6 +37,14 @@ fn record_session_opened(kind: &SessionKind) {
                 format!("{namespace}/{pod}/{container}")
             },
         ),
+        SessionKind::DockerExec { container, label } => (
+            "dockerExec",
+            if label.is_empty() {
+                container.clone()
+            } else {
+                label.clone()
+            },
+        ),
     };
 
     // Best-effort: failing to write history must never stop a shell opening.
