@@ -8,7 +8,7 @@ ColimaUI uses a **dual-mode, event-driven architecture** that works as both a na
 graph TD
     subgraph Frontend["Frontend — Svelte 5 + TypeScript"]
         APP["App.svelte"]
-        PAGES["Pages (19)"]
+        PAGES["Pages (20)"]
         STORE["Rune Stores"]
         API["api.ts (dual-mode)"]
     end

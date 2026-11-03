@@ -74,7 +74,7 @@ Common event topics: `docker-state`, `instances`, `docker-event`, `metrics.sampl
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `GET` | `/api/instances` | List all Colima instances (`~/.colima` fast YAML reader) |
+| `GET` | `/api/instances` | List all Colima instances (fast XDG / `~/.colima` YAML reader) |
 | `POST` | `/api/instances/start` | Start or create instance (JSON: `StartConfig`) |
 | `POST` | `/api/instances/stop` | Stop instance (`?profile=default&force=false`) |
 | `POST` | `/api/instances/delete` | Delete instance (`?profile=default&force=false`) |

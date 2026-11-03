@@ -1,14 +1,24 @@
 name: Release
 
-# Triggered by version tags. main is the only long-lived branch, so every
-# channel is cut from it.
-# Flow: feature branch → PR → main → tag v* → Release
+# Automatically cuts a SemVer tag and publishes a GitHub Release whenever a push
+# to `main` passes the `CI` workflow (`workflow_run`), while also supporting
+# explicit version tags (`v*`, `v*-rc.*`, `v*-beta.*`) and manual `workflow_dispatch`.
 on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+    branches: [main]
   push:
     tags:
       - 'v*'           # Production release (vX.Y.Z, from main)
       - 'v*-rc.*'      # Release candidate (from main)
       - 'v*-beta.*'    # Beta release (from main)
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Optional explicit version (e.g. 0.3.0 or 0.3.0-rc.1). Leave empty to auto-bump patch on main.'
+        required: false
+        type: string
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
@@ -16,84 +26,329 @@ env:
 permissions:
   contents: write
 
+concurrency:
+  group: release-pipeline
+  # Never cancel an active release build/upload mid-flight so draft releases
+  # are never left half-populated on GitHub.
+  cancel-in-progress: false
+
 jobs:
-  # ===== Auto-detect version from tag =====
+  # ===== Resolve version, tag commit, and create a single Draft Release =====
   prepare:
     name: Prepare Release
+    if: >-
+      github.event_name != 'workflow_run' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push' &&
+       github.event.workflow_run.head_branch == 'main')
     runs-on: ubuntu-latest
     outputs:
-      version: ${{ steps.version.outputs.version }}
-      tag: ${{ steps.version.outputs.tag }}
-      prev_tag: ${{ steps.version.outputs.prev_tag }}
-      prerelease: ${{ steps.version.outputs.prerelease }}
-      channel: ${{ steps.version.outputs.channel }}
+      should_release: ${{ steps.plan.outputs.should_release }}
+      version: ${{ steps.plan.outputs.version }}
+      tag: ${{ steps.plan.outputs.tag }}
+      prerelease: ${{ steps.plan.outputs.prerelease }}
+      channel: ${{ steps.plan.outputs.channel }}
+      release_id: ${{ steps.draft.outputs.release_id }}
     steps:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
-      - name: Extract version and channel
-        id: version
+      - name: Fetch remote main and tags
         run: |
-          TAG="${GITHUB_REF#refs/tags/}"
-          VERSION="${TAG#v}"
-          PREV_TAG=$(git describe --tags --abbrev=0 "${TAG}^" 2>/dev/null || echo "")
-          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "prev_tag=$PREV_TAG" >> "$GITHUB_OUTPUT"
+          git fetch --force --tags origin
+          git fetch origin main:refs/remotes/origin/main
+
+      - name: Resolve target commit, verify CI, and tag version
+        id: plan
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          EVENT_NAME: ${{ github.event_name }}
+          WORKFLOW_RUN_SHA: ${{ github.event.workflow_run.head_sha }}
+          DISPATCH_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+
+          wait_for_ci_success() {
+            local sha="$1"
+            local attempt=0
+            local max_attempts=40 # up to 10 minutes (40 * 15s)
+            while (( attempt < max_attempts )); do
+              local state
+              state=$(gh api "repos/${GITHUB_REPOSITORY}/commits/${sha}/check-runs" \
+                --jq '[.check_runs[] | select(.name == "ci")][0] | "\(.status // "none"):\(.conclusion // "none")"' 2>/dev/null || echo "none:none")
+              local status="${state%%:*}"
+              local conclusion="${state#*:}"
+
+              if [[ "$status" == "completed" && "$conclusion" == "success" ]]; then
+                echo "✅ Commit $sha passed 'ci' check-run"
+                return 0
+              fi
+
+              if [[ "$status" == "completed" && "$conclusion" != "success" && "$conclusion" != "none" ]]; then
+                echo "❌ Commit $sha failed 'ci' check-run (conclusion: $conclusion)"
+                return 1
+              fi
+
+              attempt=$((attempt + 1))
+              echo "⏳ Waiting for 'ci' check-run on $sha (current: $state, attempt $attempt/$max_attempts)..."
+              sleep 15
+            done
+
+            echo "❌ Timed out waiting for passing 'ci' check-run on $sha"
+            return 1
+          }
+
+          VERSION=""
+          TAG=""
+
+          if [[ "$EVENT_NAME" == "workflow_run" ]]; then
+            TARGET_SHA="$WORKFLOW_RUN_SHA"
+            if ! git merge-base --is-ancestor "$TARGET_SHA" origin/main; then
+              echo "❌ Workflow run SHA $TARGET_SHA is not on origin/main"
+              exit 1
+            fi
+
+            MAIN_TIP=$(git rev-parse origin/main)
+            if [[ "$TARGET_SHA" != "$MAIN_TIP" ]]; then
+              TIP_CONCLUSION=$(gh api "repos/${GITHUB_REPOSITORY}/commits/${MAIN_TIP}/check-runs" \
+                --jq '[.check_runs[] | select(.name == "ci")][0].conclusion // ""' 2>/dev/null || echo "")
+              if [[ "$TIP_CONCLUSION" == "success" ]]; then
+                echo "⏭️ Newer main commit $MAIN_TIP already passed CI; skipping intermediate release for $TARGET_SHA"
+                echo "should_release=false" >> "$GITHUB_OUTPUT"
+                exit 0
+              fi
+            fi
+
+            EXISTING_TAG=$(git tag --points-at "$TARGET_SHA" 'v*' | sort -V | tail -n 1 || echo "")
+            if [[ -n "$EXISTING_TAG" ]]; then
+              PUBLISHED_ID=$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${EXISTING_TAG}" \
+                --jq 'select(.draft == false) | .id' 2>/dev/null || echo "")
+              if [[ -n "$PUBLISHED_ID" ]]; then
+                echo "⏭️ Commit $TARGET_SHA is already published under tag $EXISTING_TAG; skipping."
+                echo "should_release=false" >> "$GITHUB_OUTPUT"
+                exit 0
+              fi
+              TAG="$EXISTING_TAG"
+              VERSION="${EXISTING_TAG#v}"
+            fi
+          elif [[ "$EVENT_NAME" == "push" ]]; then
+            TAG="${GITHUB_REF#refs/tags/}"
+            VERSION="${TAG#v}"
+            TARGET_SHA=$(git rev-list -n 1 "$TAG")
+            if ! git merge-base --is-ancestor "$TARGET_SHA" origin/main; then
+              echo "❌ Release tag $TAG ($TARGET_SHA) must point at a commit on main"
+              exit 1
+            fi
+            wait_for_ci_success "$TARGET_SHA"
+          elif [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
+            TARGET_SHA=$(git rev-parse origin/main)
+            wait_for_ci_success "$TARGET_SHA"
+            if [[ -n "${DISPATCH_VERSION}" ]]; then
+              VERSION="${DISPATCH_VERSION#v}"
+              TAG="v${VERSION}"
+            fi
+          else
+            echo "❌ Unsupported event: $EVENT_NAME"
+            exit 1
+          fi
+
+          # Auto-compute next SemVer when triggered by workflow_run or empty workflow_dispatch
+          if [[ -z "$VERSION" ]]; then
+            VERSION=$(TARGET_SHA="$TARGET_SHA" node -e '
+              const { execFileSync } = require("node:child_process");
+              const sha = process.env.TARGET_SHA;
+              const pkg = JSON.parse(
+                execFileSync("git", ["show", `${sha}:package.json`], { encoding: "utf8" })
+              );
+              const rawPkg = String(pkg.version || "0.1.0").split("-")[0];
+              const parseVer = (v) => v.split(".").map((n) => Number.parseInt(n, 10) || 0);
+              const cmpVer = (a, b) => {
+                for (let i = 0; i < 3; i++) {
+                  if (a[i] !== b[i]) return a[i] - b[i];
+                }
+                return 0;
+              };
+              const allTags = new Set(
+                execFileSync("git", ["tag", "-l", "v*"], { encoding: "utf8" })
+                  .split("\n")
+                  .map((s) => s.trim())
+                  .filter(Boolean)
+              );
+              let highest = [0, 0, 0];
+              for (const t of allTags) {
+                const m = /^v(\d+)\.(\d+)\.(\d+)$/.exec(t);
+                if (!m) continue;
+                const ver = [Number(m[1]), Number(m[2]), Number(m[3])];
+                if (cmpVer(ver, highest) > 0) highest = ver;
+              }
+              const pkgTuple = parseVer(rawPkg);
+              const next = cmpVer(pkgTuple, highest) >= 0 ? [...pkgTuple] : [...highest];
+              while (allTags.has(`v${next.join(".")}`)) {
+                next[2] += 1;
+              }
+              process.stdout.write(next.join("."));
+            ')
+            TAG="v${VERSION}"
+          fi
+
+          # Validate SemVer format
+          if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.]+)?$ ]]; then
+            echo "❌ Invalid semver: $VERSION (expected X.Y.Z, X.Y.Z-beta.N, or X.Y.Z-rc.N)"
+            exit 1
+          fi
 
           # Determine release channel
           if [[ "$VERSION" == *"-beta."* ]]; then
-            echo "prerelease=true" >> "$GITHUB_OUTPUT"
-            echo "channel=beta" >> "$GITHUB_OUTPUT"
+            PRERELEASE="true"
+            CHANNEL="beta"
             echo "🧪 Beta release: $VERSION"
           elif [[ "$VERSION" == *"-rc."* ]]; then
-            echo "prerelease=true" >> "$GITHUB_OUTPUT"
-            echo "channel=rc" >> "$GITHUB_OUTPUT"
+            PRERELEASE="true"
+            CHANNEL="rc"
             echo "🔬 Release candidate: $VERSION"
           else
-            echo "prerelease=false" >> "$GITHUB_OUTPUT"
-            echo "channel=stable" >> "$GITHUB_OUTPUT"
+            PRERELEASE="false"
+            CHANNEL="stable"
             echo "🚀 Production release: $VERSION"
           fi
 
-      - name: Validate semver
-        run: |
-          VERSION="${{ steps.version.outputs.version }}"
-          if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.]+)?$ ]]; then
-            echo "❌ Invalid semver: $VERSION"
-            echo "   Expected format: X.Y.Z, X.Y.Z-beta.N, or X.Y.Z-rc.N"
-            exit 1
+          # Ensure tag exists on origin pointing to TARGET_SHA
+          if ! git ls-remote --exit-code --tags origin "refs/tags/${TAG}" >/dev/null 2>&1; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git tag -f -a "$TAG" "$TARGET_SHA" -m "Release ${TAG}"
+            git push origin "refs/tags/${TAG}"
+            echo "🏷️ Created and pushed tag ${TAG} -> ${TARGET_SHA}"
           fi
-          echo "✅ Valid semver: $VERSION"
 
-      - name: Verify tag branch and CI status
+          {
+            echo "should_release=true"
+            echo "version=$VERSION"
+            echo "tag=$TAG"
+            echo "prerelease=$PRERELEASE"
+            echo "channel=$CHANNEL"
+            echo "target_sha=$TARGET_SHA"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Create single Draft GitHub Release
+        id: draft
+        if: steps.plan.outputs.should_release == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.plan.outputs.version }}
+          TAG: ${{ steps.plan.outputs.tag }}
+          CHANNEL: ${{ steps.plan.outputs.channel }}
+          PRERELEASE: ${{ steps.plan.outputs.prerelease }}
+          TARGET_SHA: ${{ steps.plan.outputs.target_sha }}
         run: |
-          CHANNEL="${{ steps.version.outputs.channel }}"
-          git fetch origin main
+          set -euo pipefail
 
-          # main is the only long-lived branch: stable, rc and beta tags alike
-          # must point at a commit that has landed there.
-          if git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
-            echo "✅ $CHANNEL tag is on main"
+          # If a published release already exists for this tag, reuse it
+          EXISTING_PUBLISHED_ID=$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${TAG}" \
+            --jq 'select(.draft == false) | .id' 2>/dev/null || echo "")
+          if [[ -n "$EXISTING_PUBLISHED_ID" ]]; then
+            echo "♻️ Reusing existing published release ID $EXISTING_PUBLISHED_ID for $TAG"
+            echo "release_id=$EXISTING_PUBLISHED_ID" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Remove any stale draft releases for this tag so parallel uploads never split across drafts
+          STALE_DRAFTS=$(gh api "repos/${GITHUB_REPOSITORY}/releases?per_page=30" \
+            --jq ".[] | select(.draft == true and .tag_name == \"${TAG}\") | .id" 2>/dev/null || echo "")
+          for draft_id in $STALE_DRAFTS; do
+            echo "🧹 Removing stale draft release $draft_id for $TAG"
+            gh api -X DELETE "repos/${GITHUB_REPOSITORY}/releases/${draft_id}" || true
+          done
+
+          PREV_PUBLISHED_TAG=$(gh api "repos/${GITHUB_REPOSITORY}/releases/latest" \
+            --jq '.tag_name' 2>/dev/null || echo "")
+
+          if [[ -n "$PREV_PUBLISHED_TAG" && "$PREV_PUBLISHED_TAG" != "$TAG" ]]; then
+            GENERATED_NOTES=$(gh api -X POST "repos/${GITHUB_REPOSITORY}/releases/generate-notes" \
+              -f tag_name="$TAG" \
+              -f target_commitish="$TARGET_SHA" \
+              -f previous_tag_name="$PREV_PUBLISHED_TAG" \
+              --jq '.body' 2>/dev/null || echo "")
           else
-            echo "❌ Release tags ($CHANNEL) must point at a commit on main"
-            exit 1
+            GENERATED_NOTES=$(gh api -X POST "repos/${GITHUB_REPOSITORY}/releases/generate-notes" \
+              -f tag_name="$TAG" \
+              -f target_commitish="$TARGET_SHA" \
+              --jq '.body' 2>/dev/null || echo "")
           fi
 
-          CI_CONCLUSION=$(gh api "repos/${{ github.repository }}/commits/${GITHUB_SHA}/check-runs" --jq '.check_runs[] | select(.name == "ci") | .conclusion' | head -n 1 || echo "")
-          if [[ "$CI_CONCLUSION" != "success" ]]; then
-            echo "❌ Commit $GITHUB_SHA does not have a passing 'ci' check-run (found: '${CI_CONCLUSION:-none}')"
-            exit 1
-          fi
-          echo "✅ Commit $GITHUB_SHA passed CI"
+          GENERATED_NOTES="$GENERATED_NOTES" node -e '
+            const fs = require("node:fs");
+            const version = process.env.VERSION;
+            const tag = process.env.TAG;
+            const channel = process.env.CHANNEL;
+            const prerelease = process.env.PRERELEASE === "true";
+            const repo = process.env.GITHUB_REPOSITORY;
+            const generated = (process.env.GENERATED_NOTES || "").trim();
+
+            const channelLabel =
+              channel === "stable"
+                ? "🚀 Stable"
+                : channel === "rc"
+                  ? "🔬 Release Candidate"
+                  : "🧪 Beta";
+
+            const lines = [
+              `## ColimaUI v${version}`,
+              "",
+              `**Channel:** ${channelLabel}`,
+              "",
+              "### 📦 Installation",
+              "",
+              "| Platform | File | Notes |",
+              "|----------|------|-------|",
+              "| **macOS Apple Silicon** | `ColimaUI_*_aarch64.dmg` | M1 / M2 / M3 / M4 |",
+              "| **macOS Intel** | `ColimaUI_*_x64.dmg` | Intel Macs |",
+              "| **Linux** | `ColimaUI_*_amd64.deb` | Ubuntu / Debian |",
+              "| **Linux** | `ColimaUI_*_amd64.AppImage` | Universal Linux |",
+              "",
+              "### 🍎 macOS Gatekeeper",
+              "Pre-built DMGs are unsigned unless Apple Developer secrets are configured in the repository. If macOS reports *\"ColimaUI.app is damaged and can\x27t be opened\"*, either:",
+              "- Go to **System Settings → Privacy & Security** and click **Open Anyway**.",
+              "- Run `xattr -cr /Applications/ColimaUI.app` after dragging the app to Applications.",
+              "",
+              "### 🔌 Local HTTP API & Headless CLI",
+              "While running, ColimaUI exposes a Bearer-protected local REST & SSE API on `http://127.0.0.1:11420` (session token stored with `0600` permissions at `~/.colima-ui/api_token` for `cui` CLI and local AI agents).",
+            ];
+
+            if (generated) {
+              lines.push("", "---", "", generated);
+            } else {
+              lines.push(
+                "",
+                "---",
+                `*Release tag: https://github.com/${repo}/releases/tag/${tag}*`
+              );
+            }
+
+            const payload = {
+              tag_name: tag,
+              target_commitish: process.env.TARGET_SHA,
+              name: `ColimaUI v${version}`,
+              body: lines.join("\n"),
+              draft: true,
+              prerelease,
+            };
+
+            fs.writeFileSync("/tmp/release-payload.json", JSON.stringify(payload, null, 2));
+          '
+
+          RELEASE_ID=$(gh api -X POST "repos/${GITHUB_REPOSITORY}/releases" \
+            --input /tmp/release-payload.json \
+            --jq '.id')
+          echo "📝 Created Draft Release ID $RELEASE_ID for $TAG"
+          echo "release_id=$RELEASE_ID" >> "$GITHUB_OUTPUT"
 
   # ===== Build for all platforms =====
   build:
     name: Build (${{ matrix.name }})
     needs: prepare
+    if: needs.prepare.outputs.should_release == 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -113,6 +368,8 @@ jobs:
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.prepare.outputs.tag }}
 
       - uses: actions/setup-node@v7
         with:
@@ -134,119 +391,142 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
 
-      - name: Sync version to package.json
+      - name: Configure optional signing credentials
+        id: signing
+        env:
+          SIGNING_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          SIGNING_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          CERT: ${{ secrets.APPLE_CERTIFICATE }}
+          CERT_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          SIGNING_ID: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_USER: ${{ secrets.APPLE_ID }}
+          APPLE_PASS: ${{ secrets.APPLE_PASSWORD }}
+          TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
-          VERSION="${{ needs.prepare.outputs.version }}"
-          node -e "
-            const fs = require('fs');
-            const pkg = JSON.parse(fs.readFileSync('package.json'));
-            pkg.version = '$VERSION';
-            fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');
-          "
+          if [[ -n "${SIGNING_KEY}" ]]; then
+            echo "has_signing_key=true" >> "$GITHUB_OUTPUT"
+            {
+              echo "TAURI_SIGNING_PRIVATE_KEY<<__EOF_TAURI_SIGNING_KEY__"
+              echo "${SIGNING_KEY}"
+              echo "__EOF_TAURI_SIGNING_KEY__"
+            } >> "$GITHUB_ENV"
+            if [[ -n "${SIGNING_KEY_PASSWORD}" ]]; then
+              echo "TAURI_SIGNING_PRIVATE_KEY_PASSWORD=${SIGNING_KEY_PASSWORD}" >> "$GITHUB_ENV"
+            fi
+            echo "🔐 TAURI_SIGNING_PRIVATE_KEY detected — signed updater artifacts enabled"
+          else
+            echo "has_signing_key=false" >> "$GITHUB_OUTPUT"
+            echo "ℹ️ TAURI_SIGNING_PRIVATE_KEY not configured — disabling createUpdaterArtifacts for unsigned installer build"
+          fi
+
+          if [[ -n "${CERT}" ]]; then
+            {
+              echo "APPLE_CERTIFICATE<<__EOF_APPLE_CERT__"
+              echo "${CERT}"
+              echo "__EOF_APPLE_CERT__"
+            } >> "$GITHUB_ENV"
+            [[ -n "${CERT_PASSWORD}" ]] && echo "APPLE_CERTIFICATE_PASSWORD=${CERT_PASSWORD}" >> "$GITHUB_ENV"
+            [[ -n "${SIGNING_ID}" ]] && echo "APPLE_SIGNING_IDENTITY=${SIGNING_ID}" >> "$GITHUB_ENV"
+            [[ -n "${APPLE_USER}" ]] && echo "APPLE_ID=${APPLE_USER}" >> "$GITHUB_ENV"
+            [[ -n "${APPLE_PASS}" ]] && echo "APPLE_PASSWORD=${APPLE_PASS}" >> "$GITHUB_ENV"
+            [[ -n "${TEAM_ID}" ]] && echo "APPLE_TEAM_ID=${TEAM_ID}" >> "$GITHUB_ENV"
+          fi
+
+      - name: Sync version to package.json
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          node -e '
+            const fs = require("node:fs");
+            const pkg = JSON.parse(fs.readFileSync("package.json", "utf8"));
+            pkg.version = process.env.VERSION;
+            fs.writeFileSync("package.json", JSON.stringify(pkg, null, 2) + "\n");
+          '
 
       - name: Sync version to Cargo.toml
         working-directory: src-tauri
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
         run: |
-          VERSION="${{ needs.prepare.outputs.version }}"
-          sed -i.bak "s/^version = \".*\"/version = \"$VERSION\"/" Cargo.toml
+          sed -i.bak "s/^version = \".*\"/version = \"${VERSION}\"/" Cargo.toml
           rm -f Cargo.toml.bak
 
-      - name: Sync version to tauri.conf.json
+      - name: Sync version and updater flag in tauri.conf.json
         working-directory: src-tauri
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+          HAS_SIGNING_KEY: ${{ steps.signing.outputs.has_signing_key }}
         run: |
-          VERSION="${{ needs.prepare.outputs.version }}"
-          node -e "
-            const fs = require('fs');
-            const conf = JSON.parse(fs.readFileSync('tauri.conf.json'));
-            conf.version = '$VERSION';
-            fs.writeFileSync('tauri.conf.json', JSON.stringify(conf, null, 2) + '\n');
-          "
+          node -e '
+            const fs = require("node:fs");
+            const conf = JSON.parse(fs.readFileSync("tauri.conf.json", "utf8"));
+            conf.version = process.env.VERSION;
+            if (process.env.HAS_SIGNING_KEY !== "true") {
+              conf.bundle = conf.bundle || {};
+              conf.bundle.createUpdaterArtifacts = false;
+            }
+            fs.writeFileSync("tauri.conf.json", JSON.stringify(conf, null, 2) + "\n");
+          '
 
       - run: npm ci
 
-      - name: Build Tauri app
+      - name: Build Tauri app & upload release assets
         uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # Without these the bundles ship unsigned, `latest.json` carries no
-          # valid signature, and every client's update check fails signature
-          # verification — silently, on the user's side. The matching public key
-          # is already embedded in src-tauri/tauri.conf.json (updater.pubkey),
-          # so the secret must be the private half of THAT key: generating a new
-          # keypair strands every already-released install.
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-          # Optional Apple Developer signing / notarization. If these secrets are
-          # present, the DMG will be signed and notarized, avoiding the macOS
-          # Gatekeeper "app is damaged" warning on Apple Silicon. If they are
-          # absent, the action builds an unsigned DMG as before.
-          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         with:
-          tagName: ${{ needs.prepare.outputs.tag }}
-          releaseName: 'ColimaUI v${{ needs.prepare.outputs.version }}'
-          releaseBody: |
-            ## ColimaUI v${{ needs.prepare.outputs.version }}
-
-            **Channel:** ${{ needs.prepare.outputs.channel == 'stable' && '🚀 Stable' || needs.prepare.outputs.channel == 'rc' && '🔬 Release Candidate' || '🧪 Beta' }}
-
-            ### 📦 Installation
-
-            | Platform | File | Notes |
-            |----------|------|-------|
-            | **macOS Apple Silicon** | `ColimaUI_*_aarch64.dmg` | M1/M2/M3/M4 |
-            | **macOS Intel** | `ColimaUI_*_x64.dmg` | Intel Macs |
-            | **Linux** | `ColimaUI_*_amd64.deb` | Ubuntu/Debian |
-            | **Linux** | `ColimaUI_*_amd64.AppImage` | Universal Linux |
-
-            ### 🍎 macOS Gatekeeper
-            Pre-built DMGs are unsigned unless Apple Developer secrets are configured in the repository. If macOS reports *"ColimaUI.app is damaged and can't be opened"*, either:
-            - Go to **System Settings → Privacy & Security** and click **Open Anyway**.
-            - Run `xattr -cr /Applications/ColimaUI.app` after dragging the app to Applications.
-
-            ### 🔌 Local HTTP API & Headless CLI
-            While running, ColimaUI exposes a Bearer-protected local REST & SSE API on `http://127.0.0.1:11420` (session token stored with `0600` permissions at `~/.colima-ui/api_token` for `cui` CLI and local AI agents).
-
-            ---
-            *Full changelog: https://github.com/${{ github.repository }}/releases/tag/${{ needs.prepare.outputs.tag }}*
-          releaseDraft: false
-          prerelease: ${{ needs.prepare.outputs.prerelease }}
+          releaseId: ${{ needs.prepare.outputs.release_id }}
+          uploadUpdaterJson: ${{ steps.signing.outputs.has_signing_key == 'true' }}
+          uploadUpdaterSignatures: ${{ steps.signing.outputs.has_signing_key == 'true' }}
+          retryAttempts: 2
           args: ${{ matrix.target && format('--target {0}', matrix.target) || '' }} --bundles ${{ matrix.bundles }}
 
-  # ===== Post-release verification =====
-  verify:
-    name: Verify Release
+  # ===== Verify all platform assets & publish Draft Release =====
+  publish:
+    name: Publish Release
     needs: [prepare, build]
+    if: needs.prepare.outputs.should_release == 'true'
     runs-on: ubuntu-latest
     steps:
-      - name: Check release assets
+      - name: Verify release assets and publish
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_ID: ${{ needs.prepare.outputs.release_id }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+          CHANNEL: ${{ needs.prepare.outputs.channel }}
+          PRERELEASE: ${{ needs.prepare.outputs.prerelease }}
         run: |
-          TAG="${{ needs.prepare.outputs.tag }}"
-          CHANNEL="${{ needs.prepare.outputs.channel }}"
-          echo "🔍 Checking $CHANNEL release assets for $TAG..."
+          set -euo pipefail
+          echo "🔍 Verifying uploaded assets on release ${RELEASE_ID} (${TAG}, ${CHANNEL})..."
 
-          sleep 10
-
-          ASSETS=$(gh release view "$TAG" --repo "${{ github.repository }}" --json assets -q '.assets[].name' 2>/dev/null || echo "")
-          if [ -z "$ASSETS" ]; then
-            echo "⚠️ No assets found yet — may still be uploading"
-            exit 0
+          ASSETS=$(gh api "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}" --jq '.assets[].name' || echo "")
+          if [[ -z "$ASSETS" ]]; then
+            echo "❌ No assets found on release ${RELEASE_ID}"
+            exit 1
           fi
 
-          echo "📦 Release assets:"
-          echo "$ASSETS" | while read -r asset; do
-            echo "  ✅ $asset"
+          echo "📦 Uploaded assets:"
+          while IFS= read -r asset; do
+            [[ -n "$asset" ]] && echo "  ✅ $asset"
+          done <<< "$ASSETS"
+
+          for required_suffix in "_aarch64.dmg" "_x64.dmg" "_amd64.deb" "_amd64.AppImage"; do
+            if ! grep -Fq "$required_suffix" <<< "$ASSETS"; then
+              echo "❌ Missing expected platform artifact matching *${required_suffix}"
+              exit 1
+            fi
           done
 
-          COUNT=$(echo "$ASSETS" | wc -l | tr -d ' ')
-          echo ""
-          echo "📊 Total assets: $COUNT"
-          if [ "$COUNT" -lt 2 ]; then
-            echo "⚠️ Expected at least 2 platform builds, got $COUNT"
+          MAKE_LATEST="true"
+          if [[ "$PRERELEASE" == "true" ]]; then
+            MAKE_LATEST="false"
           fi
+
+          HTML_URL=$(gh api -X PATCH "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}" \
+            -F draft=false \
+            -F prerelease="$PRERELEASE" \
+            -f make_latest="$MAKE_LATEST" \
+            --jq '.html_url')
+
+          echo ""
+          echo "🎉 Published ${TAG}: ${HTML_URL}"

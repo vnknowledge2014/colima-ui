@@ -135,3 +135,17 @@ ColimaUI ships two Rust CLI targets in `src-tauri/src/bin/`:
    cargo build --manifest-path src-tauri/Cargo.toml --bin colimaui --features cli --release
    # Binary: src-tauri/target/release/colimaui
    ```
+
+---
+
+## 6. Automated GitHub Releases (`release.yml`)
+
+Every push or merged PR on `main` that passes `.github/workflows/ci.yml` automatically triggers `.github/workflows/release.yml` (`on: workflow_run`):
+
+1. **`prepare` job** — Verifies the commit is on `main` and passed `ci`, computes the next SemVer version (`max(package.json, highest stable git tag)` with automatic patch increment when that tag already exists), pushes the `vX.Y.Z` tag, generates PR release notes since the previous published release, and creates **one single Draft GitHub Release** (`release_id`).
+2. **`build` matrix job** — Compiles `macOS ARM64 (.dmg)`, `macOS x86_64 (.dmg)`, and `Linux x86_64 (.deb, .AppImage)` against the tag and uploads all bundles to `release_id`:
+   - If `TAURI_SIGNING_PRIVATE_KEY` is configured in GitHub Actions Secrets, signed updater bundles and `latest.json` are generated and uploaded automatically.
+   - If `TAURI_SIGNING_PRIVATE_KEY` is absent, `createUpdaterArtifacts` is automatically disabled for the CI build so unsigned installers publish cleanly without failing.
+3. **`publish` job** — Verifies all 4 platform artifacts are attached to `release_id` before flipping the Draft release to **Published (`Latest`)**.
+
+To prepare a `minor` or `major` version jump on a feature branch before opening a PR (or to cut an explicit `-rc.N` / `-beta.N` tag), use `./scripts/release.sh`.

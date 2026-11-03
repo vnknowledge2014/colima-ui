@@ -8,7 +8,7 @@ Detailed technical documentation for the ColimaUI project.
 |----------|-------------|
 | [Architecture](architecture.md) | System architecture, dual-mode design, data flow, HTTP auth |
 | [Backend](backend.md) | Rust backend: modules, commands, routes, PTY sessions, security |
-| [Frontend](frontend.md) | Svelte 5 frontend: 19 pages, components, runes state management |
+| [Frontend](frontend.md) | Svelte 5 frontend: 20 pages, components, runes state management |
 | [API Reference](api.md) | Bearer-authenticated HTTP REST & SSE API (`127.0.0.1:11420`) |
 | [AI System](ai.md) | Command Center AI, Event Bus tools, 3-tier guided UX, memory & sandbox |
 | [**Setup runbook**](setup.md) | Developer setup, quality gates, local packaging, and CLI build steps |

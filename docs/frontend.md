@@ -12,8 +12,8 @@ src/
 ├── vite-env.d.ts               # Vite type declarations
 ├── setupTests.ts               # Test setup (jsdom)
 ├── store.svelte.ts             # Global reactive state
-├── pages/                      # 19 page components
-├── components/                 # 69 components (incl. ai/, activity/, compose/, security/, topology/, notifications/, settings/, transfer/, diagnostics/)
+├── pages/                      # 20 page components
+├── components/                 # 66 components (incl. ai/, activity/, compose/, security/, topology/, notifications/, settings/, transfer/, diagnostics/)
 ├── store/                      # Domain-specific state modules
 ├── lib/                        # Utilities, API layer, AI bus
 ├── styles/                     # CSS design system

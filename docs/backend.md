@@ -19,14 +19,15 @@ src-tauri/src/
 ├── transfer_registry.rs   # Active & recently completed background transfer tracking
 ├── platform.rs            # OS/arch/package manager detection
 ├── docker_state.rs        # Bollard Docker event stream for real-time push
-├── instance_reader.rs     # Colima instance YAML config parser (fast filesystem read)
+├── instance_reader.rs     # Colima 0.10.x XDG YAML config parser ($COLIMA_HOME / ~/.colima / ~/.config/colima)
 ├── terminal_session.rs    # Real PTY session manager (portable-pty over Tauri IPC)
 ├── poller.rs              # Background instance status poller
-├── path_util.rs           # macOS PATH & ~/.colima-ui app data dir helpers
+├── path_util.rs           # macOS PATH, Colima/Lima/Docker socket resolution & ~/.colima-ui helpers
+├── shell_env.rs           # Pre-adoption launchd env snapshot & non-login user shell env adoption
 ├── telemetry/             # Opt-in closed-vocabulary telemetry & consent state
 ├── bin/                   # Standalone CLIs: cui.rs (AI client) & cli.rs (colimaui)
-├── commands/              # Business logic (53 modules)
-├── routes/                # HTTP route handlers (26 modules)
+├── commands/              # Business logic (54 modules)
+├── routes/                # HTTP route handlers (27 modules)
 ├── adapters/              # Unified DevOps adapter traits (7 modules)
 └── services/              # High-level orchestration (4 modules)
 ```
@@ -82,6 +83,7 @@ The central business logic layer. Both Tauri IPC and HTTP routes call into these
 | `engine_resources.rs` | 232 | Aggregate engine CPU/memory (one-shot, expensive) |
 | `autostart.rs` | 217 | Launch-at-login toggle |
 | `activity_coverage.rs` | 182 | Asserts every mutating command records activity |
+| `resolution.rs` | 380 | Environment path provenance rows & `launchd`-vs-shell duality report |
 | `terminal.rs` | 126 | PTY terminal command surface |
 | `kind.rs` | 63 | Kind cluster lifecycle |
 
@@ -135,6 +137,7 @@ Thin HTTP handlers that extract request parameters and delegate to `commands/`:
 | `activity.rs` | 68 | Activity record: what was done to the machine |
 | `capabilities.rs` | 35 | Capability probe endpoints |
 | `diagnostics.rs` | 31 | Diagnostic bundle collection |
+| `resolution.rs` | 28 | `GET /api/environment/resolutions` environment provenance & duality endpoint |
 | `announcements.rs` | 21 | Release notes & advisories feed (fetch + filter) |
 | `system_capabilities.rs` | 17 | Capability reporting |
 | `topology.rs` | 15 | Topology graph endpoint |
@@ -197,11 +200,15 @@ Higher-level orchestration (currently lightweight):
 - Auto-reconnects on connection loss
 
 ### instance_reader.rs
-- Reads Colima instance configs from `~/.colima/` YAML files
+- Resolves `COLIMA_HOME` in Colima `0.10.x` order (`$COLIMA_HOME` > legacy `~/.colima` when state exists > `$XDG_CONFIG_HOME/colima` or `~/.config/colima`) and reads per-profile YAML configs directly
 - Returns instance list in <1ms (vs 30–60s via `colima list` CLI)
 - Parses status, CPU, memory, disk, runtime, arch, K8s config
+
+### shell_env.rs
+- Captures the initial GUI `launchd` environment (`launchd_env`) before mutating `std::env`, then snapshots `$SHELL -c "command env"` once per process (with a 3s timeout) to adopt missing `COLIMA_HOME`, `LIMA_HOME`, `DOCKER_CONFIG`, `DOCKER_HOST`, `KUBECONFIG`, `XDG_CONFIG_HOME`, and `PATH` variables
+- Powers both runtime CLI/socket discovery when launched from the macOS Dock and the `"This app"` vs `"Your shell"` comparison on the Environment page (`commands/resolution.rs`)
 
 ### terminal_session.rs
 - Opens real pseudo-terminals via `portable-pty` (`TERM=xterm-256color`, window resize / `SIGWINCH`, 1 MB bounded output buffer, 16 ms frame-coalesced UTF-8 carry decoder, and 30-minute idle reaper)
 - Driven exclusively via Tauri IPC commands (`commands/terminal.rs`) and Tauri events — HTTP/WebSocket terminal endpoints were deliberately removed so no localhost port exposes interactive shell execution
-- Spawns direct `argv` commands (never shell-interpolated strings) for SSH into Colima instances and Lima VMs (with per-profile shell history) and `kubectl exec` into Kubernetes pods
+- Spawns direct `argv` commands (never shell-interpolated strings) for SSH into Colima instances and Lima VMs (with per-profile shell history), interactive container shells (`docker exec -it` with `/bin/sh` or fallback shell via `SessionKind::DockerExec`), and `kubectl exec` into Kubernetes pods
