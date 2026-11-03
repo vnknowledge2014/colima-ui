@@ -139,9 +139,10 @@ TOKEN="$(cat ~/.colima-ui/api_token)"
   - `GET /api/system/reference`: Đọc tài liệu tham chiếu nội bộ trong `resources/` (`?path=skills/docker/SKILL.md`, có bảo vệ chống path traversal).
   - `POST /api/system/install`, `POST /api/system/prune`: Cài đặt công cụ phụ thuộc và dọn dẹp toàn hệ thống.
   - `GET /api/system/autostart`, `POST /api/system/autostart`: Trạng thái và cấu hình tự khởi động cùng macOS.
-- **Diagnostics**:
+- **Diagnostics & Environment**:
   - `GET /api/diagnostics/logs`: Thu thập nhanh nhật ký chẩn đoán hệ thống.
   - `POST /api/diagnostics/bundle`, `POST /api/diagnostics/save`: Tạo và xuất gói chẩn đoán lỗi (đã tự động che giấu thông tin nhạy cảm).
+  - `GET /api/environment/resolutions`: Xem bản ghi nguồn gốc phân giải đường dẫn (`colima-home`, `lima-home`, `docker-socket`, `kubeconfig`) và đối chiếu biến môi trường giữa `launchd` với shell người dùng.
 - **Knowledge Bank & Help Articles**:
   - `GET /api/kb/articles`, `GET /api/kb/articles/get`, `GET /api/kb/articles/search`: Duyệt và tìm kiếm bài viết hướng dẫn tích hợp.
   - `POST /api/kb/query`, `feedback`, `learn`, `search`: Truy vấn mẫu lỗi, đánh giá giải pháp và ghi nhận tri thức mới.

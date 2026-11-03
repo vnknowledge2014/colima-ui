@@ -64,6 +64,7 @@
       items: [
         { id: "dashboard", label: t("sidebar.dashboard", { default: "Dashboard" }), icon: Icons.Dashboard },
         { id: "instances", label: t("sidebar.colima_instances", { default: "Instances" }), icon: Icons.Server },
+        { id: "environment", label: t("sidebar.environment", { default: "Environment" }), icon: Icons.LinuxVM },
       ],
     },
     {

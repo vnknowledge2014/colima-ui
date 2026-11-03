@@ -48,6 +48,7 @@ use crate::routes::lima::*;
 use crate::routes::ai::*;
 use crate::routes::kb::*;
 use crate::routes::misc::*;
+use crate::routes::resolution::*;
 
 /// Build the axum router with all API routes
 pub fn build_router() -> Router {
@@ -291,6 +292,8 @@ pub fn build_router() -> Router {
         .route("/api/ai/conversations", get(api_ai_list_conversations).post(api_ai_create_conversation))
         .route("/api/ai/conversations/rename", post(api_ai_rename_conversation))
         .route("/api/ai/conversations/delete", post(api_ai_delete_conversation))
+        // Environment resolution record (see commands/resolution.rs)
+        .route("/api/environment/resolutions", get(api_get_environment_resolutions))
         // Settings
         .route("/api/settings", get(api_get_settings))
         .route("/api/settings", post(api_set_setting))

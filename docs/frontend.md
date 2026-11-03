@@ -41,6 +41,7 @@ src/
 | Settings | `Settings.svelte` | System info, AI provider config, privacy/telemetry, notifications, disk usage, prune |
 | Security | `Security.svelte` | Local Trivy vulnerability scanning, `/100` provenance score breakdown, config rules, base-image alternatives, Falco runtime stream, and container Detonation |
 | Help | `Help.svelte` | Offline FTS5-searchable troubleshooting & setup guides across 4 locales (`en`, `ja`, `vi`, `zh`) |
+| Environment | `Environment.svelte` | Read-only provenance record of resolved Colima/Lima/Docker/Kubeconfig paths and `launchd`-vs-shell environment duality |
 | X-Ray | `XRay.svelte` | Kubernetes diagnostics |
 | Cluster Topology | `ClusterTopology.svelte` | Cluster visualization |
 

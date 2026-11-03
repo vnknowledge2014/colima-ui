@@ -34,6 +34,7 @@ pub async fn api_capabilities() -> (StatusCode, Json<ApiResponse<serde_json::Val
             "/api/topology": "GET - Fetch container, network, and volume topology graph",
             "/api/activity": "GET - Query local action history",
             "/api/diagnostics/bundle": "POST - Generate redacted diagnostic bundle",
+            "/api/environment/resolutions": "GET - Inspect path/socket resolution provenance and launchd-vs-shell environment duality",
             "/api/system/reference": "GET - Read bundled CLI reference docs",
             "/api/events": "GET - Subscribe to SSE event stream (?token=...&topics=...)",
         },

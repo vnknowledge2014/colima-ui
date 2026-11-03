@@ -1,3 +1,4 @@
+pub mod resolution;
 pub mod announcements;
 pub mod agent_loop;
 /// Start Colima at login, via launchd (macOS) or systemd --user (Linux).

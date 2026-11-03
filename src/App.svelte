@@ -16,6 +16,7 @@
   import Images from "./pages/Images.svelte";
   import Volumes from "./pages/Volumes.svelte";
   import Networks from "./pages/Networks.svelte";
+  import Environment from "./pages/Environment.svelte";
   import Topology from "./pages/Topology.svelte";
   import Activity from "./pages/Activity.svelte";
   import Compose from "./pages/Compose.svelte";
@@ -174,6 +175,8 @@
       <Volumes />
     {:else if uiState.currentPage === "networks"}
       <Networks />
+    {:else if uiState.currentPage === "environment"}
+      <Environment />
     {:else if uiState.currentPage === "topology"}
       <Topology />
     {:else if uiState.currentPage === "activity"}

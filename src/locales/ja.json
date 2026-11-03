@@ -37,7 +37,8 @@
     "colima_instances": "インスタンス",
     "security": "セキュリティ",
     "ai_panel_close": "Close the AI panel (⌘K)",
-    "ai_panel_open": "Open the AI panel beside the page (⌘K)"
+    "ai_panel_open": "Open the AI panel beside the page (⌘K)",
+    "environment": "環境"
   },
   "dashboard": {
     "title": "ダッシュボード",
@@ -1239,5 +1240,24 @@
     "no_workloads": "No workloads found",
     "pods": "Pods",
     "no_pods": "No pods found"
+  },
+  "environment": {
+    "shellEnv": "シェル環境",
+    "dualityExplain": "GUI プロセスは launchd の環境変数を継承し、あなたのシェルのものではありません（スナップショット: $SHELL で非ログインシェルを1回起動——zsh なら .zshenv、bash なら $BASH_ENV/.bashrc など）。2 列の差は正常です——重要なのは下の解決レコードです。",
+    "diverges": "Shell (.zshenv) とこのアプリの 2 列で値が異なります",
+    "resolutionExplain": "本アプリが実際に使用している値と、それぞれを選んだ根拠。赤は設定されたパスが存在しないことを示します。",
+    "title": "環境",
+    "subtitle": "本アプリが把握しているセットアップの状態と、その根拠。",
+    "refresh": "再スキャン",
+    "loading": "スキャン中…",
+    "snapshotError": "Shell 環境スナップショットが取得できません",
+    "dualityTitle": "環境: シェル環境 vs アプリ",
+    "variable": "変数",
+    "appEnv": "このアプリ",
+    "resolutionTitle": "解決レコード",
+    "what": "項目",
+    "rule": "ルール",
+    "resolvedTo": "解決先",
+    "detail": "詳細"
   }
 }
