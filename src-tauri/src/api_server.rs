@@ -293,7 +293,7 @@ pub fn build_router() -> Router {
         .route("/api/ai/conversations/rename", post(api_ai_rename_conversation))
         .route("/api/ai/conversations/delete", post(api_ai_delete_conversation))
         // Environment resolution record (see commands/resolution.rs)
-        .route("/api/environment/resolutions", get(crate::routes::resolution::api_get_environment_resolutions))
+        .route("/api/environment/resolutions", get(api_get_environment_resolutions))
         // Settings
         .route("/api/settings", get(api_get_settings))
         .route("/api/settings", post(api_set_setting))

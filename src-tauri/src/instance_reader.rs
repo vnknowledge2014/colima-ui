@@ -59,31 +59,34 @@ pub fn colima_home() -> PathBuf {
     resolve_colima_home(colima_home_env.as_deref(), &home)
 }
 
+/// Returns true when the legacy `~/.colima` directory holds real Colima state
+/// (`_store/colima.json`, `_templates/default.yaml`, or `<profile>/colima.yaml`),
+/// as opposed to a hollow directory stub.
+pub fn legacy_colima_holds_state(home: &str) -> bool {
+    let legacy = PathBuf::from(home).join(".colima");
+    holds_colima_config_state(&legacy)
+}
+
+fn holds_colima_config_state(dir: &std::path::Path) -> bool {
+    if !dir.is_dir() {
+        return false;
+    }
+    if dir.join("_store").join("colima.json").exists()
+        || dir.join("_templates").join("default.yaml").exists()
+    {
+        return true;
+    }
+    std::fs::read_dir(dir).is_ok_and(|entries| {
+        entries
+            .flatten()
+            .any(|e| e.path().is_dir() && e.path().join("colima.yaml").is_file())
+    })
+}
+
 /// Resolution legs with explicit inputs, so they are testable without
 /// mutating process env (tests run in parallel threads; env races forbid
 /// `set_var` here).
 pub fn resolve_colima_home(colima_home_env: Option<&str>, home: &str) -> PathBuf {
-    /// A dir "holds state" if it contains any profile's colima.yaml, the
-    /// profile store, or template files. Hollow stub dirs (created by colima's
-    /// mkdir-only code paths, e.g. status/run under a sanitized env) must not
-    /// outrank a real config home, and must not redirect anything to the
-    /// legacy path once it exists.
-    fn holds_config_state(dir: &std::path::Path) -> bool {
-        if !dir.is_dir() {
-            return false;
-        }
-        if dir.join("_store").join("colima.json").exists()
-            || dir.join("_templates").join("default.yaml").exists()
-        {
-            return true;
-        }
-        std::fs::read_dir(dir).is_ok_and(|entries| {
-            entries
-                .flatten()
-                .any(|e| e.path().is_dir() && e.path().join("colima.yaml").is_file())
-        })
-    }
-
     // COLIMA_HOME is honored only when the dir exists (colima's own rule).
     if let Some(dir) = colima_home_env {
         if std::path::Path::new(dir).is_dir() {
@@ -96,7 +99,7 @@ pub fn resolve_colima_home(colima_home_env: Option<&str>, home: &str) -> PathBuf
     // Prefer a candidate that actually contains colima state; the plain
     // existence check would let a hollow stub (created by colima's own
     // mkdir-fallback under a sanitized env) hijack the resolution.
-    if legacy.is_dir() && holds_config_state(&legacy) {
+    if legacy.is_dir() && holds_colima_config_state(&legacy) {
         return legacy;
     }
     if xdg.is_dir() {

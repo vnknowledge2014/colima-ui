@@ -247,6 +247,7 @@ Live metric samples stream over `GET /api/events?token=<token>&topics=metrics.sa
 | `POST` | `/api/diagnostics/bundle` | Build redacted diagnostic bundle (`{error?, containerId?, logLines?}`); nothing is transmitted |
 | `POST` | `/api/diagnostics/save` | Re-redact and write selected diagnostic sections to Markdown (`{bundle, include[], destDir, fileName, overwrite?}`) |
 | `GET` | `/api/diagnostics/logs` | Collect raw Lima/Colima VM diagnostic report (`?profile=default`) |
+| `GET` | `/api/environment/resolutions` | Inspect resolved Colima/Lima/Docker/Kubeconfig paths with provenance rules and `launchd`-vs-shell environment duality |
 
 ---
 

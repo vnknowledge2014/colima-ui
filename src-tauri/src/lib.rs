@@ -90,18 +90,29 @@ pub fn run() {
     //
     // Adopt the rest of the user's shell env (LIMA_HOME, DOCKER_*, KUBECONFIG,
     // PATH) — one-shot via shell_env::adopt(); already-set vars stay.
+    // Adopt the user's non-login shell env FIRST so:
+    //  1. `LAUNCHD_ENV` records the genuine pre-adoption process env for the
+    //     Environment page duality view before any fallback `set_var` runs.
+    //  2. A custom `XDG_CONFIG_HOME` exported in `.zshenv` wins over our
+    //     `$HOME/.config` fallback below.
+    shell_env::adopt();
+
+    let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
     let xdg_absent = match std::env::var("XDG_CONFIG_HOME") {
         Ok(v) => v.trim().is_empty(),
         Err(_) => true,
     };
     if xdg_absent {
-        let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
         std::env::set_var("XDG_CONFIG_HOME", format!("{}/.config", home));
     }
-    if let Ok(xdg) = std::env::var("XDG_CONFIG_HOME") {
-        let _ = std::fs::create_dir_all(std::path::PathBuf::from(&xdg).join("colima"));
+    let colima_home_explicit = std::env::var("COLIMA_HOME")
+        .ok()
+        .is_some_and(|v| !v.trim().is_empty());
+    if !colima_home_explicit && !instance_reader::legacy_colima_holds_state(&home) {
+        if let Ok(xdg) = std::env::var("XDG_CONFIG_HOME") {
+            let _ = std::fs::create_dir_all(std::path::PathBuf::from(&xdg).join("colima"));
+        }
     }
-    shell_env::adopt();
 
     // Redact secrets from panic output before anything else can panic.
     crash::install();
