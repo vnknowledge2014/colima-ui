@@ -57,9 +57,9 @@ Grab the latest release from [**GitHub Releases**](https://github.com/vnknowledg
 | **100% Free & Open Source (MIT)** | All features unlocked out of the box with zero account or sign-in required and strict BYOK local-first privacy |
 
 ### 🐳 Docker & Compose
-- **Containers, Images, Volumes & Networks** — Full lifecycle CRUD, batch prune, real-time logs, stats, inspect, exec, and background image TAR export/import + container file copy (`cp`)
+- **Containers, Images, Volumes & Networks** — Full lifecycle CRUD, batch prune, real-time logs, stats, inspect, interactive PTY container shell (`docker exec -it`), and background image TAR export/import + container file copy (`cp`)
 - **Compose Diagnose & Autofix** — Project start/stop/restart/logs plus YAML schema diagnosis and previewable, undoable autofix patches
-- **Colima Instance & YAML Config** — Fast `<1ms` `~/.colima` config reader, diff preview & mtime-guarded `colima.yaml` apply, resource presets, and idle Resource Saver daemon
+- **Colima Instance & YAML Config** — Fast `<1ms` Colima `0.10.x` XDG config reader (`$COLIMA_HOME` → `~/.colima` → `~/.config/colima`), diff preview & mtime-guarded `colima.yaml` apply, resource presets, and idle Resource Saver daemon
 
 ### ☸️ Kubernetes & Linux VMs
 - **Multi-resource K8s browser & CRDs** — Pods, Deployments, Services, ConfigMaps, Secrets, StatefulSets, DaemonSets, Jobs, CronJobs, Ingresses, PVCs, Namespaces, Nodes, Events, and dynamic CRD discovery
@@ -67,7 +67,8 @@ Grab the latest release from [**GitHub Releases**](https://github.com/vnknowledg
 - **Lima Linux VMs** — Template-based VM creation with custom CPU/memory/disk, lifecycle controls, and integrated PTY SSH tabs
 
 ### 📊 Desktop Experience
-- Real pseudo-terminal (`portable-pty` + `xterm.js`) over Tauri IPC with per-profile shell history
+- Real pseudo-terminal (`portable-pty` + `xterm.js`) over Tauri IPC for Colima SSH, Lima VMs, running Docker containers (`docker exec -it`), and Kubernetes pods (`kubectl exec`)
+- **Environment Provenance & Duality** — Read-only diagnostic view comparing `launchd` vs user shell environment variables alongside resolved Colima, Lima, Docker socket, and Kubeconfig paths
 - Offline full-text searchable Help Center (`articles_fts`) and full UI localization across **4 languages** (`en`, `ja`, `vi`, `zh`)
 
 ---
@@ -152,7 +153,7 @@ colima-ui/
 ├── src/                          # Frontend (Svelte 5 + TypeScript)
 │   ├── App.svelte                # Main shell, sidebar, event listeners
 │   ├── main.ts                   # Entry point
-│   ├── pages/                    # 19 .svelte page views
+│   ├── pages/                    # 20 .svelte page views
 │   ├── components/               # Shared & domain UI components (ai/, security/, activity/, compose/, topology/, ...)
 │   ├── store/                    # Svelte 5 rune-based state stores
 │   ├── lib/                      # Dual-mode API client, Command Center AI core, Event Bus, i18n, utilities
@@ -163,8 +164,8 @@ colima-ui/
 │   │   ├── lib.rs                # App setup, state & Tauri IPC command registration
 │   │   ├── api_server.rs         # Axum router & localhost HTTP/SSE server (11420–11429)
 │   │   ├── auth.rs               # CSPRNG Bearer token, IPC & 0600 ~/.colima-ui/api_token handoff
-│   │   ├── commands/             # 53 command modules (Docker, K8s, Colima, Security, Metrics, AI, KB, ...)
-│   │   ├── routes/               # 26 HTTP route modules (thin delegation to commands/)
+│   │   ├── commands/             # 54 command modules (Docker, K8s, Colima, Security, Metrics, AI, KB, Env, ...)
+│   │   ├── routes/               # 27 HTTP route modules (thin delegation to commands/)
 │   │   ├── adapters/             # Unified DevOps CLI adapter traits
 │   │   ├── services/             # High-level orchestration layer
 │   │   ├── telemetry/            # Opt-in closed-vocabulary telemetry & redaction
@@ -173,9 +174,10 @@ colima-ui/
 │   │   ├── error.rs              # Structured ColimaError classification & remediation hints
 │   │   ├── redact.rs             # Credential & secret redaction
 │   │   ├── validation.rs         # Input & path-containment security checks
+│   │   ├── shell_env.rs          # Pre-adoption launchd env capture & non-login user shell adoption
 │   │   ├── docker_state.rs       # Bollard real-time container event stream
-│   │   ├── instance_reader.rs    # Fast ~/.colima YAML config reader
-│   │   └── terminal_session.rs   # Real PTY session manager (Tauri IPC)
+│   │   ├── instance_reader.rs    # Fast Colima 0.10.x XDG YAML config reader ($COLIMA_HOME / ~/.colima / ~/.config/colima)
+│   │   └── terminal_session.rs   # Real PTY session manager (Colima, Lima, docker exec, kubectl exec)
 │   └── tauri.conf.json           # Tauri bundle & capability configuration
 ├── scripts/                      # Git hook installer, token/i18n gates, release script
 ├── docs/                         # Technical documentation & setup runbook
@@ -189,14 +191,15 @@ colima-ui/
 ## 🔄 CI/CD & Releases
 
 - **CI** (`.github/workflows/ci.yml`) — ESLint, TypeScript, `svelte-check`, CSS token & i18n gates, Vitest unit suite, `cargo check` + `cargo clippy` (macOS ARM64/x86, Linux), `cargo test --lib`, and frontend build verification
-- **Release** (`.github/workflows/release.yml`) — Builds DMG/deb/AppImage artifacts on version tags and publishes GitHub Releases
+- **Release** (`.github/workflows/release.yml`) — Automatically tags `main` with the next SemVer patch, builds macOS (`.dmg`) & Linux (`.deb` / `.AppImage`) bundles, and publishes a GitHub Release whenever a push to `main` passes `CI` (gracefully building unsigned installers when `TAURI_SIGNING_PRIVATE_KEY` is not configured, and automatically enabling signed updater artifacts once configured)
 
 ```bash
-# Bump version, commit, tag, and push
-./scripts/release.sh patch   # 0.2.0 → 0.2.1
-./scripts/release.sh minor   # 0.2.0 → 0.3.0
-./scripts/release.sh major   # 0.2.0 → 1.0.0
-./scripts/release.sh 2.0.0   # explicit version
+# Optional: prepare a minor/major bump on a feature branch before opening a PR
+./scripts/release.sh minor          # 0.2.x → 0.3.0
+./scripts/release.sh major          # 0.x.y → 1.0.0
+
+# Optional: cut an explicit pre-release tag on main
+./scripts/release.sh 0.3.0-rc.1 --tag
 ```
 
 ---

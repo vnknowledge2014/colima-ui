@@ -1,18 +1,17 @@
 #!/bin/bash
-# release.sh — Automated version bump + tag + push
+# release.sh — Prepare a SemVer bump (minor/major/pre-release) for ColimaUI
 #
-# Usage:
-#   ./scripts/release.sh patch   # 0.1.0 → 0.1.1
-#   ./scripts/release.sh minor   # 0.1.0 → 0.2.0
-#   ./scripts/release.sh major   # 0.1.0 → 1.0.0
-#   ./scripts/release.sh 1.2.3   # explicit version
+# NOTE: Every push/merge to `main` that passes CI automatically increments the
+# patch version, tags `main`, and publishes a GitHub Release via
+# `.github/workflows/release.yml` (`workflow_run`). You do NOT need to run this
+# script for routine patch releases!
 #
-# This script:
-# 1. Validates the version bump
-# 2. Updates version in package.json, Cargo.toml, tauri.conf.json
-# 3. Commits the version bump
-# 4. Creates a git tag
-# 5. Pushes to origin (triggers GitHub Actions release workflow)
+# Use this script when you want to bump `minor` / `major` on a PR branch or cut
+# an explicit pre-release tag (`-beta.N` / `-rc.N`):
+#   ./scripts/release.sh minor          # bump version files on current branch
+#   ./scripts/release.sh major          # bump version files on current branch
+#   ./scripts/release.sh 0.3.0-rc.1     # bump + optional --tag push on main
+#   ./scripts/release.sh 0.3.0 --tag    # bump, push commit, wait for CI, push tag
 
 set -euo pipefail
 
@@ -20,30 +19,27 @@ RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 CYAN='\033[0;36m'
-NC='\033[0m' # No Color
+NC='\033[0m'
 
-# --- Get current version from package.json ---
 CURRENT=$(node -e "console.log(require('./package.json').version)")
-echo -e "${CYAN}📦 Current version: ${YELLOW}v${CURRENT}${NC}"
+echo -e "${CYAN}📦 Current package.json version: ${YELLOW}v${CURRENT}${NC}"
 
-# --- Parse bump type ---
 BUMP="${1:-}"
+PUSH_TAG="${2:-}"
 if [ -z "$BUMP" ]; then
-  echo -e "${RED}❌ Usage: $0 <patch|minor|major|X.Y.Z>${NC}"
+  echo -e "${RED}❌ Usage: $0 <patch|minor|major|X.Y.Z[-rc.N|-beta.N]> [--tag]${NC}"
   exit 1
 fi
 
-# Calculate new version
-IFS='.' read -r MAJOR MINOR PATCH <<< "${CURRENT%-*}"  # strip pre-release suffix
+IFS='.' read -r MAJOR MINOR PATCH <<< "${CURRENT%-*}"
 case "$BUMP" in
   patch) NEW_VERSION="$MAJOR.$MINOR.$((PATCH + 1))" ;;
   minor) NEW_VERSION="$MAJOR.$((MINOR + 1)).0" ;;
   major) NEW_VERSION="$((MAJOR + 1)).0.0" ;;
   *)
-    # Explicit version — validate semver
     if [[ ! "$BUMP" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.]+)?$ ]]; then
       echo -e "${RED}❌ Invalid version: $BUMP${NC}"
-      echo "   Expected: X.Y.Z or X.Y.Z-beta.1"
+      echo "   Expected: X.Y.Z, X.Y.Z-beta.1, or X.Y.Z-rc.1"
       exit 1
     fi
     NEW_VERSION="$BUMP"
@@ -51,55 +47,44 @@ case "$BUMP" in
 esac
 
 TAG="v${NEW_VERSION}"
-echo -e "${CYAN}🚀 New version: ${GREEN}v${NEW_VERSION}${NC}"
+echo -e "${CYAN}🚀 Target version: ${GREEN}${TAG}${NC}"
 
-# --- Check for uncommitted changes ---
 if ! git diff --quiet HEAD 2>/dev/null; then
   echo -e "${YELLOW}⚠️  You have uncommitted changes. Commit or stash them first.${NC}"
   git status --short
   exit 1
 fi
 
-# --- Check tag doesn't already exist ---
-if git tag -l "$TAG" | grep -q "$TAG"; then
+if git tag -l "$TAG" | grep -Fxq "$TAG"; then
   echo -e "${RED}❌ Tag $TAG already exists${NC}"
   exit 1
 fi
 
-# --- Update versions ---
-echo -e "${CYAN}📝 Updating package.json...${NC}"
-node -e "
-  const fs = require('fs');
-  const pkg = JSON.parse(fs.readFileSync('package.json'));
-  pkg.version = '${NEW_VERSION}';
-  fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');
-"
-
-echo -e "${CYAN}📝 Updating src-tauri/Cargo.toml...${NC}"
+echo -e "${CYAN}📝 Updating package.json, src-tauri/Cargo.toml, and src-tauri/tauri.conf.json...${NC}"
+NEW_VERSION="$NEW_VERSION" node -e '
+  const fs = require("node:fs");
+  const ver = process.env.NEW_VERSION;
+  for (const file of ["package.json", "src-tauri/tauri.conf.json"]) {
+    const json = JSON.parse(fs.readFileSync(file, "utf8"));
+    json.version = ver;
+    fs.writeFileSync(file, JSON.stringify(json, null, 2) + "\n");
+  }
+'
 sed -i.bak "s/^version = \".*\"/version = \"${NEW_VERSION}\"/" src-tauri/Cargo.toml
 rm -f src-tauri/Cargo.toml.bak
 
-echo -e "${CYAN}📝 Updating src-tauri/tauri.conf.json...${NC}"
-node -e "
-  const fs = require('fs');
-  const conf = JSON.parse(fs.readFileSync('src-tauri/tauri.conf.json'));
-  conf.version = '${NEW_VERSION}';
-  fs.writeFileSync('src-tauri/tauri.conf.json', JSON.stringify(conf, null, 2) + '\n');
-"
-
-# --- Commit + tag + push ---
-echo -e "${CYAN}📦 Committing version bump...${NC}"
 git add package.json src-tauri/Cargo.toml src-tauri/tauri.conf.json
 git commit -m "chore(release): v${NEW_VERSION}"
 
-echo -e "${CYAN}🏷️  Creating tag ${TAG}...${NC}"
-git tag -a "$TAG" -m "Release ${TAG}"
-
-echo -e "${CYAN}🚀 Pushing to origin...${NC}"
-git push origin HEAD
-git push origin "$TAG"
-
-echo ""
-echo -e "${GREEN}✅ Release ${TAG} pushed!${NC}"
-echo -e "${CYAN}   GitHub Actions will now build and publish the release.${NC}"
-echo -e "${CYAN}   Track progress: https://github.com/$(git remote get-url origin | sed 's/.*github.com[:/]//' | sed 's/.git$//')/actions${NC}"
+if [[ "$PUSH_TAG" == "--tag" ]]; then
+  echo -e "${CYAN}🚀 Pushing commit to origin...${NC}"
+  git push origin HEAD
+  echo -e "${CYAN}🏷️  Creating and pushing tag ${TAG}...${NC}"
+  git tag -a "$TAG" -m "Release ${TAG}"
+  git push origin "$TAG"
+  echo -e "${GREEN}✅ Tag ${TAG} pushed — release.yml will wait for CI and publish ${TAG}.${NC}"
+else
+  echo ""
+  echo -e "${GREEN}✅ Version bumped to v${NEW_VERSION} on branch $(git branch --show-current).${NC}"
+  echo -e "${CYAN}   Open/merge a PR to main — once CI passes on main, GitHub Actions will automatically tag and publish ${TAG}.${NC}"
+fi
