@@ -8,7 +8,7 @@
   import PatchDiff from "./PatchDiff.svelte";
   import FixHistory from "./FixHistory.svelte";
 
-  let { configFiles } = $props<{ configFiles: string }>();
+  let { configFiles }: { configFiles: string } = $props();
 
   let running = $state(false);
   let result = $state<ComposeDiagnosis | null>(null);

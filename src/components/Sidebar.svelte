@@ -15,10 +15,10 @@
   } from "../store/notifications.svelte";
   import { closeAiPanel } from "../store.svelte";
 
-  let { systemInfo, onStartTour } = $props<{
+  let { systemInfo, onStartTour }: {
     systemInfo: SystemInfo | null;
     onStartTour: () => void;
-  }>();
+  } = $props();
 
   const instances = $derived(dashboardState.colimaInstances);
   const unread = $derived(unreadCount());

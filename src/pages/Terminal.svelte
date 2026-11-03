@@ -1,9 +1,9 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { dashboardState, uiState } from "../store.svelte";
+  import { dashboardState, dockerState, uiState } from "../store.svelte";
   import Icon from "../components/Icon.svelte";
   import { t } from "../lib/i18n.svelte";
-  import { k8sApi } from "../lib/api";
+  import { dockerApi, k8sApi, type DockerContainer } from "../lib/api";
   import { parseItems } from "../lib/k8sUtils";
   import { sessionLabel, type SessionKind } from "../lib/terminal-transport";
   import TerminalInstance from "./TerminalInstance.svelte";
@@ -47,6 +47,7 @@
 
   let instances = $derived(dashboardState.colimaInstances.filter(i => i.status === "Running"));
   let limaVMs = $derived(dashboardState.linuxVMs.filter(v => v.status === "Running"));
+  let runningContainers = $derived(dockerState.containers.filter((c) => c.State === "running"));
 
   /**
    * Container targets from the connected cluster.
@@ -69,9 +70,18 @@
   let podsError = $state("");
 
   // On mount, not on picker-open: `hasRunning` gates whether the New Session
-  // button renders at all, so the cluster has to be counted before the user
+  // button renders at all, so targets have to be counted before the user
   // reaches for it.
-  onMount(loadPodTargets);
+  onMount(() => {
+    loadPodTargets();
+    if (dockerState.containers.length === 0) {
+      dockerApi.listContainers(false).then((list) => {
+        if (dockerState.containers.length === 0) {
+          dockerState.containers = list;
+        }
+      }).catch(() => {});
+    }
+  });
 
   async function loadPodTargets() {
     if (podsLoading) return;
@@ -110,7 +120,10 @@
 
   /** Anything at all that a session could attach to. */
   let hasRunning = $derived(
-    instances.length > 0 || limaVMs.length > 0 || podTargets.length > 0,
+    instances.length > 0 ||
+      limaVMs.length > 0 ||
+      runningContainers.length > 0 ||
+      podTargets.length > 0,
   );
 
   function addTab(profile: string, vmType: "colima" | "lima" = "colima") {
@@ -124,11 +137,15 @@
   /**
    * Skip the picker when there is only one thing to pick.
    *
-   * Counts every source, not just VMs — otherwise a machine with one pod and no
-   * VM would open a dialog containing a single row.
+   * Counts every source, not just VMs — otherwise a machine with one container
+   * or pod and no VM would open a dialog containing a single row.
    */
   function openOrPick() {
-    const total = instances.length + limaVMs.length + podTargets.length;
+    const total =
+      instances.length +
+      limaVMs.length +
+      runningContainers.length +
+      podTargets.length;
     if (total !== 1) {
       showPicker = true;
       return;
@@ -139,9 +156,19 @@
       addTab(name === "colima" ? "default" : name.replace("colima-", ""), "colima");
     } else if (limaVMs.length === 1) {
       addTab(limaVMs[0].name, "lima");
+    } else if (runningContainers.length === 1) {
+      openContainer(runningContainers[0]);
     } else {
       openPod(podTargets[0]);
     }
+  }
+
+  function openContainer(c: DockerContainer) {
+    openSession({
+      kind: "dockerExec",
+      container: c.Id,
+      label: c.Names,
+    });
   }
 
   function openPod(p: PodTarget) {
@@ -188,19 +215,8 @@
 <div class="content-header" data-tauri-drag-region>
   <h1>{t('terminal.title', { default: 'Terminal' })}</h1>
   <div class="content-header-actions">
-    <button class="btn btn-primary" onclick={() => {
-      if (instances.length + limaVMs.length === 1) {
-        if (instances.length === 1) {
-          const name = instances[0].name;
-          addTab(name === "colima" ? "default" : name.replace("colima-", ""), "colima");
-        } else {
-          addTab(limaVMs[0].name, "lima");
-        }
-      } else {
-        showPicker = true;
-      }
-    }}>
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+    <button class="btn btn-primary" onclick={openOrPick}>
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
         <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
       </svg>
       {t('terminal.new_session', { default: 'New Session' })}
@@ -327,8 +343,29 @@
             </div>
           </div>
         {/each}
-        {#if podTargets.length > 0}
+        {#if runningContainers.length > 0}
           <div style="font-size: var(--text-xs); color: var(--text-muted); padding: 8px 16px 4px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; border-top: {instances.length + limaVMs.length > 0 ? '1px solid var(--border-primary)' : 'none'}; margin-top: {instances.length + limaVMs.length > 0 ? 4 : 0}px;">
+            {t('terminal.docker_containers', { default: 'Docker Containers' })}
+          </div>
+        {/if}
+        {#each runningContainers as c (c.Id)}
+          <button
+            type="button"
+            class="nav-item"
+            style="padding: 12px 16px; border-radius: var(--radius-md);"
+            onclick={() => openContainer(c)}
+          >
+            <div style="width: 8px; height: 8px; border-radius: 50%; background: var(--status-running); box-shadow: 0 0 6px var(--status-running); flex-shrink: 0;"></div>
+            <div style="min-width: 0;">
+              <div style="font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">🐳 {c.Names}</div>
+              <div style="font-size: var(--text-xs); color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                {c.Image}
+              </div>
+            </div>
+          </button>
+        {/each}
+        {#if podTargets.length > 0}
+          <div style="font-size: var(--text-xs); color: var(--text-muted); padding: 8px 16px 4px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; border-top: {instances.length + limaVMs.length + runningContainers.length > 0 ? '1px solid var(--border-primary)' : 'none'}; margin-top: {instances.length + limaVMs.length + runningContainers.length > 0 ? 4 : 0}px;">
             Kubernetes containers
           </div>
         {/if}

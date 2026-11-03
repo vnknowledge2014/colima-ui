@@ -7,7 +7,7 @@
   import * as Icons from "../components/Icons.svelte";
   import { viewInTopology, consumeFocus } from "../lib/topology-link";
 
-  import { dockerState, setEventCooldown, clearEventCooldown } from "../store.svelte";
+  import { dockerState, openTerminalSession, setEventCooldown, clearEventCooldown } from "../store.svelte";
   import { getCurrentPresetForInstance, getContainerPresetMap, PRESET_LABELS, PRESET_COLORS } from "../lib/presetStateManager";
   import { refreshManual } from "../lib/dataPoller";
   import { blockingCapability, capabilityNotice } from "../store/capabilities.svelte";
@@ -33,9 +33,20 @@
       inline cluster stays down to the lifecycle controls people reach for. */
   let rowMenu = $state<{ x: number; y: number; container: DockerContainer } | null>(null);
 
+  function openContainerTerminal(c: DockerContainer) {
+    selectedContainerId = null;
+    openTerminalSession({ kind: "dockerExec", container: c.Id, label: c.Names });
+  }
+
   function rowMenuItems(c: DockerContainer) {
     const busy = !!actionLoading?.startsWith(c.Id);
     return [
+      {
+        label: t('containers.open_terminal', { default: 'Open terminal' }),
+        icon: Icons.Terminal,
+        disabled: busy || c.State !== 'running',
+        action: () => openContainerTerminal(c),
+      },
       {
         label: t('containers.copy_in', { default: 'Copy file into container' }),
         icon: Icons.CopyIn,
@@ -555,7 +566,7 @@
   {/if}
 
   {#if filtered.length > 0}
-    <div class="vtable" use:columnResize style="--cols: 44px var(--col-1, minmax(180px,1.5fr)) var(--col-2, minmax(150px,1fr)) var(--col-3, minmax(170px,200px)) var(--col-4, minmax(130px,1fr)) 140px;">
+    <div class="vtable" use:columnResize style="--cols: 44px var(--col-1, minmax(180px,1.5fr)) var(--col-2, minmax(150px,1fr)) var(--col-3, minmax(170px,200px)) var(--col-4, minmax(130px,1fr)) 156px;">
       <div class="vtable-x">
       <div class="vtable-header" style="display: grid; grid-template-columns: var(--cols);">
         <div class="vtable-header-cell" style="text-align: center;">
@@ -641,8 +652,11 @@
                 {:else}
                   <button class="btn btn-ghost btn-icon btn-play" data-tooltip={t('containers.start', { default: 'Start' })} aria-label={t('containers.start', { default: 'Start' })} disabled={!!isLoading} onclick={() => handleAction(c.Id, c.Names, 'start')}>{@html Icons.Play}</button>
                 {/if}
-                <button class="btn btn-ghost btn-icon" data-tooltip={t('containers.restart', { default: 'Restart' })} disabled={!!isLoading} onclick={() => handleAction(c.Id, c.Names, 'restart')}>{@html Icons.Refresh}</button>
-                <button class="btn btn-ghost btn-icon" data-tooltip={t('common.more_actions', { default: 'More actions' })} aria-haspopup="menu" onclick={(e) => openRowMenu(e, c)}>{@html Icons.More}</button>
+                {#if isRunning}
+                  <button class="btn btn-ghost btn-icon" data-tooltip={t('containers.open_terminal', { default: 'Open terminal' })} aria-label="{t('containers.open_terminal', { default: 'Open terminal' })} {c.Names}" disabled={!!isLoading} onclick={() => openContainerTerminal(c)}>{@html Icons.Terminal}</button>
+                {/if}
+                <button class="btn btn-ghost btn-icon" data-tooltip={t('containers.restart', { default: 'Restart' })} aria-label="{t('containers.restart', { default: 'Restart' })} {c.Names}" disabled={!!isLoading} onclick={() => handleAction(c.Id, c.Names, 'restart')}>{@html Icons.Refresh}</button>
+                <button class="btn btn-ghost btn-icon" data-tooltip={t('common.more_actions', { default: 'More actions' })} aria-label="{t('common.more_actions', { default: 'More actions' })} {c.Names}" aria-haspopup="menu" onclick={(e) => openRowMenu(e, c)}>{@html Icons.More}</button>
               </div>
             </div>
           </div>
@@ -706,6 +720,7 @@
         </div>
         <div style="display: flex; gap: 6px; align-items: center;">
           {#if isRunning}
+            <button class="btn btn-ghost" style="font-size: var(--text-xs); display: inline-flex; align-items: center; gap: 4px;" onclick={() => openContainerTerminal(selectedContainer!)}>{@html Icons.Terminal} {t('sidebar.terminal', { default: 'Terminal' })}</button>
             <button class="btn btn-ghost" style="font-size: var(--text-xs);" onclick={() => handleAction(selectedContainer!.Id, selectedContainer!.Names, "stop")}>Stop</button>
             <button class="btn btn-ghost" style="font-size: var(--text-xs);" onclick={() => handleAction(selectedContainer!.Id, selectedContainer!.Names, "restart")}>Restart</button>
           {:else}
@@ -772,6 +787,19 @@
         {/if}
       {:else if detailTab === "exec"}
         {#if isRunning}
+          <div style="display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 12px; margin-bottom: 12px; background: var(--bg-secondary); border: 1px solid var(--border-primary); border-radius: var(--radius-md);">
+            <span style="font-size: var(--text-xs); color: var(--text-secondary);">
+              Interactive PTY shell (<code>vim</code>, <code>htop</code>, tab-completion, <code>Ctrl+C</code>, resize)
+            </span>
+            <button
+              class="btn btn-primary"
+              style="font-size: var(--text-xs); display: inline-flex; align-items: center; gap: 6px; flex-shrink: 0;"
+              onclick={() => openContainerTerminal(selectedContainer!)}
+            >
+              {@html Icons.Terminal}
+              {t('containers.open_interactive_terminal', { default: 'Open Interactive Terminal (PTY)' })}
+            </button>
+          </div>
           <div bind:this={execRef} style="background: var(--bg-primary); border-radius: 8px; padding: 12px; max-height: 40vh; overflow: auto; margin-bottom: 12px; min-height: 120px;">
             {#if detailExecOutput.length === 0}
               <div style="color: var(--text-muted); font-size: var(--text-sm);">Run commands inside '{selectedContainer.Names}'. Output will appear here.</div>

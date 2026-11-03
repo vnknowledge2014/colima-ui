@@ -11,7 +11,7 @@
   import SelfHealing from "./settings/SelfHealing.svelte";
   import ColimaConfig from "./settings/ColimaConfig.svelte";
 
-  let { systemInfo } = $props<{ systemInfo: SystemInfo | null }>();
+  let { systemInfo }: { systemInfo: SystemInfo | null } = $props();
 
   // Fix: use version string presence as fallback for installed status in case backend boolean is unreliable
   const deps = $derived([

@@ -5,14 +5,14 @@
   // Shared Settings layout: a titled header bar visually separated from its
   // content, so every section on the page reads as one system instead of each
   // inventing its own heading style.
-  let { title, icon, description, el = $bindable(), children } = $props<{
+  let { title, icon, description, el = $bindable(), children }: {
     title: string;
     icon?: string;
     description?: string;
     /** Optional: expose the root card element (e.g. for scroll-into-view). */
     el?: HTMLDivElement | null;
     children: Snippet;
-  }>();
+  } = $props();
 </script>
 
 <div class="card settings-section" bind:this={el}>

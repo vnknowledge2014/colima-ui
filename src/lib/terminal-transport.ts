@@ -14,7 +14,8 @@
 export type SessionKind =
   | { kind: "colima"; profile: string }
   | { kind: "lima"; instance: string }
-  | { kind: "k8sExec"; namespace: string; pod: string; container: string };
+  | { kind: "k8sExec"; namespace: string; pod: string; container: string }
+  | { kind: "dockerExec"; container: string; label?: string };
 
 /** Human label for a tab. */
 export function sessionLabel(k: SessionKind): string {
@@ -25,17 +26,19 @@ export function sessionLabel(k: SessionKind): string {
       return `🐧 ${k.instance}`;
     case "k8sExec":
       return k.container ? `${k.pod}/${k.container}` : k.pod;
+    case "dockerExec":
+      return `🐳 ${k.label || k.container}`;
   }
 }
 
 /**
  * Explain an exit code when the raw one is useless on its own.
  *
- * `kubectl exec` returns 127 with an OCI runtime error when the requested
- * program is not in the image. For a shell that means the image has none —
- * coredns and other `FROM scratch` / distroless builds ship only their binary.
- * No argv fixes that, so the honest response is to say so and point at what
- * does work.
+ * `kubectl exec` and `docker exec` return 126/127 with an OCI runtime error
+ * when `/bin/sh` is absent or non-executable. For a shell that means the image
+ * has none — coredns and other `FROM scratch` / distroless builds ship only
+ * their binary. No argv fixes that, so the honest response is to say so and
+ * point at what does work.
  *
  * Returns null when the code speaks for itself.
  */
@@ -48,6 +51,13 @@ export function exitHint(kind: SessionKind, code: number): string | null {
       "container with: kubectl debug -it " +
       `-n ${kind.namespace} ${kind.pod} --image=busybox --target=` +
       `${kind.container || "<container>"}`
+    );
+  }
+  if (kind.kind === "dockerExec" && (code === 126 || code === 127)) {
+    return (
+      "This image has no shell (/bin/sh), so there is nothing to attach to. " +
+      "Images built FROM scratch or on a distroless base ship only their " +
+      "binary. Use the container's Logs tab to inspect output instead."
     );
   }
   return null;

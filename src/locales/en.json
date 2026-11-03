@@ -178,7 +178,9 @@
     "paused": "Paused",
     "unpause": "Unpause",
     "restart": "Restart",
-    "no_containers": "No containers"
+    "no_containers": "No containers",
+    "open_terminal": "Open terminal",
+    "open_interactive_terminal": "Open Interactive Terminal (PTY)"
   },
   "diff": {
     "no_changes": "No changes",
@@ -508,7 +510,8 @@
     "title": "Terminal",
     "new_session": "New Session",
     "no_sessions": "No terminal sessions",
-    "instructions": "Open a new SSH session to a running instance."
+    "instructions": "Open a new SSH session to a running instance.",
+    "docker_containers": "Docker Containers"
   },
   "compose": {
     "diagnose": {

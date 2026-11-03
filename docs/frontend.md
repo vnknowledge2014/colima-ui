@@ -26,7 +26,7 @@ src/
 |------|------|-------------|
 | Dashboard | `Dashboard.svelte` | System overview, resource counts, quick navigation |
 | Instances | `Instances.svelte` | Colima instance & Kind cluster management |
-| Containers | `Containers.svelte` | Docker container list, actions, stats, logs |
+| Containers | `Containers.svelte` | Docker container list, actions, stats, logs, interactive PTY terminal launch |
 | Images | `Images.svelte` | Docker image management |
 | Volumes | `Volumes.svelte` | Docker volume management |
 | Networks | `Networks.svelte` | Docker network management |
@@ -36,7 +36,7 @@ src/
 | Kubernetes | `Kubernetes.svelte` | Multi-resource K8s browser |
 | Linux VMs | `LinuxVMs.svelte` | Lima VM management |
 | Models | `Models.svelte` | Ollama AI model management |
-| Terminal | `Terminal.svelte` | Integrated xterm.js terminal |
+| Terminal | `Terminal.svelte` | Integrated xterm.js PTY terminal (`colima`, `lima`, `dockerExec`, `k8sExec`) |
 | Terminal Instance | `TerminalInstance.svelte` | Individual terminal tab |
 | Settings | `Settings.svelte` | System info, AI provider config, privacy/telemetry, notifications, disk usage, prune |
 | Security | `Security.svelte` | Local Trivy vulnerability scanning, `/100` provenance score breakdown, config rules, base-image alternatives, Falco runtime stream, and container Detonation |
@@ -177,6 +177,7 @@ es.addEventListener('instances', (e) => {
 | `i18n.svelte.ts` | Internationalization with reactive locale (`en`, `ja`, `vi`, `zh`) |
 | `settingsStore.svelte.ts` | SQLite-backed persistent settings |
 | `presetStateManager.ts` | Instance configuration preset management |
+| `terminal-transport.ts` | Tauri IPC PTY transport, `SessionKind` (`colima`, `lima`, `dockerExec`, `k8sExec`), tab labels, and shell-less `exitHint` |
 
 ### Notifications and background transfers
 
@@ -294,3 +295,4 @@ Test files follow the `*.test.ts` convention alongside source files:
 - `normalizers.test.ts`
 - `markdown.test.ts`
 - `i18n.test.ts`
+- `terminal-transport.test.ts`

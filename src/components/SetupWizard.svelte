@@ -6,11 +6,11 @@
   import { loadCapabilities, capability } from "../store/capabilities.svelte";
   import Icon from "./Icon.svelte";
 
-  let { systemInfo, onComplete, onSkip } = $props<{
+  let { systemInfo, onComplete, onSkip }: {
     systemInfo: SystemInfo | null;
     onComplete: () => void;
     onSkip: () => void;
-  }>();
+  } = $props();
 
   type DepName = "homebrew" | "colima" | "docker" | "lima";
   type DepStatus = "checking" | "installed" | "missing" | "installing" | "failed";

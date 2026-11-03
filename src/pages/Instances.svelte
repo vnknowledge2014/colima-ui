@@ -14,7 +14,7 @@
     description?: string; color?: string; runtime?: string;
   }
 
-  let { onRefresh } = $props<{ onRefresh: () => void }>();
+  let { onRefresh }: { onRefresh: () => void } = $props();
 
   // --- State ---
   let showCreate = $state(false);

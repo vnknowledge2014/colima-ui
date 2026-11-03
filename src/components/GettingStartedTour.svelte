@@ -2,9 +2,9 @@
   import { onMount } from "svelte";
   import TourTooltip from "./TourTooltip.svelte";
 
-  let { onComplete } = $props<{
+  let { onComplete }: {
     onComplete: () => void;
-  }>();
+  } = $props();
 
   interface TourStep {
     targetSelector: string;
