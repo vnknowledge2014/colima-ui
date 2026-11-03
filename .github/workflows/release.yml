@@ -74,9 +74,12 @@ jobs:
             local attempt=0
             local max_attempts=40 # up to 10 minutes (40 * 15s)
             while (( attempt < max_attempts )); do
-              local state
-              state=$(gh api "repos/${GITHUB_REPOSITORY}/commits/${sha}/check-runs" \
-                --jq '[.check_runs[] | select(.name == "ci")][0] | "\(.status // "none"):\(.conclusion // "none")"' 2>/dev/null || echo "none:none")
+              local state="none:none"
+              local raw_state
+              if raw_state=$(gh api "repos/${GITHUB_REPOSITORY}/commits/${sha}/check-runs" \
+                --jq '[.check_runs[] | select(.name == "ci")][0] | "\(.status // "none"):\(.conclusion // "none")"' 2>/dev/null); then
+                state="$raw_state"
+              fi
               local status="${state%%:*}"
               local conclusion="${state#*:}"
 
@@ -111,8 +114,11 @@ jobs:
 
             MAIN_TIP=$(git rev-parse origin/main)
             if [[ "$TARGET_SHA" != "$MAIN_TIP" ]]; then
-              TIP_CONCLUSION=$(gh api "repos/${GITHUB_REPOSITORY}/commits/${MAIN_TIP}/check-runs" \
-                --jq '[.check_runs[] | select(.name == "ci")][0].conclusion // ""' 2>/dev/null || echo "")
+              TIP_CONCLUSION=""
+              if RAW_TIP=$(gh api "repos/${GITHUB_REPOSITORY}/commits/${MAIN_TIP}/check-runs" \
+                --jq '[.check_runs[] | select(.name == "ci")][0].conclusion // ""' 2>/dev/null); then
+                TIP_CONCLUSION="$RAW_TIP"
+              fi
               if [[ "$TIP_CONCLUSION" == "success" ]]; then
                 echo "⏭️ Newer main commit $MAIN_TIP already passed CI; skipping intermediate release for $TARGET_SHA"
                 echo "should_release=false" >> "$GITHUB_OUTPUT"
@@ -120,12 +126,12 @@ jobs:
               fi
             fi
 
-            EXISTING_TAG=$(git tag --points-at "$TARGET_SHA" 'v*' | sort -V | tail -n 1 || echo "")
+            EXISTING_TAG=$(git tag --points-at "$TARGET_SHA" 'v*' | sort -V | tail -n 1 || true)
             if [[ -n "$EXISTING_TAG" ]]; then
-              PUBLISHED_ID=$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${EXISTING_TAG}" \
-                --jq 'select(.draft == false) | .id' 2>/dev/null || echo "")
-              if [[ -n "$PUBLISHED_ID" ]]; then
-                echo "⏭️ Commit $TARGET_SHA is already published under tag $EXISTING_TAG; skipping."
+              PUBLISHED_ID=$(gh api "repos/${GITHUB_REPOSITORY}/releases?per_page=30" \
+                --jq "[.[] | select(.draft == false and .tag_name == \"${EXISTING_TAG}\")][0].id // empty")
+              if [[ "$PUBLISHED_ID" =~ ^[0-9]+$ ]]; then
+                echo "⏭️ Commit $TARGET_SHA is already published under tag $EXISTING_TAG (release $PUBLISHED_ID); skipping."
                 echo "should_release=false" >> "$GITHUB_OUTPUT"
                 exit 0
               fi
@@ -244,37 +250,46 @@ jobs:
         run: |
           set -euo pipefail
 
+          RELEASES_JSON=$(gh api "repos/${GITHUB_REPOSITORY}/releases?per_page=30")
+
           # If a published release already exists for this tag, reuse it
-          EXISTING_PUBLISHED_ID=$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${TAG}" \
-            --jq 'select(.draft == false) | .id' 2>/dev/null || echo "")
-          if [[ -n "$EXISTING_PUBLISHED_ID" ]]; then
+          EXISTING_PUBLISHED_ID=$(jq -r --arg tag "$TAG" \
+            '[.[] | select(.draft == false and .tag_name == $tag)][0].id // empty' <<< "$RELEASES_JSON")
+          if [[ "$EXISTING_PUBLISHED_ID" =~ ^[0-9]+$ ]]; then
             echo "♻️ Reusing existing published release ID $EXISTING_PUBLISHED_ID for $TAG"
             echo "release_id=$EXISTING_PUBLISHED_ID" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
           # Remove any stale draft releases for this tag so parallel uploads never split across drafts
-          STALE_DRAFTS=$(gh api "repos/${GITHUB_REPOSITORY}/releases?per_page=30" \
-            --jq ".[] | select(.draft == true and .tag_name == \"${TAG}\") | .id" 2>/dev/null || echo "")
+          STALE_DRAFTS=$(jq -r --arg tag "$TAG" \
+            '.[] | select(.draft == true and .tag_name == $tag) | .id' <<< "$RELEASES_JSON")
           for draft_id in $STALE_DRAFTS; do
-            echo "🧹 Removing stale draft release $draft_id for $TAG"
-            gh api -X DELETE "repos/${GITHUB_REPOSITORY}/releases/${draft_id}" || true
+            if [[ "$draft_id" =~ ^[0-9]+$ ]]; then
+              echo "🧹 Removing stale draft release $draft_id for $TAG"
+              gh api -X DELETE "repos/${GITHUB_REPOSITORY}/releases/${draft_id}" || true
+            fi
           done
 
-          PREV_PUBLISHED_TAG=$(gh api "repos/${GITHUB_REPOSITORY}/releases/latest" \
-            --jq '.tag_name' 2>/dev/null || echo "")
+          PREV_PUBLISHED_TAG=$(jq -r --arg tag "$TAG" \
+            '[.[] | select(.draft == false and .prerelease == false and .tag_name != $tag)][0].tag_name // empty' <<< "$RELEASES_JSON")
 
-          if [[ -n "$PREV_PUBLISHED_TAG" && "$PREV_PUBLISHED_TAG" != "$TAG" ]]; then
-            GENERATED_NOTES=$(gh api -X POST "repos/${GITHUB_REPOSITORY}/releases/generate-notes" \
+          GENERATED_NOTES=""
+          if [[ -n "$PREV_PUBLISHED_TAG" ]]; then
+            if RAW_NOTES=$(gh api -X POST "repos/${GITHUB_REPOSITORY}/releases/generate-notes" \
               -f tag_name="$TAG" \
               -f target_commitish="$TARGET_SHA" \
               -f previous_tag_name="$PREV_PUBLISHED_TAG" \
-              --jq '.body' 2>/dev/null || echo "")
+              --jq '.body' 2>/dev/null); then
+              GENERATED_NOTES="$RAW_NOTES"
+            fi
           else
-            GENERATED_NOTES=$(gh api -X POST "repos/${GITHUB_REPOSITORY}/releases/generate-notes" \
+            if RAW_NOTES=$(gh api -X POST "repos/${GITHUB_REPOSITORY}/releases/generate-notes" \
               -f tag_name="$TAG" \
               -f target_commitish="$TARGET_SHA" \
-              --jq '.body' 2>/dev/null || echo "")
+              --jq '.body' 2>/dev/null); then
+              GENERATED_NOTES="$RAW_NOTES"
+            fi
           fi
 
           GENERATED_NOTES="$GENERATED_NOTES" node -e '
@@ -341,6 +356,10 @@ jobs:
           RELEASE_ID=$(gh api -X POST "repos/${GITHUB_REPOSITORY}/releases" \
             --input /tmp/release-payload.json \
             --jq '.id')
+          if [[ ! "$RELEASE_ID" =~ ^[0-9]+$ ]]; then
+            echo "❌ Failed to create numeric Draft Release ID (got: '$RELEASE_ID')"
+            exit 1
+          fi
           echo "📝 Created Draft Release ID $RELEASE_ID for $TAG"
           echo "release_id=$RELEASE_ID" >> "$GITHUB_OUTPUT"
 
@@ -499,7 +518,7 @@ jobs:
           set -euo pipefail
           echo "🔍 Verifying uploaded assets on release ${RELEASE_ID} (${TAG}, ${CHANNEL})..."
 
-          ASSETS=$(gh api "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}" --jq '.assets[].name' || echo "")
+          ASSETS=$(gh api "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}" --jq '.assets[].name')
           if [[ -z "$ASSETS" ]]; then
             echo "❌ No assets found on release ${RELEASE_ID}"
             exit 1
