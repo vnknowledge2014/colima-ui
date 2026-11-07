@@ -30,8 +30,8 @@ Grab the latest release from [**GitHub Releases**](https://github.com/vnknowledg
 | **macOS** (Intel) | `ColimaUI_*_x64.dmg` | x86_64 |
 | **Linux** (Debian/Ubuntu) | `ColimaUI_*_amd64.deb` | x86_64 |
 | **Linux** (Universal) | `ColimaUI_*_amd64.AppImage` | x86_64 |
-| **Standalone Headless AI & MCP CLI (`cui`)** | `cui-{aarch64-apple-darwin,x86_64-apple-darwin,x86_64-unknown-linux-gnu}.tar.gz` | macOS ARM64 / Intel, Linux x86_64 |
-| **Standalone Direct CLI (`colimaui`)** | `colimaui-{aarch64-apple-darwin,x86_64-apple-darwin,x86_64-unknown-linux-gnu}.tar.gz` | macOS ARM64 / Intel, Linux x86_64 |
+| **Standalone Unified CLI, A2A & MCP (`cui`)** | `cui-{aarch64-apple-darwin,x86_64-apple-darwin,x86_64-unknown-linux-gnu}.tar.gz` | macOS ARM64 / Intel, Linux x86_64 |
+| **Backward-Compatible CLI Alias (`colimaui`)** | `colimaui-{aarch64-apple-darwin,x86_64-apple-darwin,x86_64-unknown-linux-gnu}.tar.gz` | macOS ARM64 / Intel, Linux x86_64 |
 
 > **macOS Gatekeeper:** Pre-built DMGs are currently unsigned. If macOS shows
 > *"ColimaUI.app is damaged and can't be opened"*, open **System Settings →
@@ -53,8 +53,8 @@ Grab the latest release from [**GitHub Releases**](https://github.com/vnknowledg
 
 | Pillar | Capabilities |
 |--------|--------------|
-| **Command Center AI** | Multi-provider agent (**6 built-in provider modes**: `anthropic`, `openai`, `gemini`, `ollama-local`, `ollama-cloud`, and `openai-compatible` covering any OpenAI-compatible gateway such as OpenRouter, Groq, DeepSeek, Mistral, Together AI, LiteLLM, 9router, vLLM, or LM Studio) with **100** bracket-tag Event Bus tools across **17** navigable UI pages, `<think>` reasoning blocks, **3-tier guided UX** (context-aware empty state, interactive choice cards, follow-up chips), safe Terminal command handoff, and multi-conversation SQLite history |
-| **CLI & Native MCP Server** | Headless multi-turn AI CLI (`cui`), direct subcommand CLI (`colimaui`), and built-in **JSON-RPC 2.0 MCP stdio server** (`cui mcp` / `colimaui mcp`) exposing **15 typed tools** that work seamlessly whether ColimaUI Desktop is running or closed |
+| **Command Center AI (Inside App)** | Multi-provider agent (**6 built-in provider modes**: `anthropic`, `openai`, `gemini`, `ollama-local`, `ollama-cloud`, and `openai-compatible` covering OpenRouter, Groq, DeepSeek, Mistral, Together AI, LiteLLM, 9router, vLLM, or LM Studio) with **100** bracket-tag Event Bus tools across **17** navigable UI pages, Internal Skills (`system_prompt.md`, `router.md`, `src-tauri/resources/skills/*`), Knowledge Bank RAG + FTS5 Memories, Live UI Bridge (`ui-navigate` & `agent-external-chat-turn`), `<think>` reasoning blocks, **3-tier guided UX**, safe Terminal handoff, and multi-conversation SQLite history |
+| **CLI-First `cui` (`v0.3.0`), A2A & 22-Tool MCP (Outside App)** | Unified `cui` control plane (with `colimaui` preserved as a backward-compatible alias): **22 subcommands** (`< 5ms` over `:11420..11429` when Desktop is open, automatic standalone Rust fallback when Desktop is closed, global `--json` returning `{"ok": true, "data": ...}`), isolated A2A sessions (`colima-a2a-default-session` + opt-in `--mirror-ui`), Native HTTP A2A (`/.well-known/agent.json`, `/a2a`), and a **22-tool JSON-RPC 2.0 MCP stdio server** (`cui mcp` / `colimaui mcp`) |
 | **Security & Runtime Auditing** | Local Trivy vulnerability scanning with provenance-backed scores, CycloneDX/SPDX SBOM export, configuration rule pack (`L1`–`L3`), local base-image alternatives catalog, Falco runtime event stream, and isolated container Detonation sandbox |
 | **Topology, Live Activity & Self-Healing** | Interactive Docker & Kubernetes topology graphs, low-overhead Bollard live metrics, alert rules with historical backtesting, self-healing rules with kill switch, Compose Diagnose & AI Autofix (preview/apply/undo), and background TAR/file transfers |
 | **100% Free & Open Source (MIT)** | All features unlocked out of the box with zero account or sign-in required and strict BYOK local-first privacy |
@@ -74,19 +74,32 @@ Grab the latest release from [**GitHub Releases**](https://github.com/vnknowledg
 - **Environment Provenance & Duality** — Read-only diagnostic view comparing `launchd` vs user shell environment variables alongside resolved Colima, Lima, Docker socket, and Kubeconfig paths
 - Offline full-text searchable Help Center (`articles_fts`) and full UI localization across **4 languages** (`en`, `ja`, `vi`, `zh`)
 
-### 🤖 Headless CLI (`cui` / `colimaui`) & Native MCP Server
+### 🤖 Dual-Surface CLI-First (`cui` `v0.3.0`), Native A2A & 22-Tool MCP Server
 
-GitHub Releases (`v0.2.2+`) include standalone `cui` and `colimaui` tarballs alongside desktop installers:
+ColimaUI `v0.3.0` pairs its in-app **Command Center AI** (`AiChatPanel` + `agentCore.ts` + Internal Skills) with an external **CLI-First control plane (`cui`, with `colimaui` preserved as a backward-compatible alias)**. Every direct `cui` subcommand executes in `< 5ms` over localhost HTTP (`127.0.0.1:11420..11429`) when ColimaUI Desktop is open, and **automatically falls back to standalone native Rust execution** when Desktop is closed. Passing `--json` in any position emits `{"ok": true, "data": ...}` or `{"ok": false, "error": "..."}`:
 
 ```bash
-# Headless multi-turn AI agent (reads ~/.colima-ui/knowledge.db settings; read-only by default)
-cui "Check Colima status and summarize exited containers"
-cui --yes "Restart the exited redis container"
-cui --json --provider openai-compatible --model deepseek-chat "Inspect K8s pod health"
+# 20 deterministic < 5ms subcommand domains (+ `chat` and `mcp` = 22 subcommands):
+# vm | config | presets | container | image | volume | network | compose | k8s | kind |
+# lima | security | models | alerts | self-heal | memories (kb) | sessions | ui | events | doctor
+cui vm list --json
+cui container list --all --json
+cui k8s pods -n default --json
+cui compose diagnose ./docker-compose.yml --json
+cui security scan nginx:latest --json
+cui ui navigate kubernetes --section pods --toast "Inspecting failing pods" --json
+cui doctor --json
+
+# Multi-turn AI agent chat (isolated to `colima-a2a-default-session` by default; --mirror-ui mirrors into AiChatPanel)
+cui chat "Check Colima status and summarize exited containers" --session colima-a2a-default-session --json
+cui chat "Restart the exited redis container" --session colima-a2a-default-session --yes --mirror-ui --json
+cui "Inspect K8s pod health" --provider openai-compatible --model deepseek-chat --json
 # Provider IDs: anthropic | openai | gemini | openai-compatible | ollama-local | ollama-cloud
 ```
 
-**Native MCP Stdio Server (`cui mcp` or `colimaui mcp`)** — Exposes **15 typed JSON-RPC 2.0 MCP tools** (`colima_list_instances`, `colima_instance_action`, `docker_list_containers`, `docker_container_action`, `docker_container_logs`, `docker_list_images`, `docker_pull_image`, `docker_list_volumes`, `docker_list_networks`, `compose_list_projects`, `k8s_list_pods`, `k8s_cluster_status`, `environment_resolutions`, `system_diagnostics`, `colima_ai_ask`). Automatically proxies via `127.0.0.1:<api_port>` when ColimaUI Desktop is open, or executes directly via native fallback when Desktop is closed:
+**Native HTTP A2A Protocol (`/.well-known/agent.json` & `/a2a`)** — Exposes a Bearer-authenticated (`~/.colima-ui/api_token`, `0600`) A2A Agent Card at `GET /.well-known/agent.json` and JSON-RPC 2.0 endpoint at `POST /a2a` (`message/send`, `tasks/send`, `tasks/get`, `tasks/cancel`), keeping `GET /api/health` as the only public unauthenticated route and isolating automated sessions to `colima-a2a-default-session`.
+
+**Native MCP Stdio Server (`cui mcp` or `colimaui mcp`)** — Exposes **22 typed JSON-RPC 2.0 MCP tools** (`colima_list_instances`, `colima_instance_action`, `docker_list_containers`, `docker_container_action`, `docker_container_logs`, `docker_list_images`, `docker_pull_image`, `docker_list_volumes`, `docker_list_networks`, `compose_list_projects`, `k8s_list_pods`, `k8s_cluster_status`, `environment_resolutions`, `system_diagnostics`, `colima_ai_ask`, `security_scan_image`, `compose_diagnose_autofix`, `lima_manage`, `colima_config`, `kb_memories`, `chat_sessions`, `ui_navigate`). Automatically proxies via `127.0.0.1:<api_port>` when ColimaUI Desktop is open, or executes directly via native fallback when Desktop is closed:
 
 - **Claude Desktop** (`claude_desktop_config.json`), **Cursor** (`~/.cursor/mcp.json`), **Antigravity** (`~/.gemini/antigravity/mcp_config.json`), **Windsurf** (`~/.codeium/windsurf/mcp_config.json`):
   ```json
@@ -194,16 +207,16 @@ colima-ui/
 │   │   ├── lib.rs                # App setup, state & Tauri IPC command registration
 │   │   ├── api_server.rs         # Axum router & localhost HTTP/SSE server (11420–11429)
 │   │   ├── auth.rs               # CSPRNG Bearer token, IPC & 0600 ~/.colima-ui/api_token handoff
-│   │   ├── mcp.rs                # Native JSON-RPC 2.0 MCP stdio server (15 typed tools)
+│   │   ├── mcp.rs                # Native JSON-RPC 2.0 MCP stdio server (22 typed tools)
 │   │   ├── crash.rs              # Redacted panic hook & ~/.colima-ui/crashes report store
 │   │   ├── commands/             # Command modules (Docker, K8s, Colima, Security, Metrics, AI, KB, Env, ...)
-│   │   ├── routes/               # HTTP route modules (thin delegation to commands/)
+│   │   ├── routes/               # HTTP & A2A route modules (thin delegation to commands/)
 │   │   ├── adapters/             # Unified DevOps CLI adapter traits
 │   │   ├── services/             # High-level orchestration layer
 │   │   ├── telemetry/            # Opt-in closed-vocabulary telemetry & redaction
 │   │   ├── pro/                  # MIT-side Pro sidecar boundary (free by default)
 │   │   ├── subscription/         # Local offline entitlement state cache
-│   │   ├── bin/                  # Standalone CLI & MCP binaries (cui, colimaui)
+│   │   ├── bin/                  # Standalone CLI-First, A2A & MCP binaries (cui v0.3.0 + colimaui alias)
 │   │   ├── sse.rs                # SSE broadcast & topic subscriber tracking
 │   │   ├── error.rs              # Structured ColimaError classification & remediation hints
 │   │   ├── redact.rs             # Credential & secret redaction

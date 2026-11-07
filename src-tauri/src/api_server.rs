@@ -290,6 +290,7 @@ pub fn build_router() -> Router {
         .route("/api/ai/search", post(api_ai_search))
         .route("/api/ai/fetch-page", post(api_ai_fetch_page))
         .route("/api/ai/context", get(api_ai_context))
+        .route("/api/ai/reference", get(api_ai_reference))
         .route("/api/ai/history", get(api_ai_load_history).post(api_ai_save_message))
         .route("/api/ai/history/clear", post(api_ai_clear_history))
         .route("/api/ai/conversations", get(api_ai_list_conversations).post(api_ai_create_conversation))
@@ -331,6 +332,12 @@ pub fn build_router() -> Router {
         .route("/api/capabilities", get(api_capabilities))
         // Diagnostics
         .route("/api/diagnostics/logs", get(api_diagnostics_logs))
+        // UI Remote Control Bridge
+        .route("/api/ui/navigate", post(crate::routes::ui::api_ui_navigate))
+        .route("/api/ui/state", get(crate::routes::ui::api_ui_state))
+        // Native A2A v0.2.1 Protocol
+        .route("/.well-known/agent.json", get(crate::routes::a2a::api_a2a_agent_card))
+        .route("/a2a", post(crate::routes::a2a::api_a2a_rpc))
         // Terminal sessions used to live here, over HTTP. They are Tauri
         // commands now: a shell endpoint reachable on a local port is arbitrary
         // code execution, and the safest version of that endpoint is one that
@@ -636,5 +643,229 @@ mod tests {
             .unwrap();
         assert_ne!(unpause_json.status(), StatusCode::NOT_FOUND);
         assert_ne!(unpause_json.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    }
+
+    #[tokio::test]
+    async fn a2a_ui_and_reference_routes_enforce_bearer_auth_and_contracts() {
+        use axum::body::to_bytes;
+
+        // 1. `/api/health` remains public while all new A2A, UI, and AI reference routes require auth.
+        assert_eq!(status_of("/api/health", None).await, StatusCode::OK);
+        assert_eq!(
+            status_of("/.well-known/agent.json", None).await,
+            StatusCode::UNAUTHORIZED
+        );
+        assert_eq!(
+            status_of("/api/ui/state", None).await,
+            StatusCode::UNAUTHORIZED
+        );
+        assert_eq!(
+            status_of("/api/ai/reference?path=router.md", None).await,
+            StatusCode::UNAUTHORIZED
+        );
+
+        let unauth_a2a = build_router()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/a2a")
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"jsonrpc":"2.0","id":1,"method":"tasks/get","params":{"id":"x"}}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(unauth_a2a.status(), StatusCode::UNAUTHORIZED);
+
+        let unauth_ui_nav = build_router()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/ui/navigate")
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"page":"containers"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(unauth_ui_nav.status(), StatusCode::UNAUTHORIZED);
+
+        let bearer = format!("Bearer {}", get_api_token());
+
+        // 2. Agent Card (`GET /.well-known/agent.json`) with valid Bearer token
+        let card_res = build_router()
+            .oneshot(
+                Request::builder()
+                    .uri("/.well-known/agent.json")
+                    .header("authorization", &bearer)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(card_res.status(), StatusCode::OK);
+        let card_bytes = to_bytes(card_res.into_body(), 1024 * 1024).await.unwrap();
+        let card_json: serde_json::Value = serde_json::from_slice(&card_bytes).unwrap();
+        assert_eq!(card_json["protocolVersion"], "0.2.1");
+        assert_eq!(card_json["authentication"]["schemes"][0], "Bearer");
+        assert_eq!(card_json["skills"].as_array().map(Vec::len), Some(6));
+
+        // 3. A2A JSON-RPC (`POST /a2a`): seed task -> `tasks/get` -> `tasks/cancel` -> unknown method
+        let seeded_id = "router-test-a2a-task-1";
+        crate::a2a::upsert_task(
+            crate::a2a::A2aTask {
+                id: seeded_id.to_string(),
+                session_id: crate::commands::ai_chat::A2A_DEFAULT_CONVERSATION_ID.to_string(),
+                status: crate::a2a::A2aTaskStatus {
+                    state: "working".to_string(),
+                    message: None,
+                    timestamp: "2026-11-07T00:00:00Z".to_string(),
+                },
+                history: Vec::new(),
+                artifacts: Vec::new(),
+                state_transition_history: vec![crate::a2a::A2aStateTransition {
+                    state: "working".to_string(),
+                    timestamp: "2026-11-07T00:00:00Z".to_string(),
+                }],
+                metadata: None,
+            },
+            None,
+        );
+
+        let get_res = build_router()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/a2a")
+                    .header("authorization", &bearer)
+                    .header("content-type", "application/json")
+                    .body(Body::from(format!(
+                        r#"{{"jsonrpc":"2.0","id":10,"method":"tasks/get","params":{{"id":"{seeded_id}"}}}}"#
+                    )))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(get_res.status(), StatusCode::OK);
+        let get_json: serde_json::Value =
+            serde_json::from_slice(&to_bytes(get_res.into_body(), 1024 * 1024).await.unwrap())
+                .unwrap();
+        assert_eq!(get_json["result"]["id"], seeded_id);
+        assert_eq!(get_json["result"]["status"]["state"], "working");
+
+        let cancel_res = build_router()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/a2a")
+                    .header("authorization", &bearer)
+                    .header("content-type", "application/json")
+                    .body(Body::from(format!(
+                        r#"{{"jsonrpc":"2.0","id":11,"method":"tasks/cancel","params":{{"id":"{seeded_id}"}}}}"#
+                    )))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(cancel_res.status(), StatusCode::OK);
+        let cancel_json: serde_json::Value =
+            serde_json::from_slice(&to_bytes(cancel_res.into_body(), 1024 * 1024).await.unwrap())
+                .unwrap();
+        assert_eq!(cancel_json["result"]["status"]["state"], "canceled");
+
+        let unknown_res = build_router()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/a2a")
+                    .header("authorization", &bearer)
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        r#"{"jsonrpc":"2.0","id":12,"method":"tasks/doesNotExist","params":{}}"#,
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(unknown_res.status(), StatusCode::OK);
+        let unknown_json: serde_json::Value =
+            serde_json::from_slice(&to_bytes(unknown_res.into_body(), 1024 * 1024).await.unwrap())
+                .unwrap();
+        assert_eq!(unknown_json["error"]["code"], -32601);
+
+        // 4. UI Remote Control (`GET /api/ui/state` & `POST /api/ui/navigate`)
+        let ui_state_res = build_router()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/ui/state")
+                    .header("authorization", &bearer)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(ui_state_res.status(), StatusCode::OK);
+        let ui_state_json: serde_json::Value = serde_json::from_slice(
+            &to_bytes(ui_state_res.into_body(), 1024 * 1024)
+                .await
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            ui_state_json["data"]["a2a_default_session_id"],
+            crate::commands::ai_chat::A2A_DEFAULT_CONVERSATION_ID
+        );
+
+        let nav_ok = build_router()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/ui/navigate")
+                    .header("authorization", &bearer)
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        r#"{"page":"containers","section":"running","toast":"Switched to Containers"}"#,
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(nav_ok.status(), StatusCode::OK);
+
+        let nav_bad = build_router()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/ui/navigate")
+                    .header("authorization", &bearer)
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"page":"not-a-valid-page"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(nav_bad.status(), StatusCode::BAD_REQUEST);
+
+        // 5. Embedded AI Context & Reference (`GET /api/ai/context` & `GET /api/ai/reference`)
+        assert_eq!(
+            status_of("/api/ai/context", Some(&bearer)).await,
+            StatusCode::OK
+        );
+        assert_eq!(
+            status_of("/api/ai/reference?path=skills/colima/SKILL.md", Some(&bearer)).await,
+            StatusCode::OK
+        );
+        assert_eq!(
+            status_of("/api/ai/reference?path=../Cargo.toml", Some(&bearer)).await,
+            StatusCode::BAD_REQUEST
+        );
+        assert_eq!(
+            status_of("/api/ai/conversations", Some(&bearer)).await,
+            StatusCode::OK
+        );
+        assert_eq!(
+            status_of("/api/ai/conversations?include_a2a=true", Some(&bearer)).await,
+            StatusCode::OK
+        );
     }
 }

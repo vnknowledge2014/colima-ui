@@ -120,38 +120,49 @@ When building distributable release artifacts with Tauri updater signatures (and
 npm run tauri build
 ```
 
-### Standalone CLI Binaries & Native MCP Server
+### Standalone CLI Binaries (`cui` `v0.3.0` & `colimaui` Alias), Native A2A & 22-Tool MCP Server
 
-GitHub Releases (`v0.2.2+`) publish prebuilt standalone CLI archives alongside desktop installers:
-- `cui-{aarch64-apple-darwin,x86_64-apple-darwin,x86_64-unknown-linux-gnu}.tar.gz`
-- `colimaui-{aarch64-apple-darwin,x86_64-apple-darwin,x86_64-unknown-linux-gnu}.tar.gz`
+GitHub Releases publish prebuilt standalone CLI archives alongside desktop installers:
+- `cui-{aarch64-apple-darwin,x86_64-apple-darwin,x86_64-unknown-linux-gnu}.tar.gz` (primary unified CLI-First, A2A & MCP binary)
+- `colimaui-{aarch64-apple-darwin,x86_64-apple-darwin,x86_64-unknown-linux-gnu}.tar.gz` (backward-compatible CLI & MCP alias)
 
-You can also compile both Rust CLI targets locally from `src-tauri/src/bin/`:
+You can install or compile both Rust CLI targets locally from `src-tauri/src/bin/`:
 
-1. **`cui`** — Multi-turn headless AI CLI & MCP stdio server (reads `app_settings` from `~/.colima-ui/knowledge.db`, uses `~/.colima-ui/api_token` + `api_port` when Desktop is running, or falls back natively when closed):
+1. **`cui` (`v0.3.0`)** — Unified CLI-First control plane (**22 subcommands**: 20 deterministic `< 5ms` direct subcommands + `chat` + `mcp`), A2A session client, and 22-tool MCP stdio server. Proxies over `127.0.0.1:11420..11429` (`~/.colima-ui/api_port` + `0600` `~/.colima-ui/api_token`) when ColimaUI Desktop is open, and automatically falls back to standalone native Rust execution when Desktop is closed. Passing `--json` in any position emits `{"ok": true, "data": ...}` or `{"ok": false, "error": "..."}`:
    ```bash
+   # Install into ~/.cargo/bin/cui (or build in src-tauri/target/release/cui)
+   cargo install --path ~/Documents/colima-ui/src-tauri --bin cui
    cargo build --manifest-path src-tauri/Cargo.toml --bin cui --release
-   # Binary: src-tauri/target/release/cui
 
-   # Usage examples:
-   cui "Check Colima status and list running containers"
-   cui --yes "Restart the exited redis container"
-   cui --json --provider anthropic --model claude-sonnet-4-6 "Summarize K8s pod health"
-   cui --help
-   cui --version
+   # Verify installation & environment health
+   cui --version          # Expected: cui 0.3.0
+   cui doctor --json
+
+   # Instant < 5ms deterministic subcommands (20 direct domains):
+   # vm | config | presets | container | image | volume | network | compose | k8s | kind |
+   # lima | security | models | alerts | self-heal | memories (kb) | sessions | ui | events | doctor
+   cui vm list --json
+   cui container list --all --json
+   cui k8s pods -n default --json
+   cui ui navigate kubernetes --section pods --toast "Inspecting pods" --json
+
+   # Isolated A2A multi-turn chat (defaults to `colima-a2a-default-session`; --mirror-ui mirrors into AiChatPanel)
+   cui chat "Check Colima status and list exited containers" --session colima-a2a-default-session --json
+   cui chat "Restart the exited redis container" --session colima-a2a-default-session --yes --mirror-ui --json
+   cui "Summarize K8s pod health" --provider anthropic --model claude-sonnet-4-6 --json
    cui mcp
    ```
 
-2. **`colimaui`** — Direct subcommand CLI & MCP stdio server (gated behind the `cli` Cargo feature for `clap`):
+2. **`colimaui`** — Backward-compatible direct subcommand CLI & 22-tool MCP stdio server alias (gated behind the `cli` Cargo feature for `clap`):
    ```bash
    cargo build --manifest-path src-tauri/Cargo.toml --bin colimaui --features cli --release
    # Binary: src-tauri/target/release/colimaui
    colimaui mcp
    ```
 
-#### Connecting External AI Hosts via MCP (`cui mcp` / `colimaui mcp`)
+#### Connecting External AI Hosts via MCP (`cui mcp` / `colimaui mcp`) & Native A2A
 
-Both `cui mcp` and `colimaui mcp` expose **15 typed JSON-RPC 2.0 MCP tools** over `stdin`/`stdout` (`colima_list_instances`, `colima_instance_action`, `docker_list_containers`, `docker_container_action`, `docker_container_logs`, `docker_list_images`, `docker_pull_image`, `docker_list_volumes`, `docker_list_networks`, `compose_list_projects`, `k8s_list_pods`, `k8s_cluster_status`, `environment_resolutions`, `system_diagnostics`, `colima_ai_ask`), working seamlessly whether ColimaUI Desktop is open or closed:
+Both `cui mcp` and `colimaui mcp` expose **22 typed JSON-RPC 2.0 MCP tools** over `stdin`/`stdout` (`colima_list_instances`, `colima_instance_action`, `docker_list_containers`, `docker_container_action`, `docker_container_logs`, `docker_list_images`, `docker_pull_image`, `docker_list_volumes`, `docker_list_networks`, `compose_list_projects`, `k8s_list_pods`, `k8s_cluster_status`, `environment_resolutions`, `system_diagnostics`, `colima_ai_ask`, `security_scan_image`, `compose_diagnose_autofix`, `lima_manage`, `colima_config`, `kb_memories`, `chat_sessions`, `ui_navigate`), working seamlessly whether ColimaUI Desktop is open or closed:
 
 - **Claude Desktop** (`~/Library/Application Support/Claude/claude_desktop_config.json`), **Cursor** (`~/.cursor/mcp.json`), **Antigravity** (`~/.gemini/antigravity/mcp_config.json`), **Windsurf** (`~/.codeium/windsurf/mcp_config.json`):
   ```json
@@ -164,6 +175,12 @@ Both `cui mcp` and `colimaui mcp` expose **15 typed JSON-RPC 2.0 MCP tools** ove
 - **Claude Code**:
   ```bash
   claude mcp add colima-ui -- cui mcp
+  ```
+- **Native HTTP A2A Discovery & JSON-RPC 2.0** (authenticated via `~/.colima-ui/api_token`; `GET /api/health` remains the sole public route):
+  ```bash
+  PORT="$(cat ~/.colima-ui/api_port 2>/dev/null || echo 11420)"
+  TOKEN="$(cat ~/.colima-ui/api_token)"
+  curl -s -H "Authorization: Bearer ${TOKEN}" "http://127.0.0.1:${PORT}/.well-known/agent.json"
   ```
 
 ---

@@ -169,18 +169,25 @@ pub async fn api_ai_clear_history(
     }
 }
 
-pub async fn api_ai_list_conversations() -> (
+pub async fn api_ai_list_conversations(
+    axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
+) -> (
     StatusCode,
     Json<ApiResponse<Vec<crate::commands::ai_chat::AiConversation>>>,
 ) {
-    match crate::commands::ai_chat::ai_chat_list_conversations().await {
+    let include_a2a = params
+        .get("include_a2a")
+        .or_else(|| params.get("includeA2a"))
+        .is_some_and(|v| matches!(v.trim().to_ascii_lowercase().as_str(), "true" | "1" | "yes"));
+
+    match crate::commands::ai_chat::ai_chat_list_conversations_filtered(include_a2a).await {
         Ok(conversations) => (
             StatusCode::OK,
             Json(ApiResponse { success: true, data: Some(conversations), error: None }),
         ),
         Err(e) => (
             StatusCode::INTERNAL_SERVER_ERROR,
-            Json(ApiResponse { success: false, data: None, error: Some(e.to_string().into()) }),
+            Json(ApiResponse { success: false, data: None, error: Some(e) }),
         ),
     }
 }
@@ -221,49 +228,67 @@ pub async fn api_ai_delete_conversation(
 }
 
 
+#[allow(clippy::unused_async)]
 pub async fn api_ai_context() -> (StatusCode, Json<ApiResponse<String>>) {
-    let exe_path = std::env::current_exe().unwrap_or_default();
-    let bundled = exe_path
-        .parent() // MacOS/
-        .and_then(|p| p.parent()) // Contents/
-        .map(|p| p.join("Resources").join("resources"));
-
-    let resource_dir = match bundled {
-        Some(ref b) if b.exists() => b.clone(),
-        _ => {
-            if std::path::Path::new("src-tauri/resources").exists() {
-                std::path::PathBuf::from("src-tauri/resources")
-            } else if std::path::Path::new("resources").exists() {
-                std::path::PathBuf::from("resources")
-            } else {
-                bundled.unwrap_or_else(|| exe_path.parent().unwrap_or(&exe_path).to_path_buf())
-            }
-        }
-    };
-
     let home_dir = std::env::var("HOME").ok().map(std::path::PathBuf::from);
-    let context = crate::commands::system::build_app_context_from_dir(&resource_dir, home_dir);
+    let context = crate::commands::embedded_resources::load_app_context(home_dir);
     ok(context)
+}
+
+#[allow(clippy::unused_async)]
+pub async fn api_ai_reference(
+    axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
+) -> (StatusCode, Json<ApiResponse<String>>) {
+    let path = params
+        .get("path")
+        .or_else(|| params.get("rel_path"))
+        .map_or("", String::as_str);
+
+    match crate::commands::embedded_resources::read_reference_any(path) {
+        Ok(content) => ok(content),
+        Err(msg) => (
+            StatusCode::BAD_REQUEST,
+            Json(ApiResponse {
+                success: false,
+                data: None,
+                error: Some(crate::error::ColimaError::validation(msg)),
+            }),
+        ),
+    }
 }
 
 
 pub async fn api_cli_chat(
     Json(payload): Json<agent_loop::HeadlessChatRequest>,
 ) -> (StatusCode, Json<serde_json::Value>) {
-    match agent_loop::run_headless_agent(payload).await {
-        Ok(reply) => (
+    match agent_loop::run_headless_agent_detailed(payload).await {
+        Ok(outcome) => (
             StatusCode::OK,
             Json(serde_json::json!({
                 "success": true,
-                "reply": reply,
-                "result": reply,
-                "data": { "reply": reply }
+                "ok": true,
+                "reply": outcome.reply,
+                "result": outcome.reply,
+                "session_id": outcome.session_id,
+                "provider": outcome.provider,
+                "model": outcome.model,
+                "tools_executed": outcome.tools_executed,
+                "navigated_to": outcome.navigated_to,
+                "data": {
+                    "reply": outcome.reply,
+                    "session_id": outcome.session_id,
+                    "provider": outcome.provider,
+                    "model": outcome.model,
+                    "tools_executed": outcome.tools_executed,
+                    "navigated_to": outcome.navigated_to,
+                }
             })),
         ),
         Err(err) => (
             StatusCode::BAD_GATEWAY,
             Json(serde_json::json!({
                 "success": false,
+                "ok": false,
                 "error": err
             })),
         ),

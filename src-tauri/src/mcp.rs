@@ -14,9 +14,16 @@ use tokio::io::{
     AsyncBufRead, AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, BufReader,
 };
 
+use crate::cli_engine::args::DEFAULT_A2A_SESSION_ID;
+use crate::cli_engine::handlers_infra::{
+    config_changes_to_json, parse_yaml_to_config_changes, resolve_compose_file_path,
+};
+use crate::cli_engine::handlers_ops::{fresh_scan_id, parse_sbom_format, run_sbom_export};
 use crate::commands::{
     agent_loop::{self, HeadlessChatRequest},
-    colima, compose, containers, k8s_cluster, kubernetes, networks, resolution, volumes,
+    ai_chat, colima, colima_config, compose, compose_autofix, compose_autofix_apply,
+    compose_diagnose, containers, k8s_cluster, knowledge_bank, kubernetes, lima, networks,
+    resolution, security_catalog, security_history, security_rules, security_scan, volumes,
 };
 
 const DEFAULT_PROTOCOL_VERSION: &str = "2024-11-05";
@@ -49,8 +56,7 @@ enum ProxyOutcome {
 
 /// Entrypoint invoked by `cui mcp` and `colimaui mcp`.
 pub async fn run_stdio_server() -> Result<(), String> {
-    crate::shell_env::adopt();
-    crate::path_util::fix_path_env();
+    crate::cli_engine::init_process_env();
 
     let stdin = tokio::io::stdin();
     let stdout = tokio::io::stdout();
@@ -328,9 +334,10 @@ fn handle_initialize(params: &Value) -> Value {
     })
 }
 
-/// Return all 15 strongly-typed MCP tool definitions.
+/// Return all 22 strongly-typed MCP tool definitions.
 pub fn mcp_tool_definitions() -> Vec<Value> {
     vec![
+        // 1
         json!({
             "name": "colima_list_instances",
             "description": "List all Colima VM instances/profiles with status, architecture, CPU, memory, disk, runtime, and IP address.",
@@ -340,6 +347,7 @@ pub fn mcp_tool_definitions() -> Vec<Value> {
                 "required": []
             }
         }),
+        // 2
         json!({
             "name": "colima_instance_action",
             "description": "Start, stop, or restart a Colima VM instance while preserving existing colima.yaml settings.",
@@ -360,6 +368,7 @@ pub fn mcp_tool_definitions() -> Vec<Value> {
                 "required": ["action"]
             }
         }),
+        // 3
         json!({
             "name": "docker_list_containers",
             "description": "List containers across the active Docker or containerd runtime.",
@@ -375,6 +384,7 @@ pub fn mcp_tool_definitions() -> Vec<Value> {
                 "required": []
             }
         }),
+        // 4
         json!({
             "name": "docker_container_action",
             "description": "Execute a lifecycle action (start, stop, restart, pause, unpause, remove) on a container.",
@@ -394,6 +404,7 @@ pub fn mcp_tool_definitions() -> Vec<Value> {
                 "required": ["action", "container_id"]
             }
         }),
+        // 5
         json!({
             "name": "docker_container_logs",
             "description": "Retrieve recent stdout/stderr log lines from a container.",
@@ -414,6 +425,7 @@ pub fn mcp_tool_definitions() -> Vec<Value> {
                 "required": ["container_id"]
             }
         }),
+        // 6
         json!({
             "name": "docker_list_images",
             "description": "List local container images with repository, tag, ID, and size.",
@@ -423,6 +435,7 @@ pub fn mcp_tool_definitions() -> Vec<Value> {
                 "required": []
             }
         }),
+        // 7
         json!({
             "name": "docker_pull_image",
             "description": "Pull a container image from a registry.",
@@ -437,6 +450,7 @@ pub fn mcp_tool_definitions() -> Vec<Value> {
                 "required": ["image"]
             }
         }),
+        // 8
         json!({
             "name": "docker_list_volumes",
             "description": "List Docker or containerd volumes.",
@@ -446,6 +460,7 @@ pub fn mcp_tool_definitions() -> Vec<Value> {
                 "required": []
             }
         }),
+        // 9
         json!({
             "name": "docker_list_networks",
             "description": "List Docker or containerd networks.",
@@ -455,6 +470,7 @@ pub fn mcp_tool_definitions() -> Vec<Value> {
                 "required": []
             }
         }),
+        // 10
         json!({
             "name": "compose_list_projects",
             "description": "List Docker Compose projects and their current status.",
@@ -464,6 +480,7 @@ pub fn mcp_tool_definitions() -> Vec<Value> {
                 "required": []
             }
         }),
+        // 11
         json!({
             "name": "k8s_list_pods",
             "description": "List Kubernetes pods in a specific namespace or across all namespaces.",
@@ -478,6 +495,7 @@ pub fn mcp_tool_definitions() -> Vec<Value> {
                 "required": []
             }
         }),
+        // 12
         json!({
             "name": "k8s_cluster_status",
             "description": "Inspect Kubernetes cluster health, node readiness, and cluster summary.",
@@ -487,6 +505,7 @@ pub fn mcp_tool_definitions() -> Vec<Value> {
                 "required": []
             }
         }),
+        // 13
         json!({
             "name": "environment_resolutions",
             "description": "Inspect host DevOps binary resolutions (Colima, Docker, Lima, kubectl, Helm) and environment duality diagnostics.",
@@ -496,6 +515,7 @@ pub fn mcp_tool_definitions() -> Vec<Value> {
                 "required": []
             }
         }),
+        // 14
         json!({
             "name": "system_diagnostics",
             "description": "Collect Colima VM and container daemon diagnostic logs for troubleshooting.",
@@ -510,6 +530,7 @@ pub fn mcp_tool_definitions() -> Vec<Value> {
                 "required": []
             }
         }),
+        // 15
         json!({
             "name": "colima_ai_ask",
             "description": "Ask ColimaUI's headless AI DevOps agent to inspect or manage local container/VM infrastructure.",
@@ -524,9 +545,186 @@ pub fn mcp_tool_definitions() -> Vec<Value> {
                         "type": "boolean",
                         "default": false,
                         "description": "Allow the AI agent to run mutating actions when true (default: false)."
+                    },
+                    "session_id": {
+                        "type": "string",
+                        "default": DEFAULT_A2A_SESSION_ID,
+                        "description": "Isolated conversation thread ID (defaults to 'colima-a2a-default-session')."
+                    },
+                    "mirror_ui": {
+                        "type": "boolean",
+                        "default": false,
+                        "description": "Mirror this AI turn into the open ColimaUI Desktop chat panel when true (default: false)."
                     }
                 },
                 "required": ["prompt"]
+            }
+        }),
+        // 16
+        json!({
+            "name": "security_scan_image",
+            "description": "Run container image vulnerability scans, posture audits, CycloneDX SBOM exports, hardened image alternatives, or Falco runtime event queries.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "enum": ["scan", "audit", "sbom", "alternatives", "falco_events"],
+                        "description": "Security operation to execute."
+                    },
+                    "image": {
+                        "type": "string",
+                        "description": "Target container image reference (required for scan, audit, sbom, and alternatives)."
+                    }
+                },
+                "required": ["action"]
+            }
+        }),
+        // 17
+        json!({
+            "name": "compose_diagnose_autofix",
+            "description": "Diagnose Docker Compose YAML anti-patterns, propose non-destructive autofix patches, or list recorded autofix history.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "enum": ["diagnose", "propose", "history"],
+                        "description": "Compose diagnostic or autofix operation."
+                    },
+                    "path": {
+                        "type": "string",
+                        "description": "Path to a compose file or project directory (required for diagnose and propose)."
+                    }
+                },
+                "required": ["action"]
+            }
+        }),
+        // 18
+        json!({
+            "name": "lima_manage",
+            "description": "List standalone Lima VMs, inspect Lima host info, or start/stop a named Lima VM.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "enum": ["list", "info", "start", "stop"],
+                        "description": "Lima VM action to perform."
+                    },
+                    "name": {
+                        "type": "string",
+                        "description": "Lima VM name (required for start and stop; optional filter for info)."
+                    }
+                },
+                "required": ["action"]
+            }
+        }),
+        // 19
+        json!({
+            "name": "colima_config",
+            "description": "Inspect, preview diff, or apply changes to a Colima profile's colima.yaml configuration.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "enum": ["get", "preview", "apply"],
+                        "description": "Configuration operation to execute."
+                    },
+                    "profile": {
+                        "type": "string",
+                        "default": "default",
+                        "description": "Colima profile name (defaults to 'default')."
+                    },
+                    "yaml": {
+                        "type": "string",
+                        "description": "YAML/JSON configuration snippet or '@path/to/file.yaml' (required for preview and apply)."
+                    },
+                    "restart": {
+                        "type": "boolean",
+                        "default": false,
+                        "description": "Restart the Colima instance after applying changes when true (default: false)."
+                    }
+                },
+                "required": ["action"]
+            }
+        }),
+        // 20
+        json!({
+            "name": "kb_memories",
+            "description": "Query Knowledge Bank error solutions or list, add, and delete persistent agent memories.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "enum": ["query", "list", "add", "delete"],
+                        "description": "Knowledge Bank / memory operation."
+                    },
+                    "text": {
+                        "type": "string",
+                        "description": "Error text to query or memory content to store (required for query and add)."
+                    },
+                    "category": {
+                        "type": "string",
+                        "default": "learned",
+                        "description": "Memory category when adding an entry (default: 'learned')."
+                    },
+                    "id": {
+                        "type": ["string", "integer"],
+                        "description": "Memory entry ID to remove (required for delete)."
+                    }
+                },
+                "required": ["action"]
+            }
+        }),
+        // 21
+        json!({
+            "name": "chat_sessions",
+            "description": "List AI chat sessions, read conversation message history, clear messages, or delete a session.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "enum": ["list", "history", "clear", "delete"],
+                        "description": "Chat session management action."
+                    },
+                    "session_id": {
+                        "type": "string",
+                        "description": "Session ID (defaults to 'default' for history/clear; required for delete)."
+                    },
+                    "include_a2a": {
+                        "type": "boolean",
+                        "default": false,
+                        "description": "Include automated A2A session ('colima-a2a-default-session') when listing sessions."
+                    }
+                },
+                "required": ["action"]
+            }
+        }),
+        // 22
+        json!({
+            "name": "ui_navigate",
+            "description": "Navigate the open ColimaUI Desktop window to a specific page/section and optionally display a toast notification.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "page": {
+                        "type": "string",
+                        "description": "Target UI page (e.g. 'containers', 'instances', 'images', 'compose', 'kubernetes', 'security', 'ai', 'settings')."
+                    },
+                    "section": {
+                        "type": "string",
+                        "description": "Optional sub-section or tab identifier on the target page."
+                    },
+                    "toast": {
+                        "type": "string",
+                        "description": "Optional toast banner message to display in ColimaUI Desktop."
+                    }
+                },
+                "required": ["page"]
             }
         }),
     ]
@@ -592,7 +790,10 @@ async fn discover_desktop_api() -> Option<DesktopApiTarget> {
 }
 
 fn unwrap_api_response_body(status: StatusCode, body_text: &str) -> ProxyOutcome {
-    if status == StatusCode::UNAUTHORIZED || status == StatusCode::FORBIDDEN {
+    if matches!(
+        status,
+        StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN | StatusCode::NOT_FOUND
+    ) {
         return ProxyOutcome::Unavailable;
     }
 
@@ -608,9 +809,8 @@ fn unwrap_api_response_body(status: StatusCode, body_text: &str) -> ProxyOutcome
                 if let Some(data) = parsed.get("data") {
                     let rendered = match data {
                         Value::String(s) => s.clone(),
-                        other => {
-                            serde_json::to_string_pretty(other).unwrap_or_else(|_| other.to_string())
-                        }
+                        other => serde_json::to_string_pretty(other)
+                            .unwrap_or_else(|_| other.to_string()),
                     };
                     return ProxyOutcome::Completed {
                         text: rendered,
@@ -717,6 +917,14 @@ fn optional_str<'a>(args: &'a Value, key: &str) -> Option<&'a str> {
         .and_then(Value::as_str)
         .map(str::trim)
         .filter(|s| !s.is_empty())
+}
+
+fn required_id_string(args: &Value, key: &str) -> Result<String, String> {
+    match args.get(key) {
+        Some(Value::String(s)) if !s.trim().is_empty() => Ok(s.trim().to_string()),
+        Some(Value::Number(n)) => Ok(n.to_string()),
+        _ => Err(format!("Missing or empty required parameter '{key}'")),
+    }
 }
 
 fn to_tool_tuple(res: Result<String, String>) -> (String, bool) {
@@ -913,6 +1121,11 @@ async fn try_proxy_tool(target: &DesktopApiTarget, name: &str, args: &Value) -> 
                 .get("allow_actions")
                 .and_then(Value::as_bool)
                 .unwrap_or(false);
+            let session_id = optional_str(args, "session_id").unwrap_or(DEFAULT_A2A_SESSION_ID);
+            let mirror_ui = args
+                .get("mirror_ui")
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
             let req = target
                 .client
                 .post(format!("{base}/api/cli/chat"))
@@ -920,8 +1133,313 @@ async fn try_proxy_tool(target: &DesktopApiTarget, name: &str, args: &Value) -> 
                 .json(&json!({
                     "prompt": prompt,
                     "allow_actions": allow_actions,
+                    "session_id": session_id,
+                    "mirror_ui": mirror_ui,
                 }));
             send_proxy_request(req, Duration::from_secs(120)).await
+        }
+        "security_scan_image" => {
+            let action = args.get("action").and_then(Value::as_str).unwrap_or("");
+            match action {
+                "scan" => {
+                    let image = optional_str(args, "image").unwrap_or("");
+                    let req = target
+                        .client
+                        .post(format!("{base}/api/security/scan"))
+                        .header("Authorization", auth)
+                        .json(&json!({
+                            "scanId": fresh_scan_id("mcp-scan"),
+                            "imageRef": image,
+                            "refresh": false,
+                        }));
+                    send_proxy_request(req, Duration::from_secs(300)).await
+                }
+                "audit" => {
+                    let image = optional_str(args, "image").unwrap_or("");
+                    let req = target
+                        .client
+                        .post(format!("{base}/api/security/audit"))
+                        .header("Authorization", auth)
+                        .json(&json!({
+                            "scanId": fresh_scan_id("mcp-audit"),
+                            "imageRef": image,
+                            "refresh": false,
+                        }));
+                    send_proxy_request(req, Duration::from_secs(300)).await
+                }
+                "alternatives" => {
+                    let image = optional_str(args, "image").unwrap_or("");
+                    let url =
+                        build_query_url(base, "/api/security/alternatives", &[("image", image)]);
+                    let req = target.client.get(url).header("Authorization", auth);
+                    send_proxy_request(req, Duration::from_secs(10)).await
+                }
+                "falco_events" => {
+                    let url =
+                        build_query_url(base, "/api/security/falco/events", &[("limit", "50")]);
+                    let req = target.client.get(url).header("Authorization", auth);
+                    send_proxy_request(req, Duration::from_secs(15)).await
+                }
+                // `sbom` reads back and cleans up the generated temp JSON file in fallback helper.
+                _ => ProxyOutcome::Unavailable,
+            }
+        }
+        "compose_diagnose_autofix" => {
+            let action = args.get("action").and_then(Value::as_str).unwrap_or("");
+            match action {
+                "diagnose" => {
+                    let resolved = resolve_compose_file_path(optional_str(args, "path").unwrap_or(""));
+                    let req = target
+                        .client
+                        .post(format!("{base}/api/compose/diagnose"))
+                        .header("Authorization", auth)
+                        .json(&json!({ "filePath": resolved }));
+                    send_proxy_request(req, Duration::from_secs(30)).await
+                }
+                "propose" => {
+                    let resolved = resolve_compose_file_path(optional_str(args, "path").unwrap_or(""));
+                    let req = target
+                        .client
+                        .post(format!("{base}/api/compose/autofix/propose"))
+                        .header("Authorization", auth)
+                        .json(&json!({ "filePath": resolved }));
+                    send_proxy_request(req, Duration::from_secs(60)).await
+                }
+                "history" => {
+                    let req = target
+                        .client
+                        .get(format!("{base}/api/compose/autofix/history"))
+                        .header("Authorization", auth);
+                    send_proxy_request(req, Duration::from_secs(15)).await
+                }
+                _ => ProxyOutcome::Unavailable,
+            }
+        }
+        "lima_manage" => {
+            let action = args.get("action").and_then(Value::as_str).unwrap_or("");
+            match action {
+                "list" => {
+                    let req = target
+                        .client
+                        .get(format!("{base}/api/lima"))
+                        .header("Authorization", auth);
+                    send_proxy_request(req, Duration::from_secs(15)).await
+                }
+                "info" if optional_str(args, "name").is_none() => {
+                    let req = target
+                        .client
+                        .get(format!("{base}/api/lima/info"))
+                        .header("Authorization", auth);
+                    send_proxy_request(req, Duration::from_secs(15)).await
+                }
+                "start" => {
+                    let vm_name = optional_str(args, "name").unwrap_or("");
+                    let req = target
+                        .client
+                        .post(format!("{base}/api/lima/start"))
+                        .header("Authorization", auth)
+                        .json(&json!({ "name": vm_name }));
+                    send_proxy_request(req, Duration::from_secs(240)).await
+                }
+                "stop" => {
+                    let vm_name = optional_str(args, "name").unwrap_or("");
+                    let req = target
+                        .client
+                        .post(format!("{base}/api/lima/stop"))
+                        .header("Authorization", auth)
+                        .json(&json!({ "name": vm_name }));
+                    send_proxy_request(req, Duration::from_secs(90)).await
+                }
+                _ => ProxyOutcome::Unavailable,
+            }
+        }
+        "colima_config" => {
+            let action = args.get("action").and_then(Value::as_str).unwrap_or("");
+            let profile = optional_str(args, "profile").unwrap_or("default");
+            let restart = args
+                .get("restart")
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
+            match action {
+                "get" => {
+                    let url =
+                        build_query_url(base, "/api/instances/config", &[("profile", profile)]);
+                    let req = target.client.get(url).header("Authorization", auth);
+                    send_proxy_request(req, Duration::from_secs(10)).await
+                }
+                "preview" => {
+                    let yaml = optional_str(args, "yaml").unwrap_or("");
+                    let changes = match parse_yaml_to_config_changes(yaml) {
+                        Ok(c) => c,
+                        Err(e) => {
+                            return ProxyOutcome::Completed {
+                                text: e,
+                                is_error: true,
+                            }
+                        }
+                    };
+                    let req = target
+                        .client
+                        .post(format!("{base}/api/instances/config/preview"))
+                        .header("Authorization", auth)
+                        .json(&json!({
+                            "profile": profile,
+                            "changes": config_changes_to_json(&changes),
+                        }));
+                    send_proxy_request(req, Duration::from_secs(15)).await
+                }
+                "apply" if !restart => {
+                    let yaml = optional_str(args, "yaml").unwrap_or("");
+                    let changes = match parse_yaml_to_config_changes(yaml) {
+                        Ok(c) => c,
+                        Err(e) => {
+                            return ProxyOutcome::Completed {
+                                text: e,
+                                is_error: true,
+                            }
+                        }
+                    };
+                    let snap_url =
+                        build_query_url(base, "/api/instances/config", &[("profile", profile)]);
+                    let expected_mtime = match send_proxy_request(
+                        target
+                            .client
+                            .get(snap_url)
+                            .header("Authorization", &auth),
+                        Duration::from_secs(10),
+                    )
+                    .await
+                    {
+                        ProxyOutcome::Completed {
+                            ref text,
+                            is_error: false,
+                        } => serde_json::from_str::<Value>(text)
+                            .ok()
+                            .and_then(|v| v.get("mtime").and_then(Value::as_i64))
+                            .unwrap_or(0),
+                        _ => 0,
+                    };
+                    let req = target
+                        .client
+                        .post(format!("{base}/api/instances/config/apply"))
+                        .header("Authorization", auth)
+                        .json(&json!({
+                            "profile": profile,
+                            "changes": config_changes_to_json(&changes),
+                            "expectedMtime": expected_mtime,
+                        }));
+                    send_proxy_request(req, Duration::from_secs(20)).await
+                }
+                _ => ProxyOutcome::Unavailable,
+            }
+        }
+        "kb_memories" => {
+            let action = args.get("action").and_then(Value::as_str).unwrap_or("");
+            match action {
+                "query" => {
+                    let text = optional_str(args, "text").unwrap_or("");
+                    let req = target
+                        .client
+                        .post(format!("{base}/api/kb/query"))
+                        .header("Authorization", auth)
+                        .json(&json!({ "error_text": text }));
+                    send_proxy_request(req, Duration::from_secs(15)).await
+                }
+                "list" => {
+                    let req = target
+                        .client
+                        .get(format!("{base}/api/kb/memories"))
+                        .header("Authorization", auth);
+                    send_proxy_request(req, Duration::from_secs(10)).await
+                }
+                "add" => {
+                    let text = optional_str(args, "text").unwrap_or("");
+                    let category = optional_str(args, "category").unwrap_or("learned");
+                    let req = target
+                        .client
+                        .post(format!("{base}/api/kb/memories/add"))
+                        .header("Authorization", auth)
+                        .json(&json!({
+                            "memory_type": category,
+                            "content": text,
+                        }));
+                    send_proxy_request(req, Duration::from_secs(10)).await
+                }
+                "delete" => {
+                    let Ok(id) = required_id_string(args, "id") else {
+                        return ProxyOutcome::Unavailable;
+                    };
+                    let req = target
+                        .client
+                        .post(format!("{base}/api/kb/memories/delete"))
+                        .header("Authorization", auth)
+                        .json(&json!({ "id": id }));
+                    send_proxy_request(req, Duration::from_secs(10)).await
+                }
+                _ => ProxyOutcome::Unavailable,
+            }
+        }
+        "chat_sessions" => {
+            let action = args.get("action").and_then(Value::as_str).unwrap_or("");
+            match action {
+                "list" => {
+                    let include_a2a = args
+                        .get("include_a2a")
+                        .and_then(Value::as_bool)
+                        .unwrap_or(false);
+                    let include_str = if include_a2a { "true" } else { "false" };
+                    let url = build_query_url(
+                        base,
+                        "/api/ai/conversations",
+                        &[("include_a2a", include_str)],
+                    );
+                    let req = target.client.get(url).header("Authorization", auth);
+                    send_proxy_request(req, Duration::from_secs(10)).await
+                }
+                "history" => {
+                    let sid = optional_str(args, "session_id")
+                        .unwrap_or(ai_chat::DEFAULT_CONVERSATION_ID);
+                    let url =
+                        build_query_url(base, "/api/ai/history", &[("conversationId", sid)]);
+                    let req = target.client.get(url).header("Authorization", auth);
+                    send_proxy_request(req, Duration::from_secs(10)).await
+                }
+                "clear" => {
+                    let sid = optional_str(args, "session_id")
+                        .unwrap_or(ai_chat::DEFAULT_CONVERSATION_ID);
+                    let req = target
+                        .client
+                        .post(format!("{base}/api/ai/history/clear"))
+                        .header("Authorization", auth)
+                        .json(&json!({ "conversationId": sid }));
+                    send_proxy_request(req, Duration::from_secs(10)).await
+                }
+                "delete" => {
+                    let sid = optional_str(args, "session_id").unwrap_or("");
+                    let req = target
+                        .client
+                        .post(format!("{base}/api/ai/conversations/delete"))
+                        .header("Authorization", auth)
+                        .json(&json!({ "id": sid }));
+                    send_proxy_request(req, Duration::from_secs(10)).await
+                }
+                _ => ProxyOutcome::Unavailable,
+            }
+        }
+        "ui_navigate" => {
+            let page = optional_str(args, "page").unwrap_or("");
+            let section = optional_str(args, "section");
+            let toast = optional_str(args, "toast");
+            let req = target
+                .client
+                .post(format!("{base}/api/ui/navigate"))
+                .header("Authorization", auth)
+                .json(&json!({
+                    "page": page,
+                    "section": section,
+                    "toast": toast,
+                }));
+            send_proxy_request(req, Duration::from_secs(5)).await
         }
         _ => ProxyOutcome::Unavailable,
     }
@@ -985,6 +1503,129 @@ pub async fn execute_mcp_tool(name: &str, args: &Value) -> (String, bool) {
         }
         "colima_ai_ask" => {
             if let Err(e) = required_str(args, "prompt") {
+                return (e, true);
+            }
+        }
+        "security_scan_image" => {
+            let action = match required_str(args, "action") {
+                Ok(a) => a,
+                Err(e) => return (e, true),
+            };
+            if !matches!(
+                action,
+                "scan" | "audit" | "sbom" | "alternatives" | "falco_events"
+            ) {
+                return (
+                    format!(
+                        "Invalid action '{action}'. Expected one of: scan, audit, sbom, alternatives, falco_events."
+                    ),
+                    true,
+                );
+            }
+            if matches!(action, "scan" | "audit" | "sbom" | "alternatives") {
+                if let Err(e) = required_str(args, "image") {
+                    return (e, true);
+                }
+            }
+        }
+        "compose_diagnose_autofix" => {
+            let action = match required_str(args, "action") {
+                Ok(a) => a,
+                Err(e) => return (e, true),
+            };
+            if !matches!(action, "diagnose" | "propose" | "history") {
+                return (
+                    format!(
+                        "Invalid action '{action}'. Expected one of: diagnose, propose, history."
+                    ),
+                    true,
+                );
+            }
+            if matches!(action, "diagnose" | "propose") {
+                if let Err(e) = required_str(args, "path") {
+                    return (e, true);
+                }
+            }
+        }
+        "lima_manage" => {
+            let action = match required_str(args, "action") {
+                Ok(a) => a,
+                Err(e) => return (e, true),
+            };
+            if !matches!(action, "list" | "info" | "start" | "stop") {
+                return (
+                    format!("Invalid action '{action}'. Expected one of: list, info, start, stop."),
+                    true,
+                );
+            }
+            if matches!(action, "start" | "stop") {
+                if let Err(e) = required_str(args, "name") {
+                    return (e, true);
+                }
+            }
+        }
+        "colima_config" => {
+            let action = match required_str(args, "action") {
+                Ok(a) => a,
+                Err(e) => return (e, true),
+            };
+            if !matches!(action, "get" | "preview" | "apply") {
+                return (
+                    format!("Invalid action '{action}'. Expected one of: get, preview, apply."),
+                    true,
+                );
+            }
+            if matches!(action, "preview" | "apply") {
+                if let Err(e) = required_str(args, "yaml") {
+                    return (e, true);
+                }
+            }
+        }
+        "kb_memories" => {
+            let action = match required_str(args, "action") {
+                Ok(a) => a,
+                Err(e) => return (e, true),
+            };
+            if !matches!(action, "query" | "list" | "add" | "delete") {
+                return (
+                    format!(
+                        "Invalid action '{action}'. Expected one of: query, list, add, delete."
+                    ),
+                    true,
+                );
+            }
+            if matches!(action, "query" | "add") {
+                if let Err(e) = required_str(args, "text") {
+                    return (e, true);
+                }
+            }
+            if action == "delete" {
+                if let Err(e) = required_id_string(args, "id") {
+                    return (e, true);
+                }
+            }
+        }
+        "chat_sessions" => {
+            let action = match required_str(args, "action") {
+                Ok(a) => a,
+                Err(e) => return (e, true),
+            };
+            if !matches!(action, "list" | "history" | "clear" | "delete") {
+                return (
+                    format!(
+                        "Invalid action '{action}'. Expected one of: list, history, clear, delete."
+                    ),
+                    true,
+                );
+            }
+            if action == "delete" {
+                if let Err(e) = required_str(args, "session_id") {
+                    return (e, true);
+                }
+            }
+        }
+        "ui_navigate" => {
+            if let Err(e) = required_str(args, "page") {
                 return (e, true);
             }
         }
@@ -1122,9 +1763,17 @@ async fn execute_direct_fallback(name: &str, args: &Value) -> Result<String, Str
                 .map_err(|e| e.to_string())
         }
         "colima_ai_ask" => {
+            crate::cli_engine::ensure_kb_init();
             let prompt = required_str(args, "prompt")?.to_string();
             let allow_actions = args
                 .get("allow_actions")
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
+            let session_id = optional_str(args, "session_id")
+                .unwrap_or(DEFAULT_A2A_SESSION_ID)
+                .to_string();
+            let mirror_ui = args
+                .get("mirror_ui")
                 .and_then(Value::as_bool)
                 .unwrap_or(false);
             agent_loop::run_headless_agent(HeadlessChatRequest {
@@ -1132,10 +1781,238 @@ async fn execute_direct_fallback(name: &str, args: &Value) -> Result<String, Str
                 provider: None,
                 model: None,
                 allow_actions,
+                session_id: Some(session_id),
+                mirror_ui,
             })
             .await
             .map_err(|e| e.to_string())
         }
+        "security_scan_image" => {
+            let action = required_str(args, "action")?;
+            match action {
+                "scan" => {
+                    let image = required_str(args, "image")?.to_string();
+                    let res = security_scan::security_scan_image(
+                        fresh_scan_id("mcp-scan"),
+                        image,
+                        Some(false),
+                    )
+                    .await
+                    .map_err(|e| e.to_string())?;
+                    serde_json::to_string_pretty(&res).map_err(|e| e.to_string())
+                }
+                "audit" => {
+                    let image = required_str(args, "image")?.to_string();
+                    let res = security_scan::security_audit_image(
+                        fresh_scan_id("mcp-audit"),
+                        image,
+                        Some(security_rules::Level::default()),
+                        Some(false),
+                    )
+                    .await
+                    .map_err(|e| e.to_string())?;
+                    serde_json::to_string_pretty(&res).map_err(|e| e.to_string())
+                }
+                "sbom" => {
+                    let image = required_str(args, "image")?;
+                    let fmt = parse_sbom_format("cyclonedx-json")?;
+                    let val = run_sbom_export(image, fmt, None, None).await?;
+                    serde_json::to_string_pretty(&val).map_err(|e| e.to_string())
+                }
+                "alternatives" => {
+                    let image = required_str(args, "image")?;
+                    let sug = security_catalog::suggestions_for(image);
+                    serde_json::to_string_pretty(&sug).map_err(|e| e.to_string())
+                }
+                "falco_events" => {
+                    let evs =
+                        crate::helpers::run_blocking(|| security_history::falco_events(50)).await?;
+                    serde_json::to_string_pretty(&evs).map_err(|e| e.to_string())
+                }
+                _ => Err(format!("Unsupported security action: {action}")),
+            }
+        }
+        "compose_diagnose_autofix" => {
+            crate::cli_engine::ensure_kb_init();
+            let action = required_str(args, "action")?;
+            match action {
+                "diagnose" => {
+                    let resolved = resolve_compose_file_path(required_str(args, "path")?);
+                    let diag = compose_diagnose::compose_diagnose(resolved)
+                        .await
+                        .map_err(|e| e.to_string())?;
+                    serde_json::to_string_pretty(&diag).map_err(|e| e.to_string())
+                }
+                "propose" => {
+                    let resolved = resolve_compose_file_path(required_str(args, "path")?);
+                    let prop = compose_autofix::compose_autofix_propose(resolved)
+                        .await
+                        .map_err(|e| e.to_string())?;
+                    serde_json::to_string_pretty(&prop).map_err(|e| e.to_string())
+                }
+                "history" => {
+                    let hist = compose_autofix_apply::compose_autofix_history()
+                        .await
+                        .map_err(|e| e.to_string())?;
+                    serde_json::to_string_pretty(&hist).map_err(|e| e.to_string())
+                }
+                _ => Err(format!("Unsupported compose_diagnose_autofix action: {action}")),
+            }
+        }
+        "lima_manage" => {
+            let action = required_str(args, "action")?;
+            match action {
+                "list" => {
+                    let vms = lima::lima_list().await.map_err(|e| e.to_string())?;
+                    serde_json::to_string_pretty(&vms).map_err(|e| e.to_string())
+                }
+                "info" => {
+                    let vm_name = optional_str(args, "name").unwrap_or("").to_string();
+                    lima::lima_info(vm_name).await.map_err(|e| e.to_string())
+                }
+                "start" => {
+                    let vm_name = required_str(args, "name")?.to_string();
+                    lima::lima_start(vm_name).await.map_err(|e| e.to_string())
+                }
+                "stop" => {
+                    let vm_name = required_str(args, "name")?.to_string();
+                    lima::lima_stop(vm_name).await.map_err(|e| e.to_string())
+                }
+                _ => Err(format!("Unsupported lima_manage action: {action}")),
+            }
+        }
+        "colima_config" => {
+            let action = required_str(args, "action")?;
+            let profile = optional_str(args, "profile").unwrap_or("default").to_string();
+            match action {
+                "get" => {
+                    let snap = colima_config::get_colima_config(profile)
+                        .await
+                        .map_err(|e| e.to_string())?;
+                    serde_json::to_string_pretty(&snap).map_err(|e| e.to_string())
+                }
+                "preview" => {
+                    let yaml = required_str(args, "yaml")?;
+                    let changes = parse_yaml_to_config_changes(yaml)?;
+                    let diff = colima_config::preview_colima_config(profile, changes)
+                        .await
+                        .map_err(|e| e.to_string())?;
+                    serde_json::to_string_pretty(&diff).map_err(|e| e.to_string())
+                }
+                "apply" => {
+                    let yaml = required_str(args, "yaml")?;
+                    let restart = args
+                        .get("restart")
+                        .and_then(Value::as_bool)
+                        .unwrap_or(false);
+                    let changes = parse_yaml_to_config_changes(yaml)?;
+                    let expected_mtime = colima_config::get_colima_config(profile.clone())
+                        .await
+                        .ok()
+                        .map_or(0, |s| s.mtime);
+                    let applied_res = colima_config::apply_colima_config(
+                        profile.clone(),
+                        changes,
+                        expected_mtime,
+                    )
+                    .await
+                    .map_err(|e| e.to_string())?;
+                    let mut val = serde_json::to_value(&applied_res).map_err(|e| e.to_string())?;
+                    if restart {
+                        let _ = colima::stop_instance_cli(profile.clone(), false).await;
+                        colima::start_instance(build_colima_start_config(&profile))
+                            .await
+                            .map_err(|e| e.to_string())?;
+                        if let Some(obj) = val.as_object_mut() {
+                            obj.insert("restarted".into(), json!(true));
+                        }
+                    }
+                    serde_json::to_string_pretty(&val).map_err(|e| e.to_string())
+                }
+                _ => Err(format!("Unsupported colima_config action: {action}")),
+            }
+        }
+        "kb_memories" => {
+            crate::cli_engine::ensure_kb_init();
+            let action = required_str(args, "action")?;
+            match action {
+                "query" => {
+                    let text = required_str(args, "text")?.to_string();
+                    let res = knowledge_bank::kb_query(text)
+                        .await
+                        .map_err(|e| e.to_string())?;
+                    serde_json::to_string_pretty(&res).map_err(|e| e.to_string())
+                }
+                "list" => {
+                    let items = knowledge_bank::get_all_memories()
+                        .await
+                        .map_err(|e| e.to_string())?;
+                    serde_json::to_string_pretty(&items).map_err(|e| e.to_string())
+                }
+                "add" => {
+                    let text = required_str(args, "text")?.to_string();
+                    let category = optional_str(args, "category")
+                        .unwrap_or("learned")
+                        .to_string();
+                    knowledge_bank::add_memory(category, text)
+                        .await
+                        .map_err(|e| e.to_string())
+                }
+                "delete" => {
+                    let id = required_id_string(args, "id")?;
+                    knowledge_bank::delete_memory(id)
+                        .await
+                        .map_err(|e| e.to_string())
+                }
+                _ => Err(format!("Unsupported kb_memories action: {action}")),
+            }
+        }
+        "chat_sessions" => {
+            crate::cli_engine::ensure_kb_init();
+            let action = required_str(args, "action")?;
+            match action {
+                "list" => {
+                    let include_a2a = args
+                        .get("include_a2a")
+                        .and_then(Value::as_bool)
+                        .unwrap_or(false);
+                    let filtered = ai_chat::ai_chat_list_conversations_filtered(include_a2a)
+                        .await
+                        .map_err(|e| e.to_string())?;
+                    serde_json::to_string_pretty(&filtered).map_err(|e| e.to_string())
+                }
+                "history" => {
+                    let sid = optional_str(args, "session_id")
+                        .unwrap_or(ai_chat::DEFAULT_CONVERSATION_ID)
+                        .to_string();
+                    let msgs = ai_chat::ai_chat_load_history(Some(sid))
+                        .await
+                        .map_err(|e| e.to_string())?;
+                    serde_json::to_string_pretty(&msgs).map_err(|e| e.to_string())
+                }
+                "clear" => {
+                    let sid = optional_str(args, "session_id")
+                        .unwrap_or(ai_chat::DEFAULT_CONVERSATION_ID)
+                        .to_string();
+                    ai_chat::ai_chat_clear_history(Some(sid.clone()))
+                        .await
+                        .map_err(|e| e.to_string())?;
+                    Ok(format!("Cleared chat history for session '{sid}'"))
+                }
+                "delete" => {
+                    let sid = required_str(args, "session_id")?.to_string();
+                    ai_chat::ai_chat_delete_conversation(sid.clone())
+                        .await
+                        .map_err(|e| e.to_string())?;
+                    Ok(format!("Deleted chat session '{sid}'"))
+                }
+                _ => Err(format!("Unsupported chat_sessions action: {action}")),
+            }
+        }
+        "ui_navigate" => Err(
+            "ColimaUI Desktop is not running (or UI navigation endpoint is unavailable). Launch ColimaUI Desktop to navigate the UI."
+                .to_string(),
+        ),
         _ => Err(format!("Unknown tool: {name}")),
     }
 }
@@ -1208,7 +2085,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn tools_list_returns_all_15_well_typed_tools() {
+    async fn tools_list_returns_all_22_well_typed_tools() {
         let req = json!({
             "jsonrpc": "2.0",
             "id": 2,
@@ -1235,9 +2112,16 @@ mod tests {
             "environment_resolutions",
             "system_diagnostics",
             "colima_ai_ask",
+            "security_scan_image",
+            "compose_diagnose_autofix",
+            "lima_manage",
+            "colima_config",
+            "kb_memories",
+            "chat_sessions",
+            "ui_navigate",
         ];
 
-        assert_eq!(tools.len(), 15);
+        assert_eq!(tools.len(), 22);
         let actual_names: Vec<&str> = tools
             .iter()
             .map(|t| t["name"].as_str().expect("tool name string"))
@@ -1251,6 +2135,61 @@ mod tests {
             assert!(tool["inputSchema"]["properties"].is_object());
             assert!(tool["inputSchema"]["required"].is_array());
         }
+
+        // Verify colima_ai_ask exposes session_id (defaulting to colima-a2a-default-session) & mirror_ui.
+        let ai_tool = tools
+            .iter()
+            .find(|t| t["name"] == "colima_ai_ask")
+            .expect("colima_ai_ask present");
+        assert_eq!(
+            ai_tool["inputSchema"]["properties"]["session_id"]["default"],
+            DEFAULT_A2A_SESSION_ID
+        );
+        assert_eq!(
+            ai_tool["inputSchema"]["properties"]["mirror_ui"]["default"],
+            false
+        );
+    }
+
+    #[tokio::test]
+    async fn tools_call_validates_new_22_tool_parameters_and_executes_catalog_lookup() {
+        // Hardened alternatives works purely in-memory with zero external daemon dependencies.
+        let (alt_text, alt_err) = execute_mcp_tool(
+            "security_scan_image",
+            &json!({ "action": "alternatives", "image": "ubuntu:latest" }),
+        )
+        .await;
+        assert!(!alt_err, "unexpected error: {alt_text}");
+        let parsed_alts: Value = serde_json::from_str(&alt_text).expect("valid JSON object");
+        assert!(parsed_alts["alternatives"].is_array());
+
+        // Missing required parameters on new tools must fail fast with isError = true.
+        let (_, scan_missing_img) =
+            execute_mcp_tool("security_scan_image", &json!({ "action": "scan" })).await;
+        assert!(scan_missing_img);
+
+        let (_, compose_missing_path) =
+            execute_mcp_tool("compose_diagnose_autofix", &json!({ "action": "diagnose" })).await;
+        assert!(compose_missing_path);
+
+        let (_, lima_missing_name) =
+            execute_mcp_tool("lima_manage", &json!({ "action": "start" })).await;
+        assert!(lima_missing_name);
+
+        let (_, cfg_missing_yaml) =
+            execute_mcp_tool("colima_config", &json!({ "action": "preview" })).await;
+        assert!(cfg_missing_yaml);
+
+        let (_, kb_missing_id) =
+            execute_mcp_tool("kb_memories", &json!({ "action": "delete" })).await;
+        assert!(kb_missing_id);
+
+        let (_, sess_missing_id) =
+            execute_mcp_tool("chat_sessions", &json!({ "action": "delete" })).await;
+        assert!(sess_missing_id);
+
+        let (_, ui_missing_page) = execute_mcp_tool("ui_navigate", &json!({})).await;
+        assert!(ui_missing_page);
     }
 
     #[tokio::test]

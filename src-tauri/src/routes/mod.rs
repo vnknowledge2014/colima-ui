@@ -40,3 +40,5 @@ pub mod detonation;
 /// Host tool detection. Distinct from `capabilities`, which is the static
 /// API schema published for AI agents — the two are unrelated contracts.
 pub mod system_capabilities;
+pub mod ui;
+pub mod a2a;

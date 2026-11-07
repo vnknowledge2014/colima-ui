@@ -322,10 +322,10 @@ jobs:
               "| **Linux** | `ColimaUI_*_amd64.deb` | Ubuntu / Debian |",
               "| **Linux** | `ColimaUI_*_amd64.AppImage` | Universal Linux |",
               "",
-              "### ⌨️ Standalone CLI & MCP Server (`cui` & `colimaui`)",
+              "### ⌨️ Unified CLI-First Agent & MCP Server (`cui` & `colimaui`)",
               "",
-              "| Platform | AI Agent & MCP CLI | Direct Management CLI |",
-              "|----------|--------------------|-----------------------|",
+              "| Platform | Unified CLI-First, A2A & MCP Binary | Backward-Compatible Alias |",
+              "|----------|-------------------------------------|---------------------------|",
               "| **macOS Apple Silicon** | `cui-aarch64-apple-darwin.tar.gz` | `colimaui-aarch64-apple-darwin.tar.gz` |",
               "| **macOS Intel** | `cui-x86_64-apple-darwin.tar.gz` | `colimaui-x86_64-apple-darwin.tar.gz` |",
               "| **Linux x86_64** | `cui-x86_64-unknown-linux-gnu.tar.gz` | `colimaui-x86_64-unknown-linux-gnu.tar.gz` |",
@@ -335,9 +335,10 @@ jobs:
               "- Go to **System Settings → Privacy & Security** and click **Open Anyway**.",
               "- Run `xattr -cr /Applications/ColimaUI.app` after dragging the app to Applications.",
               "",
-              "### 🔌 MCP Server, Headless CLI & Local HTTP API",
-              "- **MCP Server (`stdio`)**: Configure `{\"mcpServers\": {\"colima-ui\": {\"command\": \"cui\", \"args\": [\"mcp\"]}}}` in Claude Desktop, Cursor, Antigravity, Zed, Windsurf, or Claude Code.",
-              "- **Local REST & SSE API**: While running, ColimaUI exposes a Bearer-protected local API on `http://127.0.0.1:11420` (session credentials stored with `0600` permissions at `~/.colima-ui/api_token` and `~/.colima-ui/api_port`).",
+              "### 🔌 CLI-First Subcommands, 22-Tool MCP Server, Native A2A & Local HTTP API",
+              "- **CLI-First (`< 5ms`)**: Run `cui <subcommand> --json` across 20 deterministic domains (`vm`, `config`, `presets`, `container`, `image`, `volume`, `network`, `compose`, `k8s`, `kind`, `lima`, `security`, `models`, `alerts`, `self-heal`, `memories`, `sessions`, `ui`, `events`, `doctor`) plus `cui chat` and `cui mcp` — with automatic standalone Rust fallback when ColimaUI Desktop is closed.",
+              "- **MCP Server (`stdio`, 22 tools)**: Configure `{\"mcpServers\": {\"colima-ui\": {\"command\": \"cui\", \"args\": [\"mcp\"]}}}` in Claude Desktop, Cursor, Antigravity, Zed, Windsurf, or Claude Code.",
+              "- **Native A2A & Local REST/SSE API**: While running, ColimaUI exposes a Bearer-protected local API (`http://127.0.0.1:11420..11429`, `GET /.well-known/agent.json`, `POST /a2a`, `POST /api/ui/navigate`, `GET /api/events`) using `0600` session credentials at `~/.colima-ui/api_token` and `~/.colima-ui/api_port`.",
             ];
 
             if (generated) {
