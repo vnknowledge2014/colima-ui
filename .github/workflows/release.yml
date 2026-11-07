@@ -167,7 +167,7 @@ jobs:
               const pkg = JSON.parse(
                 execFileSync("git", ["show", `${sha}:package.json`], { encoding: "utf8" })
               );
-              const rawPkg = String(pkg.version || "0.1.0").split("-")[0];
+              const rawPkg = String(pkg.version || "0.2.0").split("-")[0];
               const parseVer = (v) => v.split(".").map((n) => Number.parseInt(n, 10) || 0);
               const cmpVer = (a, b) => {
                 for (let i = 0; i < 3; i++) {
@@ -183,7 +183,7 @@ jobs:
               );
               let highest = [0, 0, 0];
               for (const t of allTags) {
-                const m = /^v(\d+)\.(\d+)\.(\d+)$/.exec(t);
+                const m = /^v(\d+)\.(\d+)\.(\d+)(?:-[a-zA-Z0-9.]+)?$/.exec(t);
                 if (!m) continue;
                 const ver = [Number(m[1]), Number(m[2]), Number(m[3])];
                 if (cmpVer(ver, highest) > 0) highest = ver;
@@ -313,7 +313,7 @@ jobs:
               "",
               `**Channel:** ${channelLabel}`,
               "",
-              "### 📦 Installation",
+              "### 📦 Desktop Installers",
               "",
               "| Platform | File | Notes |",
               "|----------|------|-------|",
@@ -322,13 +322,22 @@ jobs:
               "| **Linux** | `ColimaUI_*_amd64.deb` | Ubuntu / Debian |",
               "| **Linux** | `ColimaUI_*_amd64.AppImage` | Universal Linux |",
               "",
+              "### ⌨️ Standalone CLI & MCP Server (`cui` & `colimaui`)",
+              "",
+              "| Platform | AI Agent & MCP CLI | Direct Management CLI |",
+              "|----------|--------------------|-----------------------|",
+              "| **macOS Apple Silicon** | `cui-aarch64-apple-darwin.tar.gz` | `colimaui-aarch64-apple-darwin.tar.gz` |",
+              "| **macOS Intel** | `cui-x86_64-apple-darwin.tar.gz` | `colimaui-x86_64-apple-darwin.tar.gz` |",
+              "| **Linux x86_64** | `cui-x86_64-unknown-linux-gnu.tar.gz` | `colimaui-x86_64-unknown-linux-gnu.tar.gz` |",
+              "",
               "### 🍎 macOS Gatekeeper",
               "Pre-built DMGs are unsigned unless Apple Developer secrets are configured in the repository. If macOS reports *\"ColimaUI.app is damaged and can\x27t be opened\"*, either:",
               "- Go to **System Settings → Privacy & Security** and click **Open Anyway**.",
               "- Run `xattr -cr /Applications/ColimaUI.app` after dragging the app to Applications.",
               "",
-              "### 🔌 Local HTTP API & Headless CLI",
-              "While running, ColimaUI exposes a Bearer-protected local REST & SSE API on `http://127.0.0.1:11420` (session token stored with `0600` permissions at `~/.colima-ui/api_token` for `cui` CLI and local AI agents).",
+              "### 🔌 MCP Server, Headless CLI & Local HTTP API",
+              "- **MCP Server (`stdio`)**: Configure `{\"mcpServers\": {\"colima-ui\": {\"command\": \"cui\", \"args\": [\"mcp\"]}}}` in Claude Desktop, Cursor, Antigravity, Zed, Windsurf, or Claude Code.",
+              "- **Local REST & SSE API**: While running, ColimaUI exposes a Bearer-protected local API on `http://127.0.0.1:11420` (session credentials stored with `0600` permissions at `~/.colima-ui/api_token` and `~/.colima-ui/api_port`).",
             ];
 
             if (generated) {
@@ -375,14 +384,17 @@ jobs:
           - name: macOS ARM64 (Apple Silicon)
             runner: macos-latest
             target: aarch64-apple-darwin
+            cli_triple: aarch64-apple-darwin
             bundles: dmg
           - name: macOS x86_64 (Intel)
             runner: macos-latest
             target: x86_64-apple-darwin
+            cli_triple: x86_64-apple-darwin
             bundles: dmg
           - name: Linux x86_64
             runner: ubuntu-latest
             target: ""
+            cli_triple: x86_64-unknown-linux-gnu
             bundles: deb,appimage
     runs-on: ${{ matrix.runner }}
     steps:
@@ -500,6 +512,49 @@ jobs:
           retryAttempts: 2
           args: ${{ matrix.target && format('--target {0}', matrix.target) || '' }} --bundles ${{ matrix.bundles }}
 
+      - name: Build & upload standalone CLI binaries (cui & colimaui)
+        working-directory: src-tauri
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_ID: ${{ needs.prepare.outputs.release_id }}
+          TARGET: ${{ matrix.target }}
+          CLI_TRIPLE: ${{ matrix.cli_triple }}
+        run: |
+          set -euo pipefail
+          if [[ -n "$TARGET" ]]; then
+            cargo build --release --target "$TARGET" --bin cui --bin colimaui --features cli
+            BIN_DIR="target/${TARGET}/release"
+          else
+            cargo build --release --bin cui --bin colimaui --features cli
+            BIN_DIR="target/release"
+          fi
+
+          STAGE_DIR=$(mktemp -d)
+          cp "${BIN_DIR}/cui" "${STAGE_DIR}/cui"
+          cp "${BIN_DIR}/colimaui" "${STAGE_DIR}/colimaui"
+          chmod +x "${STAGE_DIR}/cui" "${STAGE_DIR}/colimaui"
+
+          CUI_ARCHIVE="${STAGE_DIR}/cui-${CLI_TRIPLE}.tar.gz"
+          COLIMAUI_ARCHIVE="${STAGE_DIR}/colimaui-${CLI_TRIPLE}.tar.gz"
+          tar -C "${STAGE_DIR}" -czf "${CUI_ARCHIVE}" cui
+          tar -C "${STAGE_DIR}" -czf "${COLIMAUI_ARCHIVE}" colimaui
+
+          for archive in "${CUI_ARCHIVE}" "${COLIMAUI_ARCHIVE}"; do
+            ASSET_NAME=$(basename "${archive}")
+            EXISTING_ASSET_ID=$(gh api "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}/assets" \
+              --jq "[.[] | select(.name == \"${ASSET_NAME}\")][0].id // empty")
+            if [[ "$EXISTING_ASSET_ID" =~ ^[0-9]+$ ]]; then
+              gh api -X DELETE "repos/${GITHUB_REPOSITORY}/releases/assets/${EXISTING_ASSET_ID}" || true
+            fi
+            curl -fsSL -X POST \
+              -H "Authorization: Bearer ${GH_TOKEN}" \
+              -H "Accept: application/vnd.github+json" \
+              -H "Content-Type: application/gzip" \
+              --data-binary @"${archive}" \
+              "https://uploads.github.com/repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}/assets?name=${ASSET_NAME}" >/dev/null
+            echo "📦 Uploaded ${ASSET_NAME}"
+          done
+
   # ===== Verify all platform assets & publish Draft Release =====
   publish:
     name: Publish Release
@@ -529,9 +584,19 @@ jobs:
             [[ -n "$asset" ]] && echo "  ✅ $asset"
           done <<< "$ASSETS"
 
-          for required_suffix in "_aarch64.dmg" "_x64.dmg" "_amd64.deb" "_amd64.AppImage"; do
+          for required_suffix in \
+            "_aarch64.dmg" \
+            "_x64.dmg" \
+            "_amd64.deb" \
+            "_amd64.AppImage" \
+            "cui-aarch64-apple-darwin.tar.gz" \
+            "cui-x86_64-apple-darwin.tar.gz" \
+            "cui-x86_64-unknown-linux-gnu.tar.gz" \
+            "colimaui-aarch64-apple-darwin.tar.gz" \
+            "colimaui-x86_64-apple-darwin.tar.gz" \
+            "colimaui-x86_64-unknown-linux-gnu.tar.gz"; do
             if ! grep -Fq "$required_suffix" <<< "$ASSETS"; then
-              echo "❌ Missing expected platform artifact matching *${required_suffix}"
+              echo "❌ Missing expected release artifact matching *${required_suffix}"
               exit 1
             fi
           done

@@ -120,6 +120,11 @@ fn set_active_user_id(user_id: Option<&str>) {
 
 // ===== Tauri commands =====
 
+fn with_open_source_entitlement(mut state: SubscriptionState) -> SubscriptionState {
+    state.entitled = true;
+    state
+}
+
 /// Current entitlement, evaluated locally offline.
 ///
 /// In the open-source edition all features are unlocked locally (`entitled` is
@@ -128,9 +133,10 @@ fn set_active_user_id(user_id: Option<&str>) {
 #[tauri::command]
 pub async fn subscription_state(user_id: Option<String>) -> SubscriptionState {
     set_active_user_id(user_id.as_deref());
-    let mut state = SubscriptionState::from_cache(cache::load().as_ref(), user_id.as_deref());
-    state.entitled = true;
-    state
+    with_open_source_entitlement(SubscriptionState::from_cache(
+        cache::load().as_ref(),
+        user_id.as_deref(),
+    ))
 }
 
 /// Persist what the oracle returned, then report the resulting state.
@@ -168,10 +174,10 @@ pub async fn subscription_store(
     // entitled.
     crate::commands::metrics_store::start_if_entitled();
 
-    Ok(SubscriptionState::from_cache(
+    Ok(with_open_source_entitlement(SubscriptionState::from_cache(
         Some(&record),
         Some(payload.user_id.as_str()),
-    ))
+    )))
 }
 
 /// Erase the local record.
@@ -182,7 +188,7 @@ pub async fn subscription_store(
 #[tauri::command]
 pub async fn subscription_clear() -> Result<SubscriptionState, crate::error::ColimaError> {
     cache::clear()?;
-    Ok(SubscriptionState::none())
+    Ok(with_open_source_entitlement(SubscriptionState::none()))
 }
 
 // ===== HTTP handlers (browser mode) =====
@@ -279,5 +285,20 @@ mod tests {
         for _ in 0..3 {
             assert!(SubscriptionState::from_cache(Some(&r), Some("user-a")).entitled);
         }
+    }
+
+    #[test]
+    fn open_source_entitlement_preserved_across_store_and_clear_states() {
+        let cleared = with_open_source_entitlement(SubscriptionState::none());
+        assert!(cleared.entitled);
+        assert!(!cleared.known);
+
+        let lapsed = rec("user-a", false, "2020-01-01T00:00:00Z");
+        let stored = with_open_source_entitlement(SubscriptionState::from_cache(
+            Some(&lapsed),
+            Some("user-a"),
+        ));
+        assert!(stored.entitled);
+        assert!(stored.known);
     }
 }

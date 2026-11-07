@@ -79,7 +79,7 @@
         {applied.explanation}
       </span>
       <button class="btn btn-sm" onclick={undo}>
-        <Icon name="rotate-ccw" size={14} />
+        <Icon name="Refresh" size={14} />
         {t('compose.autofix.undo', { default: 'Undo' })}
       </button>
     </div>

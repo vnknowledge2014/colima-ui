@@ -17,9 +17,9 @@ Khi phân tích yêu cầu của User, hãy tham chiếu danh sách này để b
 - `list-containers`: Lấy danh sách toàn bộ container (đang chạy và đã dừng).
 - `start-container`, `stop-container`, `restart-container`, `pause-container`, `unpause-container`, `rename-container`, `remove-container`: Quản lý vòng đời container.
 - `container-logs`, `container-stats`, `all-container-stats`, `container-top`, `inspect-container`: Giám sát logs, tài nguyên và tiến trình.
-- `container-exec`: Chạy một lệnh bên trong container.
+- `container-exec`: Chạy một lệnh đơn lẻ (không tương tác) bên trong container. Để mở shell tương tác trực tiếp vào container (**Interactive Container PTY** — `dockerExec`), điều hướng tới `[NAVIGATE: containers]` hoặc `[NAVIGATE: terminal]`.
 - `run-container`: Chạy container mới từ Image.
-- `list-images`, `inspect-image`, `pull-image`, `tag-image`, `remove-image`, `prune-images`: Quản lý Docker Images.
+- `list-images`, `inspect-image`, `build-image` (`{"contextPath": ".", "dockerfile": "Dockerfile", "tag": "my-app:latest"}`), `pull-image`, `tag-image`, `remove-image`, `prune-images`: Quản lý và build Docker Images.
 - **Background Transfers & Topology** (hỗ trợ sẵn qua UI và REST API):
   - Lưu/nạp ảnh `.tar` (`images/save`, `images/load`), sao chép tệp hai chiều giữa máy chủ và container (`containers/cp/to`, `containers/cp/from`), theo dõi/hủy tiến trình nền (`transfers`).
   - Xem đồ thị liên kết trực quan giữa Container – Network – Volume (`topology`).
@@ -31,6 +31,7 @@ Khi phân tích yêu cầu của User, hãy tham chiếu danh sách này để b
 ## Docker Compose, Diagnose & AI Autofix
 - `compose-list`: Liệt kê các dự án Compose.
 - `compose-up`, `compose-down`, `compose-restart`: Khởi chạy, dừng/gỡ bỏ và khởi động lại dự án Compose.
+- `compose-build` (`{"projectDir": "...", "service"?: "..."}`), `compose-pull` (`{"projectDir": "...", "service"?: "..."}`): Build hoặc kéo mới image cho toàn bộ dự án hoặc từng service trong Compose.
 - `compose-logs`: Lấy logs của dự án Compose.
 - **Compose Diagnose & AI Autofix** (`/api/compose/diagnose`, `/api/compose/autofix/*`): Kiểm tra hợp lệ schema + đối chiếu Knowledge Bank, sinh bản vá YAML kèm xem trước diff, áp dụng an toàn và hoàn tác (`undo`).
 
@@ -58,7 +59,9 @@ Khi phân tích yêu cầu của User, hãy tham chiếu danh sách này để b
 - `k8s-cluster-health`, `k8s-benchmark`, `k8s-events`: Kiểm tra sức khỏe cụm, benchmark HTTP và đọc sự kiện.
 - `kind-list`, `kind-create`, `kind-delete`: Quản lý cụm Kind (Kubernetes trong Docker).
 
-## Hệ thống & Lima VMs
+## Hệ thống, Môi trường, Điều hướng UI & Lima VMs
+- `navigate` (`{"page": "..."}`): Điều hướng tới một trong **17 trang giao diện chính** (`dashboard`, `instances`, `environment`, `containers`, `images`, `volumes`, `networks`, `compose`, `topology`, `activity`, `security`, `kubernetes`, `linux-vms`, `models`, `terminal`, `settings`, `help`).
+- `environment-resolutions`: Kiểm tra nguồn gốc phân giải đường dẫn (`$COLIMA_HOME` — XDG `~/.config/colima` trên Colima `0.10.x` so với `~/.colima` cũ, Lima `_lima/colima`, Docker socket, `KUBECONFIG`) và đối chiếu biến môi trường giữa `launchd` với shell người dùng.
 - `system-df`: Xem dung lượng đĩa.
 - `system-host-specs`, `system-check`, `system-check-tool`: Kiểm tra tài nguyên phần cứng và công cụ trên máy chủ macOS.
 - `system-prune`: Dọn dẹp rác toàn hệ thống (Containers, Networks, Images, Volumes).
@@ -70,20 +73,16 @@ Khi phân tích yêu cầu của User, hãy tham chiếu danh sách này để b
 - **Sử dụng khi:** Đọc và cập nhật cấu hình nội bộ (Tự nhận thức / Meta-Capabilities).
 
 ### Danh sách các cấu hình khả dụng (EXACT KEYS — DO NOT GUESS):
-- `ai_provider`: Hỗ trợ đầy đủ **9 nhà cung cấp AI (`ai_provider`)**:
-  1. `ollama` — Mô hình cục bộ hoặc Ollama từ xa (ví dụ: `qwen2.5-coder:7b`, `llama3.3`, `deepseek-r1:8b`, `gemma3`; trên UI cũng phân tách `ollama-local` / `ollama-cloud`)
+- `ai_provider`: Chỉ chấp nhận **ĐÚNG 6 định danh `ai_provider` chuẩn** dưới đây (TUYỆT ĐỐI KHÔNG dùng các tên không hợp lệ như `ollama`, `google`, `openrouter`, `groq`, `together`, `mistral`, `deepseek`):
+  1. `anthropic` — Anthropic Claude API (ví dụ: `claude-sonnet-4-6`, `claude-opus-4-6`, `claude-haiku-4-5`)
   2. `openai` — OpenAI API (ví dụ: `gpt-4o`, `gpt-4o-mini`, `o3-mini`)
-  3. `anthropic` — Anthropic Claude API (ví dụ: `claude-sonnet-4-6`, `claude-opus-4-6`, `claude-3-5-sonnet-latest`)
-  4. `google` — Google Gemini API (ví dụ: `gemini-2.5-pro`, `gemini-2.5-flash`, `gemini-2.0-flash`; alias UI: `gemini`)
-  5. `openrouter` — Cổng tổng hợp OpenRouter (ví dụ: `anthropic/claude-sonnet-4-6`, `openai/gpt-4o`, `deepseek/deepseek-r1`)
-  6. `groq` — Suy luận tốc độ cao trên Groq LPU (ví dụ: `llama-3.3-70b-versatile`, `deepseek-r1-distill-llama-70b`)
-  7. `together` — Together AI (ví dụ: `meta-llama/Llama-3.3-70B-Instruct-Turbo`, `Qwen/Qwen2.5-Coder-32B-Instruct`)
-  8. `mistral` — Mistral AI (ví dụ: `mistral-large-latest`, `codestral-latest`, `mistral-small-latest`)
-  9. `deepseek` — DeepSeek API (ví dụ: `deepseek-chat`, `deepseek-reasoner`)
-  *(Lưu ý: các nhà cung cấp chuẩn OpenAI như `openrouter`, `groq`, `together`, `mistral`, `deepseek`, LiteLLM, vLLM cũng có thể cấu hình qua chế độ `openai-compatible` kèm `ai_endpoint` tương ứng).*
-- `ai_model` (string — ví dụ: `claude-sonnet-4-6`, `gpt-4o`, `gpt-4o-mini`, `gemini-2.0-flash`, `deepseek-chat`, `qwen2.5-coder:7b`)
+  3. `gemini` — Google Gemini API (ví dụ: `gemini-2.5-pro`, `gemini-2.5-flash`, `gemini-2.0-flash`)
+  4. `openai-compatible` — Mọi cổng proxy và nhà cung cấp tương thích chuẩn OpenAI như **OpenRouter** (`https://openrouter.ai/api/v1`), **Groq** (`https://api.groq.com/openai/v1`), **DeepSeek** (`https://api.deepseek.com/v1`), **Mistral** (`https://api.mistral.ai/v1`), **Together AI** (`https://api.together.xyz/v1`), **LiteLLM** (`http://localhost:4000/v1`), **9router**, **vLLM**, hoặc **LM Studio** — cấu hình kèm `ai_endpoint` + `ai_api_key` + `ai_model` tương ứng.
+  5. `ollama-local` — Ollama daemon chạy cục bộ tại `http://localhost:11434` (ví dụ: `qwen2.5-coder:7b`, `llama3.3`, `deepseek-r1:8b`, `gemma3`)
+  6. `ollama-cloud` — Máy chủ Ollama từ xa hoặc Ollama Cloud cấu hình qua `ai_endpoint` (và `ai_api_key` nếu có)
+- `ai_model` (string — ví dụ: `claude-sonnet-4-6`, `gpt-4o`, `gemini-2.5-flash`, `deepseek-chat`, `qwen2.5-coder:7b`)
 - `ai_api_key` (string)
-- `ai_endpoint` (string — base URL cho Ollama từ xa hoặc các cổng tương thích OpenAI)
+- `ai_endpoint` (string — bắt buộc cho `openai-compatible` và `ollama-cloud`, ví dụ `https://openrouter.ai/api/v1` hoặc `https://api.deepseek.com/v1`)
 - `ai_searxng_instances` (JSON string array)
 - `ai_diag_content_mode` (`full`, `summary`)
 - `ai_diag_max_page_size` (string number, ví dụ: `"8000"`)
@@ -99,5 +98,4 @@ Khi phân tích yêu cầu của User, hãy tham chiếu danh sách này để b
 **Input:** `{"settings": {"colimaui_auto_pause": "true", "colimaui_auto_pause_mins": "15"}}` (Luôn luôn dùng kiểu String cho value)
 **Output:** Confirmation. (Sau khi update xong, hãy nhắc User refresh UI).
 
-- `update-setting`: Bật tắt giao diện Dark Mode, Auto-Pause, Idle Threshold.
-- `list-presets`, `save-preset`, `delete-preset`: Xem, lưu và xóa các cấu hình phần cứng máy ảo Custom.
+- `list-presets`, `save-preset`, `delete-preset`: Xem, lưu và xóa các cấu hình phần cứng máy ảo Custom (lưu trữ bền vững trong SQLite `~/.colima-ui/knowledge.db`).

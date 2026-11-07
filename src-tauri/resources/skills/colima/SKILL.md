@@ -15,6 +15,7 @@ Manage Colima VMs (instances) through the App Event Bus.
 
 - **List all instances**: `[QUERY: list-instances]`
 - **Instance status**: `[QUERY: colima-status | {"profile": "default"}]`
+- **Resolved paths & env (`$COLIMA_HOME`, XDG `~/.config/colima` vs legacy `~/.colima`, Lima `_lima/colima`, Docker socket, `launchd` vs shell env)**: `[QUERY: environment-resolutions]` (or open `[NAVIGATE: environment]`)
 - **Host specs** (for preset recommendation): `[QUERY: system-host-specs]`
 
 ## 2. Lifecycle (State Changes)
@@ -41,7 +42,7 @@ When creating a new instance, ALWAYS interview the user step by step:
 
 - **Non-interactive one-shot command inside VM**:
   `[EVENT_APPROVE: cli-exec | {"command": "colima", "args": ["ssh", "-p", "default", "--", "uname", "-a"]}]`
-- **Viewing or editing `colima.yaml`**: Do NOT read config paths with `~` via `cli-exec` (`runSandboxed` does not invoke a shell to expand `~`). Instead, navigate to `[NAVIGATE: settings]` to use the built-in Colima Config (`colima.yaml`) editor, or open interactive SSH in `[NAVIGATE: terminal]`.
+- **Viewing or editing `colima.yaml`**: Do NOT read config paths with `~` via `cli-exec` (`runSandboxed` does not invoke a shell to expand `~`). Colima `0.10.x` defaults to XDG `~/.config/colima/<profile>/colima.yaml` while older installs use `~/.colima/<profile>/colima.yaml` (or `$COLIMA_HOME`). Navigate to `[NAVIGATE: settings]` to use the built-in Colima Config (`colima.yaml`) editor (which resolves the active path automatically), inspect active paths in `[NAVIGATE: environment]`, or open interactive SSH in `[NAVIGATE: terminal]`.
 - **Interactive SSH session**: Navigate to `[NAVIGATE: terminal]` to open a full persistent PTY shell inside the Colima VM.
 
 ## Anti-Patterns

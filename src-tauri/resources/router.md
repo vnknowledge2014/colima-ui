@@ -5,11 +5,11 @@ The following skills are available to you. Each skill documents App Event Bus op
 ## Available Skills
 
 1. **ColimaUI App Event Catalog (`skills/colima_ui/SKILL.md`)**
-   - **READ THIS FIRST.** Complete catalog of 92 events across 10 domains (Instances, Containers, Images, Volumes, Networks, Compose, K8s, Kind, Lima, Models, System) plus all 16 navigable UI tabs.
+   - **READ THIS FIRST.** Complete catalog of 100 events across all domains (Instances, Containers, Images, Volumes, Networks, Compose, K8s, Kind, Lima, Models & Settings, System, Navigation & Gateway) plus all 17 navigable UI pages.
    - Includes payload schemas, category (SAFE/NORMAL/DANGEROUS), Consultant Mode `[ASK_CHOICE]` / `[SUGGEST]` patterns, and usage examples for every event.
 
 2. **Colima VM Management (`skills/colima/SKILL.md`)**
-   - App-First instance lifecycle via Event Bus: create, start, stop, restart, delete, plus Consultant Mode hardware/mount/VM-type selection and `colima.yaml` config editing via `[NAVIGATE: settings]`.
+   - App-First instance lifecycle via Event Bus: create, start, stop, restart, delete, Consultant Mode hardware/mount/VM-type selection, `colima.yaml` config editing via `[NAVIGATE: settings]`, and XDG path provenance via `[NAVIGATE: environment]` / `[QUERY: environment-resolutions]`.
    - References available:
      - `skills/colima/references/networking_and_dns.md`: SSHFS, VZ, DNS resolution.
      - `skills/colima/references/mount_volumes.md`: Mounting host directories.
@@ -17,22 +17,22 @@ The following skills are available to you. Each skill documents App Event Bus op
      - `skills/colima/references/performance_tuning.md`: CPU/RAM allocation.
 
 3. **Docker Container & Image Management (`skills/docker/SKILL.md`)**
-   - App-First container introspection and lifecycle via `[QUERY]` and `[EVENT_APPROVE]`.
-   - Native UI support for Image TAR Save/Load (`[NAVIGATE: images]`), Container File Copy (`[NAVIGATE: containers]`), visual network/volume graph (`[NAVIGATE: topology]`), and live metrics/alerts (`[NAVIGATE: activity]`).
-   - CLI escape only for: `docker build`, `docker push`.
+   - App-First container introspection, image builds (`build-image`), and lifecycle via `[QUERY]` and `[EVENT_APPROVE]`.
+   - Native UI support for Image TAR Save/Load (`[NAVIGATE: images]`), Container File Copy & interactive Container PTY `dockerExec` (`[NAVIGATE: containers]` / `[NAVIGATE: terminal]`), visual network/volume graph (`[NAVIGATE: topology]`), and live metrics/alerts (`[NAVIGATE: activity]`).
+   - CLI escape only for: `docker push`, multi-platform `docker buildx`.
    - References available:
      - `skills/docker/references/rootless_security.md`: Rootless mode, container breakout security.
      - `skills/docker/references/network_isolation.md`: Isolated bridge networks, iptables.
 
 4. **Docker Compose Management (`skills/docker_compose/SKILL.md`)**
-   - App-First Compose project lifecycle via Event Bus, plus built-in **Compose Diagnose** (schema + Knowledge Bank validation) and **AI Autofix** (diff preview, apply, and undo) in `[NAVIGATE: compose]`.
-   - CLI escape only for: `compose up --build`, `compose config`.
+   - App-First Compose project lifecycle (`compose-up`, `compose-down`, `compose-restart`, `compose-build`, `compose-pull`, `compose-logs`) via Event Bus, plus built-in **Compose Diagnose** (schema + Knowledge Bank validation) and **AI Autofix** (diff preview, apply, and undo) in `[NAVIGATE: compose]`.
+   - CLI escape only for: `compose config`.
    - References available:
      - `skills/docker_compose/references/secrets_management.md`: Managing secrets securely in compose.
 
 5. **Kubernetes Management (`skills/kubernetes/SKILL.md`)**
-   - App-First K8s management via 26 Event Bus operations. Replaces all kubectl commands.
-   - CLI escape only for: helm commands, advanced CRD mutations.
+   - App-First K8s management via 26 Event Bus operations (plus 3 Kind cluster events). Replaces all standard `kubectl` commands.
+   - CLI escape only for: `helm` commands, advanced CRD mutations.
    - References available:
      - `skills/kubernetes/references/colima_k3s_quirks.md`: Specific quirks when running K3s inside Colima.
      - `skills/kubernetes/references/rbac_security.md`: Role-Based Access Control and Service Accounts.
@@ -43,7 +43,7 @@ The following skills are available to you. Each skill documents App Event Bus op
      - `skills/limavm/references/vm_security.md`: Host-guest isolation.
 
 7. **Diagnostics & Troubleshooting (`skills/diagnostics/SKILL.md`)**
-   - QUERY-first troubleshooting: try lightweight `[QUERY]` calls before resorting to `[DIAGNOSE]`.
+   - QUERY-first troubleshooting: inspect path/socket provenance via `[QUERY: environment-resolutions]` / `[NAVIGATE: environment]` and lightweight `[QUERY]` calls before resorting to `[DIAGNOSE]`.
    - References available:
      - `skills/diagnostics/references/read_logs.md`: Colima and macOS log locations.
      - `skills/diagnostics/references/process_locks.md`: Stale `ha.sock` locks and zombie QEMU/VZ hypervisor processes.

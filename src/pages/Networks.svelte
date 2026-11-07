@@ -218,7 +218,7 @@
   <div class="content-header-actions">
     {#if selected.size > 0}
       <button class="btn btn-ghost" style="color: var(--accent-red); font-size: var(--text-sm);" onclick={handleBatchRemove} disabled={batchLoading}>
-        {batchLoading ? t('networks.removing', { default: 'Removing...' }) : t('networks.remove_selected', { default: `Remove ${selected.size} Selected` })}
+        {batchLoading ? t('networks.removing', { default: 'Removing...' }) : t('networks.remove_selected', { default: `Remove ${selected.size} Selected`, count: selected.size })}
       </button>
     {/if}
     <button class="btn btn-ghost" onclick={handlePrune} disabled={actionLoading === "prune"}>

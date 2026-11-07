@@ -251,7 +251,21 @@ pub async fn api_cli_chat(
     Json(payload): Json<agent_loop::HeadlessChatRequest>,
 ) -> (StatusCode, Json<serde_json::Value>) {
     match agent_loop::run_headless_agent(payload).await {
-        Ok(res) => (StatusCode::OK, Json(serde_json::json!({ "result": res }))),
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({ "error": e }))),
+        Ok(reply) => (
+            StatusCode::OK,
+            Json(serde_json::json!({
+                "success": true,
+                "reply": reply,
+                "result": reply,
+                "data": { "reply": reply }
+            })),
+        ),
+        Err(err) => (
+            StatusCode::BAD_GATEWAY,
+            Json(serde_json::json!({
+                "success": false,
+                "error": err
+            })),
+        ),
     }
 }

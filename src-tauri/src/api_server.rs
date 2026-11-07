@@ -86,6 +86,8 @@ pub fn build_router() -> Router {
             "/api/system/autostart",
             get(api_get_autostart_status).post(api_configure_autostart),
         )
+        .route("/api/system/resource-saver", post(api_set_resource_saver))
+        .route("/api/system/runtime", get(api_get_runtime_info))
         // Colima instances
         .route("/api/instances", get(api_list_instances))
         .route("/api/instances/start", post(api_start_instance))
@@ -94,6 +96,7 @@ pub fn build_router() -> Router {
         .route("/api/instances/status", get(api_instance_status))
         .route("/api/instances/ssh", get(api_ssh_command))
         .route("/api/instances/k8s", post(api_k8s_action))
+        .route("/api/instances/create-worker", post(api_create_worker_node))
         // Docker containers
         .route("/api/containers", get(api_list_containers))
         .route("/api/containers/start", post(api_start_container))
@@ -294,9 +297,16 @@ pub fn build_router() -> Router {
         .route("/api/ai/conversations/delete", post(api_ai_delete_conversation))
         // Environment resolution record (see commands/resolution.rs)
         .route("/api/environment/resolutions", get(api_get_environment_resolutions))
-        // Settings
+        // Settings & Presets
         .route("/api/settings", get(api_get_settings))
         .route("/api/settings", post(api_set_setting))
+        .route(
+            "/api/presets/snapshot",
+            get(api_load_preset_snapshot).post(api_save_preset_snapshot),
+        )
+        .route("/api/presets/snapshots", get(api_list_preset_snapshots))
+        .route("/api/presets", get(api_get_presets).post(api_save_preset))
+        .route("/api/presets/delete", post(api_delete_preset))
         // Colima config — colima.yaml is the single source of truth
         .route("/api/instances/config", get(crate::routes::colima_config::api_get_colima_config))
         .route("/api/instances/config/preview", post(crate::routes::colima_config::api_preview_colima_config))
@@ -558,5 +568,73 @@ mod tests {
             status_of("/api/containers", Some("Bearer not-the-real-token")).await,
             StatusCode::UNAUTHORIZED
         );
+    }
+
+    #[tokio::test]
+    async fn event_stream_also_accepts_bearer_header_auth() {
+        let bearer = format!("Bearer {}", get_api_token());
+        assert_eq!(status_of("/api/events", Some(&bearer)).await, StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn parity_routes_are_mounted_and_accept_expected_shapes() {
+        let bearer = format!("Bearer {}", get_api_token());
+
+        // GET /api/system/runtime
+        assert_eq!(
+            status_of("/api/system/runtime", Some(&bearer)).await,
+            StatusCode::OK
+        );
+
+        // GET /api/system/check-tool?name=qemu-img (allowlisted — must return 200, not 500 Unknown tool)
+        assert_eq!(
+            status_of("/api/system/check-tool?name=qemu-img", Some(&bearer)).await,
+            StatusCode::OK
+        );
+
+        // POST /api/system/resource-saver
+        let res = build_router()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/system/resource-saver")
+                    .header("authorization", &bearer)
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"enabled":false,"idle_minutes":20}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+
+        // POST /api/containers/unpause accepts both query and JSON body without 404/415/422
+        let unpause_q = build_router()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/containers/unpause")
+                    .header("authorization", &bearer)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_ne!(unpause_q.status(), StatusCode::NOT_FOUND);
+        assert_ne!(unpause_q.status(), StatusCode::UNSUPPORTED_MEDIA_TYPE);
+
+        let unpause_json = build_router()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/containers/unpause")
+                    .header("authorization", &bearer)
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"id":""}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_ne!(unpause_json.status(), StatusCode::NOT_FOUND);
+        assert_ne!(unpause_json.status(), StatusCode::UNPROCESSABLE_ENTITY);
     }
 }

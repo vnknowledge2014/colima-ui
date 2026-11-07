@@ -221,59 +221,64 @@ async fn test_adv_m3_mock_socket_http_200_succeeds() {
 // SECTION 2: SSE Event Stream & Disconnection Propagation
 // ===========================================================================
 
+static SSE_TEST_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
 #[tokio::test]
 async fn test_adv_m3_notify_instance_stopping_emits_lost_and_empty_state() {
+    let _sse_guard = SSE_TEST_LOCK.lock().await;
     let (mut rx_lost, _g_lost) = subscribe_topics(&["docker-connection-lost".to_string()]);
     let (mut rx_state, _g_state) = subscribe_topics(&["docker-state-updated".to_string()]);
 
     let test_profile = "test-adv-profile-stopping";
     notify_instance_stopping(test_profile);
 
-    // Verify docker-connection-lost event arrived
-    let lost_msg = tokio::time::timeout(Duration::from_millis(1000), async {
+    // Verify docker-connection-lost event arrived for our profile
+    let lost_data = tokio::time::timeout(Duration::from_millis(1000), async {
         loop {
             let msg = rx_lost.recv().await.expect("channel active");
             if msg.event == "docker-connection-lost" {
-                return msg;
+                let parsed: serde_json::Value =
+                    serde_json::from_str(&msg.data).expect("valid lost json");
+                if parsed["profile"] == test_profile {
+                    return parsed;
+                }
             }
         }
     })
     .await
     .expect("docker-connection-lost should be received within 1s");
 
-    let lost_data: serde_json::Value =
-        serde_json::from_str(&lost_msg.data).expect("valid lost json");
     assert_eq!(
         lost_data["profile"], test_profile,
         "Profile in connection-lost event must match target instance"
     );
 
     // Verify docker-state-updated with empty lists arrived
-    let state_msg = tokio::time::timeout(Duration::from_millis(1000), async {
+    let state_data = tokio::time::timeout(Duration::from_millis(1000), async {
         loop {
             let msg = rx_state.recv().await.expect("channel active");
             if msg.event == "docker-state-updated" {
-                return msg;
+                let parsed: serde_json::Value =
+                    serde_json::from_str(&msg.data).expect("valid state json");
+                let empty_containers = parsed["containers"]
+                    .as_array()
+                    .is_some_and(|arr| arr.is_empty());
+                let empty_images = parsed["images"]
+                    .as_array()
+                    .is_some_and(|arr| arr.is_empty());
+                if empty_containers && empty_images {
+                    return parsed;
+                }
             }
         }
     })
     .await
-    .expect("docker-state-updated should be received within 1s");
+    .expect("docker-state-updated with empty arrays should be received within 1s");
 
-    let state_data: serde_json::Value =
-        serde_json::from_str(&state_msg.data).expect("valid state json");
-    assert!(
-        state_data["containers"].is_array(),
-        "Containers in empty state must be an array"
-    );
     assert_eq!(
         state_data["containers"].as_array().unwrap().len(),
         0,
         "Containers list must be empty on connection lost"
-    );
-    assert!(
-        state_data["images"].is_array(),
-        "Images in empty state must be an array"
     );
     assert_eq!(
         state_data["images"].as_array().unwrap().len(),
@@ -284,6 +289,7 @@ async fn test_adv_m3_notify_instance_stopping_emits_lost_and_empty_state() {
 
 #[tokio::test]
 async fn test_adv_m3_sse_multi_subscriber_broadcast_concurrency() {
+    let _sse_guard = SSE_TEST_LOCK.lock().await;
     let num_subscribers = 8;
     let mut receivers = Vec::new();
     let mut guards = Vec::new();

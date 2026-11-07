@@ -248,7 +248,15 @@ pub async fn sse_instance_publisher() {
     let mut last_json = String::new();
     loop {
         tokio::time::sleep(std::time::Duration::from_secs(2)).await;
-        let instances = crate::instance_reader::list_instances_fast();
+        if subscriber_count("instances-update") == 0 {
+            last_json.clear();
+            continue;
+        }
+        let Ok(instances) =
+            tokio::task::spawn_blocking(crate::instance_reader::list_instances_fast).await
+        else {
+            continue;
+        };
         let data = serde_json::json!({ "instances": instances });
         let json = data.to_string();
         // Only publish if state actually changed (avoid noise)

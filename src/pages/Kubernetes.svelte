@@ -65,7 +65,6 @@
   let ctxMenu = $state<{ x: number; y: number; item: K8sResource } | null>(null);
   
   let eventSource: EventSource | null = null;
-  let searchInput: HTMLInputElement | null = $state(null);
   let timeoutId: ReturnType<typeof setTimeout> | null = null;
 
   const RESOURCE_GROUPS = [
@@ -118,10 +117,6 @@
   const ALL_ITEMS = RESOURCE_GROUPS.flatMap(g => g.items);
 
   function handleKeydown(e: KeyboardEvent) {
-    if ((e.metaKey || e.ctrlKey) && e.key === "k") {
-      e.preventDefault();
-      searchInput?.focus();
-    }
     if (e.key === "Escape") {
       selectedItem = null;
       ctxMenu = null;
@@ -586,7 +581,7 @@
       {:else}
         <!-- Filter bar -->
         <div style="display: flex; gap: 8px; margin-bottom: 12px; align-items: center;">
-          <input bind:this={searchInput} type="text" bind:value={filter} placeholder="Filter {activeInfo?.label || ''}..." class="input" style="flex: 1;" />
+          <input type="text" bind:value={filter} placeholder="Filter {activeInfo?.label || ''}..." class="input" style="flex: 1;" />
           <span style="font-size: var(--text-xs); color: var(--text-muted); font-family: var(--font-mono);">
             {filtered.length} {activeInfo?.label || "items"}
           </span>

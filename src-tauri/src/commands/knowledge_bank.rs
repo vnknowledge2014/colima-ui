@@ -305,7 +305,7 @@ fn seed_builtins(conn: &Connection) {
         (
             r"Cannot connect.*Docker daemon|docker.*daemon.*not running",
             "docker_socket",
-            "Docker daemon is not running because Colima is not started.\n\n**Fix:**\n```bash\ncolima start\n```\n\nIf Colima is running but Docker is unreachable:\n```bash\nexport DOCKER_HOST=unix://$HOME/.colima/default/docker.sock\n```",
+            "Docker daemon is not running because Colima is not started.\n\n**Fix:**\n```bash\ncolima start\n```\n\nIf Colima is running but Docker is unreachable (Colima 0.10+ XDG vs legacy):\n```bash\nexport DOCKER_HOST=unix://$HOME/.config/colima/default/docker.sock\n# Or on legacy Colima (<0.10):\nexport DOCKER_HOST=unix://$HOME/.colima/default/docker.sock\n```",
             "Docker socket not found — Colima VM not running or socket path misconfigured",
             r#"["colima start"]"#
         ),
@@ -326,7 +326,7 @@ fn seed_builtins(conn: &Connection) {
         (
             r"disk.*in use by instance",
             "disk_lock",
-            "VM disk file is locked by another process.\n\n**Fix:**\n```bash\ncolima stop --force\npkill -f \"limactl usernet\"\npkill -f \"colima daemon\"\n# Remove stale PID files\nrm -f ~/.colima/_lima/colima/*.pid\ncolima start\n```",
+            "VM disk file is locked by another process.\n\n**Fix:**\n```bash\ncolima stop --force\npkill -f \"limactl usernet\"\npkill -f \"colima daemon\"\n# Remove stale PID files (Colima 0.10+ XDG and legacy ~/.colima)\nrm -f ~/.config/colima/_lima/colima/*.pid ~/.colima/_lima/colima/*.pid\ncolima start\n```",
             "Stale PID files or zombie processes from a previous crash holding disk lock",
             r#"["colima stop --force","pkill -f \"limactl usernet\"","pkill -f \"colima daemon\"","colima start"]"#
         ),
@@ -354,7 +354,7 @@ fn seed_builtins(conn: &Connection) {
         (
             r"kubeconfig.*not found|KUBECONFIG.*missing",
             "k8s",
-            "Kubeconfig file is missing.\n\n**Fix:**\n```bash\nexport KUBECONFIG=~/.colima/default/kubeconfig.yaml\nkubectl get nodes\n```",
+            "Kubeconfig file is missing.\n\n**Fix (Colima 0.10+ XDG or legacy `~/.colima`):**\n```bash\nif [ -f ~/.config/colima/default/kubeconfig.yaml ]; then\n  export KUBECONFIG=~/.config/colima/default/kubeconfig.yaml\nelse\n  export KUBECONFIG=~/.colima/default/kubeconfig.yaml\nfi\nkubectl get nodes\n```",
             "KUBECONFIG environment variable not set to Colima's kubeconfig",
             r#"[]"#
         ),
@@ -685,21 +685,26 @@ pub fn search_agent_memory(conn: &Connection, query: &str, limit: u32) -> rusqli
     if tokens.is_empty() {
         return Ok(Vec::new());
     }
-    
-    // e.g. "foo bar" -> "foo OR bar"
-    let fts_query = tokens.join(" OR ");
-    
+
+    // Quote each sanitized token so FTS5 reserved operators (`AND`, `OR`, `NOT`, `NEAR`)
+    // are matched as literal terms instead of triggering `fts5: syntax error`.
+    let fts_query = tokens
+        .into_iter()
+        .map(|token| format!("\"{}\"", token))
+        .collect::<Vec<_>>()
+        .join(" OR ");
+
     let mut stmt = conn.prepare(
         "SELECT content FROM agent_memory_fts 
          WHERE agent_memory_fts MATCH ?1 
          ORDER BY bm25(agent_memory_fts) 
          LIMIT ?2",
     )?;
-    
+
     let results: rusqlite::Result<Vec<String>, _> = stmt
         .query_map(params![fts_query, limit], |row| row.get(0))?
         .collect();
-        
+
     results
 }
 
@@ -1008,4 +1013,49 @@ pub async fn delete_preset(id: String) -> Result<String, crate::error::ColimaErr
     Ok("Preset deleted".to_string())
     }
     .await.map_err(|e: String| crate::error::ColimaError::from(e))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn setup_memory_db() -> Connection {
+        let conn = Connection::open_in_memory().expect("in-memory sqlite");
+        conn.execute_batch(
+            "
+            CREATE TABLE agent_memory (
+                id TEXT PRIMARY KEY,
+                type TEXT NOT NULL,
+                content TEXT NOT NULL,
+                created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now'))
+            );
+            CREATE VIRTUAL TABLE agent_memory_fts USING fts5(
+                content,
+                content='agent_memory',
+                content_rowid='rowid'
+            );
+            CREATE TRIGGER agent_memory_ai_fts AFTER INSERT ON agent_memory
+            BEGIN
+                INSERT INTO agent_memory_fts(rowid, content) VALUES (new.rowid, new.content);
+            END;
+            ",
+        )
+        .expect("schema");
+        conn
+    }
+
+    #[test]
+    fn search_agent_memory_handles_fts5_reserved_keywords() {
+        let conn = setup_memory_db();
+        add_agent_memory(&conn, "fact", "boolean operators AND OR NOT NEAR work").unwrap();
+
+        // Previously `AND OR NOT` expanded to `AND OR OR OR NOT`, failing with `fts5: syntax error`.
+        let hits = search_agent_memory(&conn, "AND OR NOT", 10)
+            .expect("FTS5 reserved keywords must not cause syntax error");
+        assert_eq!(hits.len(), 1);
+        assert!(hits[0].contains("AND OR NOT"));
+
+        let near_only = search_agent_memory(&conn, "NEAR", 10).expect("NEAR keyword safe");
+        assert_eq!(near_only.len(), 1);
+    }
 }

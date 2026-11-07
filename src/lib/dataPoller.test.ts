@@ -52,20 +52,56 @@ vi.mock("./api/client", () => ({ resolveApiBase: vi.fn().mockResolvedValue("http
 vi.mock("../store/capabilities.svelte", () => ({ loadCapabilities: vi.fn() }));
 vi.mock("./normalizers", () => ({ normalizeContainer: (c: unknown) => c, normalizeImage: (i: unknown) => i }));
 vi.mock("./settingsStore.svelte", () => ({ getAppSetting: () => "" }));
-// Browser mode: the SSE branch is the one that owns an EventSource.
-vi.mock("./env", () => ({ isRunningInTauri: () => false }));
-vi.mock("../store.svelte", () => ({
-  dockerState: { containers: [], images: [], loading: true },
-  resourceState: { volumes: [], networks: [], volumesLoading: true, networksLoading: true },
-  dashboardState: { colimaInstances: [], systemInfo: {}, instancesLoaded: false },
-  uiState: { currentPage: "dashboard" },
-  isEventCooldownActive: () => false,
+let runInTauri = false;
+const tauriListeners = new Map<string, (e: { payload: unknown }) => void>();
+const tauriUnlisteners: ReturnType<typeof vi.fn>[] = [];
+
+vi.mock("./env", () => ({ isRunningInTauri: () => runInTauri }));
+vi.mock("@tauri-apps/api/event", () => ({
+  listen: vi.fn(async (event: string, handler: (e: { payload: unknown }) => void) => {
+    tauriListeners.set(event, handler);
+    const unlisten = vi.fn();
+    tauriUnlisteners.push(unlisten);
+    return unlisten;
+  }),
 }));
+vi.mock("../store.svelte", () => {
+  const validPages = new Set([
+    "dashboard",
+    "instances",
+    "environment",
+    "containers",
+    "images",
+    "volumes",
+    "networks",
+    "compose",
+    "topology",
+    "activity",
+    "security",
+    "kubernetes",
+    "linux-vms",
+    "models",
+    "terminal",
+    "settings",
+    "help",
+  ]);
+  return {
+    dockerState: { containers: [], images: [], loading: true },
+    resourceState: { volumes: [], networks: [], volumesLoading: true, networksLoading: true },
+    dashboardState: { colimaInstances: [], systemInfo: {}, instancesLoaded: false },
+    uiState: { currentPage: "dashboard" },
+    isEventCooldownActive: () => false,
+    isValidPage: (p: string) => validPages.has(p),
+  };
+});
 vi.mock("./visibleInterval", () => ({ setVisibleInterval: () => () => {} }));
 
 beforeEach(() => {
   vi.resetModules();
   vi.useFakeTimers();
+  runInTauri = false;
+  tauriListeners.clear();
+  tauriUnlisteners.length = 0;
   eventSources.length = 0;
   vi.stubGlobal("EventSource", FakeEventSource as unknown as typeof EventSource);
   listContainers.mockResolvedValue([]);
@@ -136,6 +172,29 @@ describe("teardown", () => {
     // HMR and a re-mounted root both take this path.
     expect(listContainers.mock.calls.length).toBeGreaterThan(after);
     stop2();
+  });
+
+  it("unlistens all Tauri event subscriptions in stopDataPoller() and filters invalid navigate events", async () => {
+    runInTauri = true;
+    const { startDataPoller, stopDataPoller } = await import("./dataPoller");
+    const { uiState } = await import("../store.svelte");
+
+    startDataPoller();
+    await vi.runOnlyPendingTimersAsync();
+
+    expect(tauriUnlisteners.length).toBe(6);
+
+    const navHandler = tauriListeners.get("navigate");
+    expect(navHandler).toBeDefined();
+
+    navHandler!({ payload: { page: "environment" } });
+    expect(uiState.currentPage).toBe("environment");
+
+    navHandler!({ payload: { page: "unknown-malicious-route" } });
+    expect(uiState.currentPage).toBe("environment");
+
+    stopDataPoller();
+    expect(tauriUnlisteners.every((fn) => fn.mock.calls.length === 1)).toBe(true);
   });
 });
 

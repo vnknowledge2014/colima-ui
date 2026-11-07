@@ -314,9 +314,22 @@ fn test_adv_start_config_normalize_resources_lifecycle() {
 
 static ADV_PROC_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
+async fn is_live_runtime_daemon_reachable() -> bool {
+    match run(vec!["info".to_string()], Duration::from_secs(2)).await {
+        Ok(out) => out.status.success(),
+        Err(_) => false,
+    }
+}
+
 #[tokio::test]
 async fn test_adv_subprocess_timeout_returns_promptly() {
     let _lock = ADV_PROC_LOCK.lock().await;
+    if !is_live_runtime_daemon_reachable().await {
+        eprintln!(
+            "[skip] test_adv_subprocess_timeout_returns_promptly: no live Docker/Colima daemon reachable"
+        );
+        return;
+    }
     let start = Instant::now();
     // Requesting `events` from docker without any events will wait indefinitely if not cancelled.
     // Timeout is set to 150ms.
@@ -411,6 +424,12 @@ async fn test_adv_subprocess_kill_on_drop_terminates_child_process() {
 #[tokio::test]
 async fn test_adv_runtime_run_repeated_timeouts_no_process_leak() {
     let _lock = ADV_PROC_LOCK.lock().await;
+    if !is_live_runtime_daemon_reachable().await {
+        eprintln!(
+            "[skip] test_adv_runtime_run_repeated_timeouts_no_process_leak: no live Docker/Colima daemon reachable"
+        );
+        return;
+    }
 
     fn count_docker_events_processes() -> usize {
         let output = std::process::Command::new("pgrep")

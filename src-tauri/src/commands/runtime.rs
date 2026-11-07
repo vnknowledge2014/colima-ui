@@ -18,6 +18,17 @@ pub fn detect_runtime() -> (String, String, Option<String>) {
         runtime_name = profile_runtime;
     }
 
+    // If no Docker socket was found, check whether a non-default containerd profile is running.
+    if host_sock.is_none() && runtime_name == "docker" {
+        if let Some(containerd_prof) = crate::instance_reader::running_containerd_profiles()
+            .into_iter()
+            .next()
+        {
+            runtime_name = "containerd".to_string();
+            profile_name = containerd_prof;
+        }
+    }
+
     (runtime_name, profile_name, host_sock)
 }
 
@@ -92,11 +103,12 @@ pub const LONG_OP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(
 /// Returns the active runtime name (e.g., "docker", "podman", "containerd").
 #[tauri::command]
 pub async fn get_runtime_info() -> Result<String, crate::error::ColimaError> {
-    async move {
-    let (runtime_name, _, _) = detect_runtime();
-    Ok(runtime_name)
-    }
-    .await.map_err(|e: String| crate::error::ColimaError::from(e))
+    crate::helpers::run_blocking(|| {
+        let (runtime_name, _, _) = detect_runtime();
+        Ok(runtime_name)
+    })
+    .await
+    .map_err(crate::error::ColimaError::from)
 }
 
 #[cfg(test)]

@@ -67,19 +67,19 @@
     if (!pullName.trim()) return;
     const name = pullName.trim();
     // Fire-and-forget: close dialog, long operation runs in background
-    globalToast("success", t('models.pulling', { default: `Pulling model '${name}'... This may take a while.` }));
+    globalToast("success", t('models.pulling', { default: `Pulling model '${name}'... This may take a while.`, name }));
     pullName = "";
     showPull = false;
     modelsApi.pullModel(selectedProfile, name, selectedRunner)
-      .then(() => { globalToast("success", t('models.pulled', { default: `Model '${name}' pulled successfully` })); fetchModels(); })
-      .catch((e) => globalToast("error", t('models.pull_failed', { default: `Pull failed: ${e}` })));
+      .then(() => { globalToast("success", t('models.pulled', { default: `Model '${name}' pulled successfully`, name })); fetchModels(); })
+      .catch((e) => globalToast("error", t('models.pull_failed', { default: `Pull failed: ${e}`, error: String(e) })));
   }
 
   async function handleDelete(name: string) {
     actionLoading = `${name}-delete`;
     try {
       await modelsApi.deleteModel(selectedProfile, name, selectedRunner);
-      globalToast("success", t('models.deleted', { default: `Model '${name}' deleted` }));
+      globalToast("success", t('models.deleted', { default: `Model '${name}' deleted`, name }));
       fetchModels();
     } catch (e) {
       globalToast("error", String(e));
@@ -92,7 +92,7 @@
     actionLoading = `${name}-serve`;
     try {
       await modelsApi.serveModel(selectedProfile, name, 11434, selectedRunner);
-      globalToast("success", t('models.serving', { default: `Model '${name}' serving on port 11434` }));
+      globalToast("success", t('models.serving', { default: `Model '${name}' serving on port 11434`, name }));
     } catch (e) {
       globalToast("error", String(e));
     } finally {

@@ -1,5 +1,10 @@
-import { describe, it, expect } from "vitest";
-import { exitHint, sessionLabel } from "./terminal-transport";
+import { describe, it, expect, vi } from "vitest";
+import {
+  exitHint,
+  isSameSessionTarget,
+  sessionLabel,
+  SHELL_MISSING_WINDOW_MS,
+} from "./terminal-transport";
 
 describe("terminal-transport — sessionLabel", () => {
   it("formats colima default and named profiles", () => {
@@ -68,5 +73,61 @@ describe("terminal-transport — exitHint", () => {
   it("returns null for colima and lima sessions even on exit code 127", () => {
     expect(exitHint({ kind: "colima", profile: "default" }, 127)).toBeNull();
     expect(exitHint({ kind: "lima", instance: "ubuntu" }, 127)).toBeNull();
+  });
+
+  it("suppresses distroless exitHint when 126/127 occurs more than 3 seconds after session creation", () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-11-07T00:00:00Z"));
+      const openedAt = Date.now();
+
+      vi.advanceTimersByTime(SHELL_MISSING_WINDOW_MS - 100);
+      expect(
+        exitHint({ kind: "dockerExec", container: "c1", label: "app" }, 127, openedAt),
+      ).toContain("/bin/sh");
+
+      vi.advanceTimersByTime(200);
+      expect(
+        exitHint({ kind: "dockerExec", container: "c1", label: "app" }, 127, openedAt),
+      ).toBeNull();
+      expect(
+        exitHint(
+          { kind: "k8sExec", namespace: "default", pod: "p1", container: "c1" },
+          127,
+          openedAt,
+        ),
+      ).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe("terminal-transport — isSameSessionTarget", () => {
+  it("matches identical targets and distinguishes distinct targets", () => {
+    expect(
+      isSameSessionTarget(
+        { kind: "colima", profile: "default" },
+        { kind: "colima", profile: "default" },
+      ),
+    ).toBe(true);
+    expect(
+      isSameSessionTarget(
+        { kind: "colima", profile: "default" },
+        { kind: "colima", profile: "dev" },
+      ),
+    ).toBe(false);
+    expect(
+      isSameSessionTarget(
+        { kind: "dockerExec", container: "abc", label: "one" },
+        { kind: "dockerExec", container: "abc", label: "two" },
+      ),
+    ).toBe(true);
+    expect(
+      isSameSessionTarget(
+        { kind: "k8sExec", namespace: "ns", pod: "p", container: "c1" },
+        { kind: "k8sExec", namespace: "ns", pod: "p", container: "c2" },
+      ),
+    ).toBe(false);
   });
 });

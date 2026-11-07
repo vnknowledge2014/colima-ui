@@ -1,8 +1,11 @@
 import { isRunningInTauri } from "../env";
 import { runSandboxed } from "./shell";
 import { EventHandler } from "./types";
-import { modelsApi } from "../api";
+import { modelsApi, settingsApi } from "../api";
+import { call } from "../api/client";
 import { getActiveProvider } from "../aiProviderConfig";
+import { setAppSetting } from "../settingsStore.svelte";
+import { uiState, VALID_PAGES, isValidPage } from "../../store.svelte";
 
 export const configRegistry: Record<string, EventHandler> = {
   "model-list": {
@@ -39,8 +42,12 @@ export const configRegistry: Record<string, EventHandler> = {
     category: "SAFE",
     description: "Navigate to a specific page in the application",
     handler: async (p) => {
-      window.dispatchEvent(new CustomEvent('colima-navigate', { detail: p.page }));
-      return `Navigated to ${p.page} tab.`;
+      const targetPage = typeof p?.page === "string" ? p.page.trim().toLowerCase() : "";
+      if (!isValidPage(targetPage)) {
+        return `Error: Invalid page '${p?.page ?? ""}'. Valid pages: ${VALID_PAGES.join(", ")}`;
+      }
+      uiState.currentPage = targetPage;
+      return `Navigated to ${targetPage} tab.`;
     }
   },
 
@@ -48,20 +55,24 @@ export const configRegistry: Record<string, EventHandler> = {
     category: "SAFE",
     description: "Get all application settings and configuration including AI provider/model",
     handler: async () => {
-      if (!isRunningInTauri()) return "[SIMULATED] Returning all settings...";
-      const { invoke } = await import("@tauri-apps/api/core");
-      const settings = await invoke("get_all_settings");
-      return JSON.stringify(settings, null, 2);
+      const settings = await settingsApi.getAll();
+      const redacted: Record<string, string> = {};
+      for (const [key, val] of Object.entries(settings ?? {})) {
+        if (/api_key|token|secret|password/i.test(key)) {
+          redacted[key] = val ? "[REDACTED]" : "";
+        } else {
+          redacted[key] = val;
+        }
+      }
+      return JSON.stringify(redacted, null, 2);
     }
   },
   "ai-update-config": {
     category: "NORMAL",
     description: "Update application settings and configuration",
     handler: async (p) => {
-      if (!isRunningInTauri()) return "[SIMULATED] Config updated.";
-      const { invoke } = await import("@tauri-apps/api/core");
-      const updates = p;
-      if (updates.provider) await invoke("set_setting", { key: "ai_provider", value: updates.provider });
+      const updates = p ?? {};
+      if (updates.provider) await setAppSetting("ai_provider", String(updates.provider));
       // Written to the active mirror and to the provider's own slot, so the
       // settings form does not overwrite these the next time it loads.
       const provider = updates.provider || getActiveProvider();
@@ -72,18 +83,20 @@ export const configRegistry: Record<string, EventHandler> = {
       ];
       for (const [activeKey, providerKey, value] of scoped) {
         if (!value) continue;
-        await invoke("set_setting", { key: activeKey, value });
-        await invoke("set_setting", { key: providerKey, value });
+        await setAppSetting(activeKey, value);
+        await setAppSetting(providerKey, value);
       }
 
       // Update other arbitrary settings
       if (updates.settings) {
-        const arbitrary = typeof updates.settings === "string" ? JSON.parse(updates.settings) : updates.settings;
+        const arbitrary = typeof updates.settings === "string"
+          ? (JSON.parse(updates.settings) as Record<string, unknown>)
+          : (updates.settings as Record<string, unknown>);
         for (const [key, value] of Object.entries(arbitrary)) {
-          await invoke("set_setting", { key, value: String(value) });
+          await setAppSetting(key, String(value));
         }
       }
-      
+
       return `Configuration updated. Please notify the user that they may need to restart the application or refresh the UI for some changes to apply.`;
     }
   },
@@ -91,9 +104,7 @@ export const configRegistry: Record<string, EventHandler> = {
     category: "SAFE",
     description: "List all saved custom presets",
     handler: async () => {
-      if (!isRunningInTauri()) return "[SIMULATED] Returning presets...";
-      const { invoke } = await import("@tauri-apps/api/core");
-      const presets = await invoke("get_all_presets");
+      const presets = await call<Record<string, string>>("get_all_presets", undefined, "GET", "/api/presets");
       return JSON.stringify(presets, null, 2);
     }
   },
@@ -101,10 +112,16 @@ export const configRegistry: Record<string, EventHandler> = {
     category: "NORMAL",
     description: "Save a custom instance preset",
     handler: async (p) => {
-      if (!isRunningInTauri()) return "[SIMULATED] Preset saved.";
-      const { invoke } = await import("@tauri-apps/api/core");
-      if (!p.id) return "Error: Missing preset id";
-      await invoke("save_preset", { id: p.id, configJson: JSON.stringify(p) });
+      if (!p?.id) return "Error: Missing preset id";
+      const configJson = JSON.stringify(p);
+      await call<string>(
+        "save_preset",
+        { id: p.id, configJson },
+        "POST",
+        "/api/presets",
+        undefined,
+        { id: p.id, config_json: configJson, configJson }
+      );
       return `Preset '${p.id}' saved successfully.`;
     }
   },
@@ -112,10 +129,15 @@ export const configRegistry: Record<string, EventHandler> = {
     category: "DANGEROUS",
     description: "Delete a custom instance preset",
     handler: async (p) => {
-      if (!isRunningInTauri()) return "[SIMULATED] Preset deleted.";
-      const { invoke } = await import("@tauri-apps/api/core");
-      if (!p.id) return "Error: Missing preset id";
-      await invoke("delete_preset", { id: p.id });
+      if (!p?.id) return "Error: Missing preset id";
+      await call<string>(
+        "delete_preset",
+        { id: p.id },
+        "POST",
+        "/api/presets/delete",
+        undefined,
+        { id: p.id }
+      );
       return `Preset '${p.id}' deleted successfully.`;
     }
   },

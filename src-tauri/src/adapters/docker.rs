@@ -32,23 +32,35 @@ impl DockerAdapter {
         crate::commands::runtime::get_runtime_cmd()
     }
 
-    /// Execute a Docker CLI command on a blocking thread pool with timeout.
-    async fn cli_output(&self, args: Vec<String>) -> Result<std::process::Output, AdapterError> {
-        let result = tokio::time::timeout(
-            std::time::Duration::from_secs(10),
-            tokio::task::spawn_blocking(move || {
-                crate::commands::runtime::get_runtime_cmd()
-                    .args(args.iter().map(|s| s.as_str()).collect::<Vec<&str>>())
-                    .output()
-                    .map_err(|e| AdapterError::new("docker", format!("Failed to run: {}", e)))
-            }),
-        )
-        .await;
+    /// Default timeout for standard Docker CLI invocations.
+    pub const DEFAULT_CLI_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
 
-        match result {
-            Ok(Ok(output)) => output,
-            Ok(Err(e)) => Err(AdapterError::new("docker", format!("Task error: {}", e))),
-            Err(_) => Err(AdapterError::new("docker", "Command timed out (daemon may be unresponsive)")),
+    /// Extended 300-second timeout for `docker pull` so large multi-layer images do not time out.
+    pub const PULL_IMAGE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(300);
+
+    /// Execute a Docker CLI command on a blocking thread pool with default timeout.
+    async fn cli_output(&self, args: Vec<String>) -> Result<std::process::Output, AdapterError> {
+        self.cli_output_with_timeout(args, Self::DEFAULT_CLI_TIMEOUT)
+            .await
+    }
+
+    /// Execute a Docker CLI command with a custom timeout.
+    async fn cli_output_with_timeout(
+        &self,
+        args: Vec<String>,
+        timeout: std::time::Duration,
+    ) -> Result<std::process::Output, AdapterError> {
+        let std_cmd = crate::commands::runtime::get_runtime_cmd();
+        let mut cmd = tokio::process::Command::from(std_cmd);
+        cmd.args(&args).kill_on_drop(true);
+
+        match tokio::time::timeout(timeout, cmd.output()).await {
+            Ok(Ok(output)) => Ok(output),
+            Ok(Err(e)) => Err(AdapterError::new("docker", format!("Failed to run: {}", e))),
+            Err(_) => Err(AdapterError::new(
+                "docker",
+                "Command timed out (daemon may be unresponsive)",
+            )),
         }
     }
 
@@ -147,11 +159,12 @@ impl ContainerRuntime for DockerAdapter {
     }
 
     async fn container_stats(&self, id: &str) -> Result<String, AdapterError> {
-        let output = self.cli_output(vec![
-            "stats".into(), "--no-stream".into(), "--format".into(), "json".into(), id.to_string()
-        ]).await?;
+        let output = self.cli_output(build_stats_args(id)).await?;
         if !output.status.success() {
-            return Err(AdapterError::new("docker", format!("stats failed: {}", String::from_utf8_lossy(&output.stderr))));
+            return Err(AdapterError::new(
+                "docker",
+                format!("stats failed: {}", String::from_utf8_lossy(&output.stderr)),
+            ));
         }
         Ok(String::from_utf8_lossy(&output.stdout).to_string())
     }
@@ -220,28 +233,44 @@ impl ContainerRuntime for DockerAdapter {
     }
 
     async fn pull_image(&self, name: &str) -> Result<String, AdapterError> {
-        let output = self.cli_output(vec!["pull".into(), name.to_string()]).await?;
+        let output = self
+            .cli_output_with_timeout(
+                vec!["pull".into(), name.to_string()],
+                Self::PULL_IMAGE_TIMEOUT,
+            )
+            .await?;
         if !output.status.success() {
-            return Err(AdapterError::new("docker", format!("pull failed: {}", String::from_utf8_lossy(&output.stderr))));
+            return Err(AdapterError::new(
+                "docker",
+                format!("pull failed: {}", String::from_utf8_lossy(&output.stderr)),
+            ));
         }
         Ok(String::from_utf8_lossy(&output.stdout).to_string())
     }
 
     async fn remove_image(&self, id: &str, force: bool) -> Result<String, AdapterError> {
         let mut args = vec!["rmi".to_string()];
-        if force { args.push("-f".into()); }
+        if force {
+            args.push("-f".into());
+        }
         args.push(id.to_string());
         let output = self.cli_output(args).await?;
         if !output.status.success() {
-            return Err(AdapterError::new("docker", format!("rmi failed: {}", String::from_utf8_lossy(&output.stderr))));
+            return Err(AdapterError::new(
+                "docker",
+                format!("rmi failed: {}", String::from_utf8_lossy(&output.stderr)),
+            ));
         }
         Ok(format!("Image {} removed", id))
     }
 
     async fn prune_images(&self) -> Result<String, AdapterError> {
-        let output = self.cli_output(vec!["image".into(), "prune".into(), "-a".into(), "-f".into()]).await?;
+        let output = self.cli_output(build_image_prune_args()).await?;
         if !output.status.success() {
-            return Err(AdapterError::new("docker", format!("prune failed: {}", String::from_utf8_lossy(&output.stderr))));
+            return Err(AdapterError::new(
+                "docker",
+                format!("prune failed: {}", String::from_utf8_lossy(&output.stderr)),
+            ));
         }
         Ok(String::from_utf8_lossy(&output.stdout).to_string())
     }
@@ -368,5 +397,56 @@ impl ContainerRuntime for DockerAdapter {
                 }
             }
         }
+    }
+}
+
+pub fn build_stats_args(id: &str) -> Vec<String> {
+    let mut args = vec![
+        "stats".to_string(),
+        "--no-stream".into(),
+        "--format".into(),
+        "json".into(),
+    ];
+    if !id.trim().is_empty() {
+        args.push(id.trim().to_string());
+    }
+    args
+}
+
+pub fn build_image_prune_args() -> Vec<String> {
+    vec!["image".to_string(), "prune".into(), "-f".into()]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pull_image_timeout_is_300_seconds() {
+        assert_eq!(
+            DockerAdapter::PULL_IMAGE_TIMEOUT,
+            std::time::Duration::from_secs(300)
+        );
+        assert_eq!(
+            DockerAdapter::DEFAULT_CLI_TIMEOUT,
+            std::time::Duration::from_secs(10)
+        );
+    }
+
+    #[test]
+    fn build_image_prune_args_uses_image_prune_force_without_system_prune() {
+        assert_eq!(build_image_prune_args(), vec!["image", "prune", "-f"]);
+    }
+
+    #[test]
+    fn build_stats_args_handles_all_and_single_container() {
+        assert_eq!(
+            build_stats_args(""),
+            vec!["stats", "--no-stream", "--format", "json"]
+        );
+        assert_eq!(
+            build_stats_args("nginx-1"),
+            vec!["stats", "--no-stream", "--format", "json", "nginx-1"]
+        );
     }
 }

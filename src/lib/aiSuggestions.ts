@@ -383,6 +383,24 @@ function getPageContextPrompts(page: string): StarterPrompt[] {
         },
       ];
 
+    case "environment":
+      return [
+        {
+          id: "starter-environment-resolutions",
+          title: t("ai.starter.environment_resolutions_title", { default: "Inspect resolved paths" }),
+          prompt: t("ai.starter.environment_resolutions_prompt", { default: "Inspect COLIMA_HOME, DOCKER_HOST, and LIMA_HOME resolution rules" }),
+          icon: "general",
+          category: "context",
+        },
+        {
+          id: "starter-environment-duality",
+          title: t("ai.starter.environment_duality_title", { default: "Explain shell vs app env" }),
+          prompt: t("ai.starter.environment_duality_prompt", { default: "Explain why shell environment variables differ from GUI app PATH" }),
+          icon: "general",
+          category: "context",
+        },
+      ];
+
     case "dashboard":
     default:
       return [
@@ -545,6 +563,12 @@ export function deriveFallbackSuggestions(context: FallbackSuggestionContext = {
       return [
         [t("ai.fallback.run_security_audit", { default: "Run security audit" }), t("ai.fallback.run_security_audit_prompt", { default: "Audit Docker security posture and configuration" })],
         [t("ai.fallback.check_image_vulnerabilities", { default: "Check image vulnerabilities" }), t("ai.fallback.check_image_vulnerabilities_prompt", { default: "Scan local container images for vulnerabilities" })],
+      ];
+
+    case "environment":
+      return [
+        [t("ai.fallback.inspect_env_resolutions", { default: "Inspect path resolutions" }), t("ai.fallback.inspect_env_resolutions_prompt", { default: "Inspect resolved COLIMA_HOME, DOCKER_HOST, and LIMA_HOME paths" })],
+        [t("ai.fallback.compare_shell_env", { default: "Compare shell vs app PATH" }), t("ai.fallback.compare_shell_env_prompt", { default: "Compare shell environment variables against the GUI app runtime environment" })],
       ];
 
     case "dashboard":

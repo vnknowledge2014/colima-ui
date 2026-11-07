@@ -120,21 +120,51 @@ When building distributable release artifacts with Tauri updater signatures (and
 npm run tauri build
 ```
 
-### Standalone CLI Binaries
+### Standalone CLI Binaries & Native MCP Server
 
-ColimaUI ships two Rust CLI targets in `src-tauri/src/bin/`:
+GitHub Releases (`v0.2.2+`) publish prebuilt standalone CLI archives alongside desktop installers:
+- `cui-{aarch64-apple-darwin,x86_64-apple-darwin,x86_64-unknown-linux-gnu}.tar.gz`
+- `colimaui-{aarch64-apple-darwin,x86_64-apple-darwin,x86_64-unknown-linux-gnu}.tar.gz`
 
-1. **`cui`** — Natural-language headless AI client that reads `~/.colima-ui/api_token`, discovers the active backend port (`11420–11429`), and calls `POST /api/cli/chat`:
+You can also compile both Rust CLI targets locally from `src-tauri/src/bin/`:
+
+1. **`cui`** — Multi-turn headless AI CLI & MCP stdio server (reads `app_settings` from `~/.colima-ui/knowledge.db`, uses `~/.colima-ui/api_token` + `api_port` when Desktop is running, or falls back natively when closed):
    ```bash
    cargo build --manifest-path src-tauri/Cargo.toml --bin cui --release
    # Binary: src-tauri/target/release/cui
+
+   # Usage examples:
+   cui "Check Colima status and list running containers"
+   cui --yes "Restart the exited redis container"
+   cui --json --provider anthropic --model claude-sonnet-4-6 "Summarize K8s pod health"
+   cui --help
+   cui --version
+   cui mcp
    ```
 
-2. **`colimaui`** — Direct subcommand CLI (gated behind the `cli` Cargo feature for `clap`):
+2. **`colimaui`** — Direct subcommand CLI & MCP stdio server (gated behind the `cli` Cargo feature for `clap`):
    ```bash
    cargo build --manifest-path src-tauri/Cargo.toml --bin colimaui --features cli --release
    # Binary: src-tauri/target/release/colimaui
+   colimaui mcp
    ```
+
+#### Connecting External AI Hosts via MCP (`cui mcp` / `colimaui mcp`)
+
+Both `cui mcp` and `colimaui mcp` expose **15 typed JSON-RPC 2.0 MCP tools** over `stdin`/`stdout` (`colima_list_instances`, `colima_instance_action`, `docker_list_containers`, `docker_container_action`, `docker_container_logs`, `docker_list_images`, `docker_pull_image`, `docker_list_volumes`, `docker_list_networks`, `compose_list_projects`, `k8s_list_pods`, `k8s_cluster_status`, `environment_resolutions`, `system_diagnostics`, `colima_ai_ask`), working seamlessly whether ColimaUI Desktop is open or closed:
+
+- **Claude Desktop** (`~/Library/Application Support/Claude/claude_desktop_config.json`), **Cursor** (`~/.cursor/mcp.json`), **Antigravity** (`~/.gemini/antigravity/mcp_config.json`), **Windsurf** (`~/.codeium/windsurf/mcp_config.json`):
+  ```json
+  {"mcpServers": {"colima-ui": {"command": "cui", "args": ["mcp"]}}}
+  ```
+- **Zed** (`~/.config/zed/settings.json`):
+  ```json
+  {"context_servers": {"colima-ui": {"command": {"path": "cui", "args": ["mcp"]}}}}
+  ```
+- **Claude Code**:
+  ```bash
+  claude mcp add colima-ui -- cui mcp
+  ```
 
 ---
 
@@ -143,9 +173,9 @@ ColimaUI ships two Rust CLI targets in `src-tauri/src/bin/`:
 Every push or merged PR on `main` that passes `.github/workflows/ci.yml` automatically triggers `.github/workflows/release.yml` (`on: workflow_run`):
 
 1. **`prepare` job** — Verifies the commit is on `main` and passed `ci`, computes the next SemVer version (`max(package.json, highest stable git tag)` with automatic patch increment when that tag already exists), pushes the `vX.Y.Z` tag, generates PR release notes since the previous published release, and creates **one single Draft GitHub Release** (`release_id`).
-2. **`build` matrix job** — Compiles `macOS ARM64 (.dmg)`, `macOS x86_64 (.dmg)`, and `Linux x86_64 (.deb, .AppImage)` against the tag and uploads all bundles to `release_id`:
+2. **`build` matrix job** — Compiles `macOS ARM64 (.dmg)`, `macOS x86_64 (.dmg)`, and `Linux x86_64 (.deb, .AppImage)` plus standalone CLI archives (`cui-{aarch64-apple-darwin,x86_64-apple-darwin,x86_64-unknown-linux-gnu}.tar.gz` and `colimaui-{aarch64-apple-darwin,x86_64-apple-darwin,x86_64-unknown-linux-gnu}.tar.gz`) against the tag and uploads all artifacts to `release_id`:
    - If `TAURI_SIGNING_PRIVATE_KEY` is configured in GitHub Actions Secrets, signed updater bundles and `latest.json` are generated and uploaded automatically.
    - If `TAURI_SIGNING_PRIVATE_KEY` is absent, `createUpdaterArtifacts` is automatically disabled for the CI build so unsigned installers publish cleanly without failing.
-3. **`publish` job** — Verifies all 4 platform artifacts are attached to `release_id` before flipping the Draft release to **Published (`Latest`)**.
+3. **`publish` job** — Verifies all platform desktop bundles and standalone CLI tarballs are attached to `release_id` before flipping the Draft release to **Published (`Latest`)**.
 
 To prepare a `minor` or `major` version jump on a feature branch before opening a PR (or to cut an explicit `-rc.N` / `-beta.N` tag), use `./scripts/release.sh`.

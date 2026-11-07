@@ -108,7 +108,7 @@ export async function call<T>(
   httpParams?: Record<string, string>,
   httpBody?: unknown
 ): Promise<T> {
-  if (isTauri()) {
+  if (isTauri() && tauriCmd) {
     const invoke = await getInvoke();
     if (invoke) {
       try {
@@ -157,11 +157,31 @@ export async function call<T>(
     );
   }
 
-  const json = await res.json();
+  const raw =
+    typeof res.text === "function"
+      ? await res.text()
+      : JSON.stringify(await res.json());
+  let json: { success?: boolean; data?: T; error?: unknown } | null = null;
+  if (raw) {
+    try {
+      json = JSON.parse(raw) as { success?: boolean; data?: T; error?: unknown };
+    } catch {
+      json = null;
+    }
+  }
 
-  if (!json.success) {
+  if (!json || typeof json !== "object") {
+    throw toAppException(
+      `HTTP ${res.status} on ${httpPath}${raw ? `: ${raw.slice(0, 200)}` : ""}`,
+    );
+  }
+
+  const isOk = typeof res.ok === "boolean" ? res.ok : res.status >= 200 && res.status < 300;
+  if (!isOk || !json.success) {
     // `json.error` is the same structured payload the Tauri path rejects with.
-    throw toAppException(json.error ?? "API call failed");
+    throw toAppException(
+      json.error ?? `HTTP ${res.status} on ${httpPath}${raw ? `: ${raw.slice(0, 200)}` : ""}`,
+    );
   }
   return json.data as T;
 }

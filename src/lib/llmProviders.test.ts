@@ -306,3 +306,50 @@ it("strips redundant inner <think> tags inside dedicated reasoning_content field
     "<think>Already wrapped reasoning</think>\n\nClean final answer."
   );
 });
+
+it("throws on mid-stream JSON error frames across Ollama, Gemini, OpenAI, and Anthropic", async () => {
+  const fetchSpy = vi.fn();
+  vi.stubGlobal("fetch", fetchSpy);
+  const { chatStream } = await import("./llmProviders");
+
+  // 1. Ollama error object
+  fetchSpy.mockResolvedValueOnce(
+    createMockStreamResponse([
+      '{"message":{"role":"assistant","content":"Partial "}}\n',
+      '{"error":"model \\"llama99\\" not found"}\n',
+    ])
+  );
+  await expect(
+    chatStream("ollama-local", "llama99", "", [{ role: "user", content: "hi" }], "", () => {})
+  ).rejects.toThrow(/LLM stream error:.*llama99/);
+
+  // 2. OpenAI SSE error frame
+  fetchSpy.mockResolvedValueOnce(
+    createMockStreamResponse([
+      'data: {"error":{"message":"Rate limit exceeded mid-stream","type":"rate_limit_error"}}\n\n',
+    ])
+  );
+  await expect(
+    chatStream("openai", "gpt-4o", "sk-test", [{ role: "user", content: "hi" }], "", () => {})
+  ).rejects.toThrow(/LLM stream error:.*Rate limit exceeded mid-stream/);
+
+  // 3. Gemini SSE error frame
+  fetchSpy.mockResolvedValueOnce(
+    createMockStreamResponse([
+      'data: {"error":{"code":429,"message":"Quota exceeded"}}\n\n',
+    ])
+  );
+  await expect(
+    chatStream("gemini", "gemini-2.0-flash", "gem-key", [{ role: "user", content: "hi" }], "", () => {})
+  ).rejects.toThrow(/LLM stream error:.*Quota exceeded/);
+
+  // 4. Anthropic SSE type="error" frame
+  fetchSpy.mockResolvedValueOnce(
+    createMockStreamResponse([
+      'data: {"type":"error","error":{"type":"overloaded_error","message":"Overloaded"}}\n\n',
+    ])
+  );
+  await expect(
+    chatStream("anthropic", "claude-3-5-sonnet-latest", "sk-ant", [{ role: "user", content: "hi" }], "", () => {})
+  ).rejects.toThrow(/LLM stream error:.*Overloaded/);
+});

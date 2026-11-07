@@ -555,6 +555,29 @@ pub async fn get_app_context(app: tauri::AppHandle) -> Result<String, crate::err
     .await.map_err(|e: String| crate::error::ColimaError::from(e))
 }
 
+static GLOBAL_RESOURCE_SAVER_STATE: std::sync::LazyLock<
+    std::sync::Mutex<Arc<RwLock<ResourceSaverState>>>,
+> = std::sync::LazyLock::new(|| {
+    std::sync::Mutex::new(Arc::new(RwLock::new(ResourceSaverState::default())))
+});
+
+pub async fn set_resource_saver_shared(
+    enabled: bool,
+    threshold: u64,
+) -> Result<String, crate::error::ColimaError> {
+    let shared = {
+        let guard = GLOBAL_RESOURCE_SAVER_STATE
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        Arc::clone(&*guard)
+    };
+    let mut s = shared.write().await;
+    s.enabled = enabled;
+    s.idle_minutes_threshold = threshold;
+    s.idle_minutes_count = 0;
+    Ok("Resource saver updated".to_string())
+}
+
 #[tauri::command]
 pub async fn set_resource_saver(     enabled: bool,     threshold: u64,     state: tauri::State<'_, Arc<RwLock<ResourceSaverState>>> ) -> Result<(), crate::error::ColimaError> {
     async move {
@@ -568,6 +591,12 @@ pub async fn set_resource_saver(     enabled: bool,     threshold: u64,     stat
 }
 
 pub fn start_resource_saver_daemon(state: Arc<RwLock<ResourceSaverState>>) {
+    {
+        let mut guard = GLOBAL_RESOURCE_SAVER_STATE
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        *guard = Arc::clone(&state);
+    }
     tauri::async_runtime::spawn(async move {
         loop {
             tokio::time::sleep(tokio::time::Duration::from_secs(60)).await;

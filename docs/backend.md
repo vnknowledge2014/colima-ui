@@ -8,8 +8,10 @@ The Rust backend (~42,000 lines across modular layers) is organized into **comma
 src-tauri/src/
 ├── lib.rs                 # App setup, plugin registration, command handler registration
 ├── main.rs                # Entry point (calls lib::run())
-├── api_server.rs          # Axum router + HTTP server startup (127.0.0.1:11420–11429)
+├── api_server.rs          # Axum router + HTTP server startup (~160 HTTP/SSE endpoints on 127.0.0.1:11420–11429)
 ├── auth.rs                # CSPRNG Bearer token, IPC & 0600 ~/.colima-ui/api_token handoff
+├── mcp.rs                 # Native JSON-RPC 2.0 MCP stdio server (cui mcp / colimaui mcp, 15 typed tools)
+├── crash.rs               # Redacted panic hook & ~/.colima-ui/crashes crash report store
 ├── sse.rs                 # SSE broadcast, topic subscriber tracking, Docker & instance watchers
 ├── error.rs               # Structured ColimaError classification & remediation hints
 ├── redact.rs              # Credential & secret redaction before logs, UI, or LLM prompts
@@ -18,16 +20,19 @@ src-tauri/src/
 ├── streaming_cmd.rs       # Streaming child-process runner with process-group cancellation
 ├── transfer_registry.rs   # Active & recently completed background transfer tracking
 ├── platform.rs            # OS/arch/package manager detection
-├── docker_state.rs        # Bollard Docker event stream for real-time push
+├── docker_state.rs        # Bollard debounced Docker container/image state watcher (UI & SSE push)
+├── docker_events.rs       # Unaggregated Bollard container event broadcast (512-slot stream for Self-Heal)
 ├── instance_reader.rs     # Colima 0.10.x XDG YAML config parser ($COLIMA_HOME / ~/.colima / ~/.config/colima)
 ├── terminal_session.rs    # Real PTY session manager (portable-pty over Tauri IPC)
 ├── poller.rs              # Background instance status poller
 ├── path_util.rs           # macOS PATH, Colima/Lima/Docker socket resolution & ~/.colima-ui helpers
 ├── shell_env.rs           # Pre-adoption launchd env snapshot & non-login user shell env adoption
 ├── telemetry/             # Opt-in closed-vocabulary telemetry & consent state
-├── bin/                   # Standalone CLIs: cui.rs (AI client) & cli.rs (colimaui)
-├── commands/              # Business logic (54 modules)
-├── routes/                # HTTP route handlers (27 modules)
+├── pro/                   # MIT-side Pro sidecar boundary (mod.rs, bridge.rs, protocol.rs; free by default)
+├── subscription/          # Local offline entitlement state cache (mod.rs, cache.rs)
+├── bin/                   # Standalone CLIs & MCP servers: cui.rs (headless AI + mcp) & cli.rs (colimaui + mcp)
+├── commands/              # Business logic (54 command modules)
+├── routes/                # HTTP route handlers (27 route modules + telemetry, pro & subscription routes; ~160 endpoints)
 ├── adapters/              # Unified DevOps adapter traits (7 modules)
 └── services/              # High-level orchestration (4 modules)
 ```
@@ -42,7 +47,7 @@ The central business logic layer. Both Tauri IPC and HTTP routes call into these
 | `knowledge_bank.rs` | 1001 | SQLite knowledge bank: solutions, feedback, memory, settings, presets |
 | `searxng.rs` | 628 | SearXNG/DuckDuckGo web search + HTML→Markdown conversion |
 | `colima.rs` | 730 | Colima instance lifecycle + diagnostics + worker nodes |
-| `ai_chat.rs` | 862 | Multi-provider AI chat (Anthropic/OpenAI/Google/Ollama/...) |
+| `ai_chat.rs` | 862 | Multi-provider AI chat across 6 canonical modes (`anthropic`, `openai`, `gemini`, `openai-compatible`, `ollama-local`, `ollama-cloud`) |
 | `kubernetes.rs` | 644 | kubectl operations: pods, deployments, services, namespaces, events |
 | `system.rs` | 598 | System info, tool checks, host specs, resource saver mode |
 | `shell_sandbox.rs` | 291 | 3-tier command sandbox: safe/approve/banned classification |
@@ -51,7 +56,7 @@ The central business logic layer. Both Tauri IPC and HTTP routes call into these
 | `compose.rs` | 156 | Docker Compose project management |
 | `networks.rs` | 166 | Docker network CRUD + prune |
 | `volumes.rs` | 178 | Docker volume CRUD + prune |
-| `agent_loop.rs` | 135 | AI agent tool execution loop |
+| `agent_loop.rs` | — | Multi-turn headless AI agent loop reading `app_settings` from `~/.colima-ui/knowledge.db` (`POST /api/cli/chat` & `cui`) |
 | `runtime.rs` | 159 | Runtime detection (docker vs nerdctl) |
 | `self_heal.rs` | 1122 | Self-healing rules & kill switch (no route performs a repair) |
 | `colima_config.rs` | 1101 | Read/write Colima instance configuration |
@@ -75,7 +80,7 @@ The central business logic layer. Both Tauri IPC and HTTP routes call into these
 | `falco_bridge.rs` / `falco_triage.rs` | — | Falco VM runtime stream reader and redacted LLM triage prompt builder |
 | `detonation.rs` | — | Isolated container detonation sessions and timeline export |
 | `k8s_resources.rs` | 308 | Generic K8s resource browsing & CRDs |
-| `system_capabilities.rs` | 276 | Capability reporting |
+| `system_capabilities.rs` | 276 | Host external tool capability probes (`colima`, `docker`, `kubectl`, `trivy`, etc.) with states (`running`, `installed_not_running`, `missing`) and `install_hint` |
 | `dockerfile_parse.rs` | 270 | Dockerfile parsing for the layer/security views |
 | `security_catalog.rs` | 248 | Base-image alternatives catalog (local table) |
 | `announcements.rs` | 239 | Release notes & advisories feed (fetch + filter) |
@@ -135,11 +140,11 @@ Thin HTTP handlers that extract request parameters and delegate to `commands/`:
 | `file_transfer.rs` | 90 | Container copy & image TAR transfer jobs |
 | `self_heal.rs` | 84 | Self-healing rules & kill switch (no route performs a repair) |
 | `activity.rs` | 68 | Activity record: what was done to the machine |
-| `capabilities.rs` | 35 | Capability probe endpoints |
+| `capabilities.rs` | 35 | `GET /api/capabilities` — Static AI Agent capabilities & 100-event App Event Bus schema |
 | `diagnostics.rs` | 31 | Diagnostic bundle collection |
 | `resolution.rs` | 28 | `GET /api/environment/resolutions` environment provenance & duality endpoint |
 | `announcements.rs` | 21 | Release notes & advisories feed (fetch + filter) |
-| `system_capabilities.rs` | 17 | Capability reporting |
+| `system_capabilities.rs` | 17 | `GET /api/system/capabilities` — Host external tool capability probes (e.g. `trivy`, `kubectl`) with `install_hint` |
 | `topology.rs` | 15 | Topology graph endpoint |
 
 ### Delegation Pattern
@@ -193,11 +198,17 @@ Higher-level orchestration (currently lightweight):
 - Restricts CORS to localhost origins (`1420`, `11420`, `tauri://localhost`)
 - Binds `127.0.0.1:11420` (falling back across `11420–11429`), serves no static frontend (`ServeDir`) in release builds, prints `Browser mode: http://localhost:1420/#token=...` only under `#[cfg(debug_assertions)]`, and terminates tracked `kubectl port-forward` children on shutdown
 
-### docker_state.rs
-- Connects to Docker via Bollard (socket auto-detection)
-- Streams container events (`start`, `stop`, `die`, `create`, `destroy`)
-- Publishes state changes to SSE and Tauri events
-- Auto-reconnects on connection loss
+### mcp.rs
+- Implements a native JSON-RPC 2.0 Model Context Protocol (MCP) server over `stdin`/`stdout` (`cui mcp` and `colimaui mcp`)
+- Exposes **15 typed MCP tools** (`colima_list_instances`, `colima_instance_action`, `docker_list_containers`, `docker_container_action`, `docker_container_logs`, `docker_list_images`, `docker_pull_image`, `docker_list_volumes`, `docker_list_networks`, `compose_list_projects`, `k8s_list_pods`, `k8s_cluster_status`, `environment_resolutions`, `system_diagnostics`, `colima_ai_ask`)
+- Proxies seamlessly to the live Desktop backend via `127.0.0.1:<api_port>` + `~/.colima-ui/api_token` when ColimaUI Desktop is running, and automatically falls back to direct native execution when Desktop is closed
+
+### crash.rs
+- Installs a process-wide panic hook routed through `redact::redact` before persisting crash reports (`0600`, max 20 retained files) under `~/.colima-ui/crashes`, ensuring API keys or URL query secrets in panic strings are scrubbed on disk
+
+### docker_state.rs & docker_events.rs
+- `docker_state.rs` connects to Docker via Bollard (socket auto-detection), debounces container events, and publishes `docker-state-updated` snapshots to SSE and Tauri events (auto-reconnecting on socket loss)
+- `docker_events.rs` exposes a separate unaggregated 512-slot `broadcast` stream of raw container lifecycle events (`die` with exit code, `oom`, `health_status`, `start`, `stop`, `restart`) so `self_heal.rs` never loses crash counts to UI debouncing
 
 ### instance_reader.rs
 - Resolves `COLIMA_HOME` in Colima `0.10.x` order (`$COLIMA_HOME` > legacy `~/.colima` when state exists > `$XDG_CONFIG_HOME/colima` or `~/.config/colima`) and reads per-profile YAML configs directly

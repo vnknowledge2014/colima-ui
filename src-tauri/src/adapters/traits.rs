@@ -142,13 +142,17 @@ pub struct VMInstance {
 }
 
 /// VM start configuration.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct VMConfig {
     pub profile: String,
-    pub runtime: String,
-    pub cpus: u32,
-    pub memory: u32,
-    pub disk: u32,
+    #[serde(default)]
+    pub runtime: Option<String>,
+    #[serde(default)]
+    pub cpus: Option<u32>,
+    #[serde(default)]
+    pub memory: Option<u32>,
+    #[serde(default)]
+    pub disk: Option<u32>,
     #[serde(default)]
     pub vm_type: String,
     #[serde(default)]

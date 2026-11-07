@@ -33,6 +33,8 @@
     "colima_missing": "Chưa phát hiện Colima",
     "colima_missing_hint": "Mở Trợ giúp để cài",
     "colima_running": "{count} đang chạy",
+    "colima_starting": "{count} đang khởi động",
+    "colima_unhealthy": "{count} không ổn định",
     "colima_stopped": "Đang tắt",
     "colima_instances": "Máy ảo",
     "security": "Bảo mật",
@@ -180,8 +182,10 @@
     "unpause": "Unpause",
     "restart": "Restart",
     "no_containers": "No containers",
+    "empty_text": "Nhấn \"Run\" để khởi chạy một container từ image.",
     "open_terminal": "Mở terminal",
-    "open_interactive_terminal": "Mở Terminal tương tác (PTY)"
+    "open_interactive_terminal": "Mở Terminal tương tác (PTY)",
+    "terminal_desktop_only": "Terminal tương tác (PTY) yêu cầu ứng dụng ColimaUI Desktop."
   },
   "diff": {
     "no_changes": "Không có thay đổi",
@@ -412,7 +416,11 @@
       "dashboard_resources_title": "Kiểm tra mức sử dụng tài nguyên",
       "dashboard_resources_prompt": "Kiểm tra mức sử dụng tài nguyên trên tất cả container và máy ảo đang chạy",
       "dashboard_health_title": "Kiểm tra sức khỏe runtime",
-      "dashboard_health_prompt": "Kiểm tra sức khỏe của cụm và môi trường thực thi"
+      "dashboard_health_prompt": "Kiểm tra sức khỏe của cụm và môi trường thực thi",
+      "environment_resolutions_title": "Kiểm tra phân giải đường dẫn",
+      "environment_resolutions_prompt": "Kiểm tra phân giải môi trường ColimaUI (COLIMA_HOME, DOCKER_HOST, LIMA_HOME và PATH)",
+      "environment_duality_title": "So sánh biến môi trường shell và ứng dụng",
+      "environment_duality_prompt": "Giải thích sự khác biệt giữa biến môi trường shell và môi trường chạy của ứng dụng GUI này"
     },
     "fallback": {
       "check_cpu_mem": "Kiểm tra CPU & bộ nhớ",
@@ -500,7 +508,11 @@
       "inspect_active_vm": "Kiểm tra máy ảo đang hoạt động",
       "inspect_active_vm_prompt": "Kiểm tra phân bổ tài nguyên và mức sử dụng đĩa của máy ảo đang hoạt động",
       "system_overview": "Tổng quan hệ thống",
-      "system_overview_prompt": "Tóm tắt trạng thái hệ thống, các phiên bản hoạt động và container"
+      "system_overview_prompt": "Tóm tắt trạng thái hệ thống, các phiên bản hoạt động và container",
+      "inspect_env_resolutions": "Kiểm tra bản ghi phân giải",
+      "inspect_env_resolutions_prompt": "Kiểm tra phân giải môi trường ColimaUI cho COLIMA_HOME, DOCKER_HOST và LIMA_HOME",
+      "compare_shell_env": "So sánh môi trường shell",
+      "compare_shell_env_prompt": "So sánh biến môi trường shell với môi trường chạy của ColimaUI"
     }
   },
   "terminal": {
@@ -512,7 +524,9 @@
     "new_session": "New Session",
     "no_sessions": "No terminal sessions",
     "instructions": "Open a new SSH session to a running instance.",
-    "docker_containers": "Container Docker"
+    "docker_containers": "Container Docker",
+    "desktop_only_title": "Yêu cầu ứng dụng Desktop",
+    "desktop_only_desc": "Phiên terminal tương tác (PTY) chạy qua Tauri IPC gốc và yêu cầu ứng dụng ColimaUI Desktop."
   },
   "compose": {
     "diagnose": {
@@ -557,6 +571,7 @@
     },
     "title": "Docker Compose",
     "projects_count": "projects",
+    "start": "Khởi động",
     "stop": "Stop",
     "restart": "Restart",
     "down": "Down",
@@ -861,6 +876,7 @@
     "remove_action": "Xoá",
     "remove_confirm": "Xoá volume \"{name}\"?",
     "remove_selected_title": "Xoá các Volume đã chọn",
+    "remove_selected": "Xoá {count} mục đã chọn",
     "remove_count": "Xoá {count}",
     "remove_batch_confirm": "Xoá {count} volume?\n\n{names}\n\nKhông thể hoàn tác.",
     "title": "Volumes",
@@ -1204,12 +1220,19 @@
     "no_models": "No models installed",
     "start_colima": "Start a Colima instance first to manage AI models.",
     "pull_to_start": "Pull a model to get started with AI inference.",
-    "popular": "Popular Models"
+    "popular": "Popular Models",
+    "count": "mô hình",
+    "deleted": "Đã xoá mô hình '{name}'",
+    "pull_failed": "Tải mô hình thất bại: {error}",
+    "pulled": "Đã tải mô hình '{name}' thành công",
+    "pulling": "Đang tải mô hình '{name}'... Quá trình này có thể mất một lúc.",
+    "serving": "Mô hình '{name}' đang phục vụ trên cổng 11434"
   },
   "networks": {
     "title": "Networks",
     "count": "networks",
     "removing": "Removing...",
+    "remove_selected": "Xoá {count} mục đã chọn",
     "pruning": "Pruning...",
     "prune": "Prune",
     "create_button": "Create Network",
@@ -1244,7 +1267,7 @@
   "environment": {
     "shellEnv": "Môi trường shell",
     "dualityExplain": "Tiến trình GUI kế thừa env từ launchd, không phải shell của bạn (ảnh chụp: khởi động shell không đăng nhập qua $SHELL — với zsh là .zshenv; bash là $BASH_ENV/.bashrc; v.v.). Hai cột khác nhau là bình thường — quan trọng là bản ghi phân giải bên dưới.",
-    "diverges": "giá trị khác nhau giữa Shell (.zshenv) và Ứng dụng này",
+    "diverges": "giá trị khác nhau giữa Môi trường shell và Ứng dụng này",
     "resolutionExplain": "Các giá trị ứng dụng đang thực sự dùng, và quy tắc đã chọn từng giá trị. Màu đỏ nghĩa là đường dẫn đã cấu hình không còn tồn tại.",
     "title": "Môi trường",
     "subtitle": "Những gì ứng dụng này tin về cấu hình của bạn, và quy tắc dẫn đến điều đó.",

@@ -20,6 +20,7 @@
   import type { TransferMode } from "../lib/api/transfer";
   import { getAppSetting, setAppSetting } from "../lib/settingsStore.svelte";
   import { setVisibleInterval } from "../lib/visibleInterval";
+  import { isTauri } from "../lib/api/client";
 
   let filter = $state<"all" | "running" | "stopped">("all");
   const containerFilters: ("all" | "running" | "stopped")[] = ["all", "running", "stopped"];
@@ -33,19 +34,29 @@
       inline cluster stays down to the lifecycle controls people reach for. */
   let rowMenu = $state<{ x: number; y: number; container: DockerContainer } | null>(null);
 
-  function openContainerTerminal(c: DockerContainer) {
+  function openContainerShell(c: DockerContainer) {
+    if (!isTauri()) {
+      globalToast(
+        "info",
+        t("containers.terminal_desktop_only", {
+          default: "Interactive PTY terminal requires the ColimaUI Desktop app.",
+        }),
+      );
+      return;
+    }
     selectedContainerId = null;
     openTerminalSession({ kind: "dockerExec", container: c.Id, label: c.Names });
   }
 
   function rowMenuItems(c: DockerContainer) {
     const busy = !!actionLoading?.startsWith(c.Id);
+    const desktop = isTauri();
     return [
       {
         label: t('containers.open_terminal', { default: 'Open terminal' }),
         icon: Icons.Terminal,
-        disabled: busy || c.State !== 'running',
-        action: () => openContainerTerminal(c),
+        disabled: busy || c.State !== 'running' || !desktop,
+        action: () => openContainerShell(c),
       },
       {
         label: t('containers.copy_in', { default: 'Copy file into container' }),
@@ -653,7 +664,13 @@
                   <button class="btn btn-ghost btn-icon btn-play" data-tooltip={t('containers.start', { default: 'Start' })} aria-label={t('containers.start', { default: 'Start' })} disabled={!!isLoading} onclick={() => handleAction(c.Id, c.Names, 'start')}>{@html Icons.Play}</button>
                 {/if}
                 {#if isRunning}
-                  <button class="btn btn-ghost btn-icon" data-tooltip={t('containers.open_terminal', { default: 'Open terminal' })} aria-label="{t('containers.open_terminal', { default: 'Open terminal' })} {c.Names}" disabled={!!isLoading} onclick={() => openContainerTerminal(c)}>{@html Icons.Terminal}</button>
+                  <button
+                    class="btn btn-ghost btn-icon"
+                    data-tooltip={isTauri() ? t('containers.open_terminal', { default: 'Open terminal' }) : t('containers.terminal_desktop_only', { default: 'Interactive PTY terminal requires the ColimaUI Desktop app.' })}
+                    aria-label="{t('containers.open_terminal', { default: 'Open terminal' })} {c.Names}"
+                    disabled={!!isLoading}
+                    onclick={() => openContainerShell(c)}
+                  >{@html Icons.Terminal}</button>
                 {/if}
                 <button class="btn btn-ghost btn-icon" data-tooltip={t('containers.restart', { default: 'Restart' })} aria-label="{t('containers.restart', { default: 'Restart' })} {c.Names}" disabled={!!isLoading} onclick={() => handleAction(c.Id, c.Names, 'restart')}>{@html Icons.Refresh}</button>
                 <button class="btn btn-ghost btn-icon" data-tooltip={t('common.more_actions', { default: 'More actions' })} aria-label="{t('common.more_actions', { default: 'More actions' })} {c.Names}" aria-haspopup="menu" onclick={(e) => openRowMenu(e, c)}>{@html Icons.More}</button>
@@ -720,7 +737,12 @@
         </div>
         <div style="display: flex; gap: 6px; align-items: center;">
           {#if isRunning}
-            <button class="btn btn-ghost" style="font-size: var(--text-xs); display: inline-flex; align-items: center; gap: 4px;" onclick={() => openContainerTerminal(selectedContainer!)}>{@html Icons.Terminal} {t('sidebar.terminal', { default: 'Terminal' })}</button>
+            <button
+              class="btn btn-ghost"
+              style="font-size: var(--text-xs); display: inline-flex; align-items: center; gap: 4px;"
+              data-tooltip={!isTauri() ? t('containers.terminal_desktop_only', { default: 'Interactive PTY terminal requires the ColimaUI Desktop app.' }) : undefined}
+              onclick={() => openContainerShell(selectedContainer!)}
+            >{@html Icons.Terminal} {t('sidebar.terminal', { default: 'Terminal' })}</button>
             <button class="btn btn-ghost" style="font-size: var(--text-xs);" onclick={() => handleAction(selectedContainer!.Id, selectedContainer!.Names, "stop")}>Stop</button>
             <button class="btn btn-ghost" style="font-size: var(--text-xs);" onclick={() => handleAction(selectedContainer!.Id, selectedContainer!.Names, "restart")}>Restart</button>
           {:else}
@@ -794,7 +816,8 @@
             <button
               class="btn btn-primary"
               style="font-size: var(--text-xs); display: inline-flex; align-items: center; gap: 6px; flex-shrink: 0;"
-              onclick={() => openContainerTerminal(selectedContainer!)}
+              data-tooltip={!isTauri() ? t('containers.terminal_desktop_only', { default: 'Interactive PTY terminal requires the ColimaUI Desktop app.' }) : undefined}
+              onclick={() => openContainerShell(selectedContainer!)}
             >
               {@html Icons.Terminal}
               {t('containers.open_interactive_terminal', { default: 'Open Interactive Terminal (PTY)' })}

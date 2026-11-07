@@ -130,7 +130,7 @@ export const sysMethods = {
   systemDf: () =>
     call<string>("system_df", undefined, "GET", "/api/docker/df"),
   systemPrune: (all = true) =>
-    call<string>("system_prune", { all }, "POST", "/api/docker/prune"),
+    call<string>("system_prune", { all }, "POST", "/api/system/prune", { all: String(all) }),
   hostSpecs: () =>
     call<HostSpecs>("host_specs", undefined, "GET", "/api/system/host-specs"),
   checkTool: (name: string) =>

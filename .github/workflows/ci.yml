@@ -107,13 +107,20 @@ jobs:
             cargo clippy --locked --all-targets --all-features -- -D warnings
           fi
 
-      # Native runner only: a cross-compiled target cannot execute its tests.
-      # Integration tests that need Docker/Trivy carry #[ignore], so a bare
-      # `cargo test` runs the unit tests and skips them.
-      - name: cargo test (unit)
-        if: matrix.target == ''
+      # Run unit, CLI binary, and integration tests on native runners (Linux x86
+      # and macOS ARM64; `macos-latest` is Apple Silicon so `aarch64-apple-darwin`
+      # executes natively). Integration tests requiring Docker/Trivy carry #[ignore].
+      - name: cargo test (unit, CLI bins & integration)
+        if: matrix.target == '' || matrix.target == 'aarch64-apple-darwin'
         working-directory: src-tauri
-        run: cargo test --locked --lib
+        run: |
+          if [ -n "${{ matrix.target }}" ]; then
+            cargo test --locked --target ${{ matrix.target }} --lib --bins --features cli
+            cargo test --locked --target ${{ matrix.target }} --tests -- --test-threads=1
+          else
+            cargo test --locked --lib --bins --features cli
+            cargo test --locked --tests -- --test-threads=1
+          fi
 
   # ===== Frontend Build =====
   frontend-build:

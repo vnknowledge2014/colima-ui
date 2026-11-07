@@ -37,8 +37,8 @@ pub async fn k8s_current_context() -> Result<String, ColimaError> {
 #[tauri::command]
 pub async fn k8s_set_context(context: String) -> Result<String, ColimaError> {
     async move {
-        if context.is_empty() {
-            return Err("Context name is empty".to_string());
+        if context.is_empty() || context.starts_with('-') {
+            return Err("Invalid context name".to_string());
         }
         run_blocking(move || run_cmd("kubectl", &["config", "use-context", &context])).await
     }
@@ -161,7 +161,9 @@ pub async fn k8s_pf_start(
             // Output is discarded: kubectl port-forward writes a line per
             // connection, and nothing reads it. Left on a pipe it would fill
             // the buffer and block the forward.
-            let child = Command::new("kubectl")
+            let mut cmd = Command::new(crate::path_util::resolve_binary("kubectl"));
+            crate::path_util::apply_path_to_cmd(&mut cmd);
+            let child = cmd
                 .args(["port-forward", "-n", &namespace, &target, &ports])
                 .stdout(Stdio::null())
                 .stderr(Stdio::null())
@@ -181,37 +183,62 @@ pub async fn k8s_pf_start(
     .map_err(ColimaError::from)
 }
 
-#[tauri::command]
-pub async fn k8s_pf_stop(local_port: u32) -> Result<String, ColimaError> {
-    run_blocking(move || {
-        if let Ok(mut fwds) = PORT_FORWARDS.lock() {
-            if let Some(pid) = fwds.remove(&local_port.to_string()) {
-                #[cfg(unix)]
+/// Strict `lsof` argv that selects ONLY `kubectl` processes in `TCP:LISTEN`
+/// state on `local_port`. `-a` forces logical AND across all filters so host
+/// services (including ColimaUI itself on port 11420) are never matched.
+pub(crate) fn kubectl_pf_lsof_args(local_port: u32) -> [String; 6] {
+    [
+        "-a".to_string(),
+        "-c".to_string(),
+        "kubectl".to_string(),
+        format!("-iTCP:{local_port}"),
+        "-sTCP:LISTEN".to_string(),
+        "-t".to_string(),
+    ]
+}
+
+/// Stop a tracked `kubectl port-forward` on `local_port`, falling back to a
+/// strictly-scoped `lsof` lookup if the app restarted while the forward lived.
+pub(crate) fn stop_kubectl_port_forward_on_port(local_port: u32) -> String {
+    if let Ok(mut fwds) = PORT_FORWARDS.lock() {
+        if let Some(pid) = fwds.remove(&local_port.to_string()) {
+            #[cfg(unix)]
+            if pid > 0 && pid != std::process::id() {
                 unsafe {
                     libc::kill(pid as i32, libc::SIGTERM);
                 }
-                return Ok(format!("Port forward on {local_port} stopped"));
+            }
+            return format!("Port forward on {local_port} stopped");
+        }
+    }
+
+    // Not in the registry — the app restarted while the forward survived.
+    // Restrict strictly to `kubectl` listening on TCP `local_port`.
+    let lsof_args = kubectl_pf_lsof_args(local_port);
+    let mut cmd = std::process::Command::new(crate::path_util::resolve_binary("lsof"));
+    crate::path_util::apply_path_to_cmd(&mut cmd);
+    if let Ok(output) = cmd.args(&lsof_args).output() {
+        let self_pid = std::process::id() as i32;
+        for line in String::from_utf8_lossy(&output.stdout).lines() {
+            match line.trim().parse::<i32>() {
+                Ok(pid) if pid > 0 && pid != self_pid => {
+                    #[cfg(unix)]
+                    unsafe {
+                        libc::kill(pid, libc::SIGTERM);
+                    }
+                }
+                _ => {}
             }
         }
+    }
+    format!("Port forward on {local_port} stopped")
+}
 
-        // Not in the registry — the app restarted while the forward survived.
-        // Fall back to whatever holds the port.
-        let _ = std::process::Command::new("lsof")
-            .args(["-ti", &format!(":{local_port}")])
-            .output()
-            .and_then(|o| {
-                let pids = String::from_utf8_lossy(&o.stdout).trim().to_string();
-                if !pids.is_empty() {
-                    std::process::Command::new("kill")
-                        .args(pids.split('\n'))
-                        .output()?;
-                }
-                Ok(())
-            });
-        Ok(format!("Port forward on {local_port} stopped"))
-    })
-    .await
-    .map_err(ColimaError::from)
+#[tauri::command]
+pub async fn k8s_pf_stop(local_port: u32) -> Result<String, ColimaError> {
+    run_blocking(move || Ok(stop_kubectl_port_forward_on_port(local_port)))
+        .await
+        .map_err(ColimaError::from)
 }
 
 // ===== Reports =====
@@ -629,5 +656,31 @@ mod tests {
             .await
             .unwrap_err();
         assert!(e.contains("http://"), "unexpected error: {e}");
+    }
+
+    #[test]
+    fn pf_lsof_args_strictly_scope_to_kubectl_listen() {
+        let args = kubectl_pf_lsof_args(11420);
+        assert_eq!(
+            args,
+            [
+                "-a",
+                "-c",
+                "kubectl",
+                "-iTCP:11420",
+                "-sTCP:LISTEN",
+                "-t",
+            ]
+        );
+    }
+
+    #[test]
+    fn stop_pf_fallback_never_kills_non_kubectl_listener() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind ephemeral port");
+        let port = listener.local_addr().unwrap().port() as u32;
+        let msg = stop_kubectl_port_forward_on_port(port);
+        assert!(msg.contains(&port.to_string()));
+        // If lsof lacked `-a -c kubectl`, this test process itself would have received SIGTERM.
+        drop(listener);
     }
 }

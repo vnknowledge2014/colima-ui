@@ -12,6 +12,16 @@ use crate::api_server::*;
 
 use crate::routes::payloads::*;
 
+fn is_valid_opt_namespace(ns: &str) -> bool {
+    ns.is_empty() || ns == "all" || is_valid_k8s_name(ns)
+}
+
+fn validation_err<T: serde::Serialize>(
+    msg: impl Into<String>,
+) -> (StatusCode, Json<ApiResponse<T>>) {
+    err(crate::error::ColimaError::validation(msg.into()))
+}
+
 pub async fn api_k8s_action(Query(q): Query<K8sQuery>) -> (StatusCode, Json<ApiResponse<String>>) {
     let profile = q.profile;
     let action = q.action;
@@ -30,7 +40,9 @@ pub async fn api_k8s_action(Query(q): Query<K8sQuery>) -> (StatusCode, Json<ApiR
             args.push(profile);
         }
         let args_ref: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
-        let output = Command::new("colima")
+        let mut cmd = Command::new(crate::path_util::resolve_binary("colima"));
+        crate::path_util::apply_path_to_cmd(&mut cmd);
+        let output = cmd
             .args(&args_ref)
             .output()
             .map_err(|e| format!("Failed to execute kubernetes {}: {}", action, e))?;
@@ -77,6 +89,9 @@ pub async fn api_k8s_namespaces() -> (StatusCode, Json<ApiResponse<String>>) {
 
 pub async fn api_k8s_pods(Query(q): Query<K8sNsQuery>) -> (StatusCode, Json<ApiResponse<String>>) {
     let ns = q.namespace;
+    if !is_valid_opt_namespace(&ns) {
+        return validation_err(format!("Invalid namespace: {ns}"));
+    }
     match run_blocking(move || {
         if ns.is_empty() || ns == "all" {
             run_cmd(
@@ -97,6 +112,9 @@ pub async fn api_k8s_pods(Query(q): Query<K8sNsQuery>) -> (StatusCode, Json<ApiR
 
 pub async fn api_k8s_services(Query(q): Query<K8sNsQuery>) -> (StatusCode, Json<ApiResponse<String>>) {
     let ns = q.namespace;
+    if !is_valid_opt_namespace(&ns) {
+        return validation_err(format!("Invalid namespace: {ns}"));
+    }
     match run_blocking(move || {
         if ns.is_empty() || ns == "all" {
             run_cmd(
@@ -119,6 +137,9 @@ pub async fn api_k8s_deployments(
     Query(q): Query<K8sNsQuery>,
 ) -> (StatusCode, Json<ApiResponse<String>>) {
     let ns = q.namespace;
+    if !is_valid_opt_namespace(&ns) {
+        return validation_err(format!("Invalid namespace: {ns}"));
+    }
     match run_blocking(move || {
         if ns.is_empty() || ns == "all" {
             run_cmd(
@@ -143,6 +164,12 @@ pub async fn api_k8s_pod_logs(
     let tail = q.lines.to_string();
     let ns = q.namespace;
     let pod = q.pod;
+    if !is_valid_k8s_name(&ns) {
+        return validation_err(format!("Invalid namespace: {ns}"));
+    }
+    if !is_valid_k8s_name(&pod) {
+        return validation_err(format!("Invalid pod name: {pod}"));
+    }
     match run_blocking(move || {
         run_cmd(
             "kubectl",
@@ -162,6 +189,12 @@ pub async fn api_k8s_delete_pod(
 ) -> (StatusCode, Json<ApiResponse<String>>) {
     let ns = body.namespace;
     let pod = body.pod;
+    if !is_valid_k8s_name(&ns) {
+        return validation_err(format!("Invalid namespace: {ns}"));
+    }
+    if !is_valid_k8s_name(&pod) {
+        return validation_err(format!("Invalid pod name: {pod}"));
+    }
     match run_blocking(move || run_cmd("kubectl", &["delete", "pod", "-n", &ns, &pod])).await {
         Ok(out) => ok(out),
         Err(e) => err(e.to_string()),
@@ -175,6 +208,15 @@ pub async fn api_k8s_describe(
     let rt = q.resource_type;
     let ns = q.namespace;
     let name = q.name;
+    if !is_valid_k8s_name(&ns) {
+        return validation_err(format!("Invalid namespace: {ns}"));
+    }
+    if !is_valid_k8s_name(&rt) {
+        return validation_err(format!("Invalid resource type: {rt}"));
+    }
+    if !is_valid_k8s_name(&name) {
+        return validation_err(format!("Invalid resource name: {name}"));
+    }
     match run_blocking(move || run_cmd("kubectl", &["describe", &rt, "-n", &ns, &name])).await {
         Ok(out) => ok(out),
         Err(e) => err(e.to_string()),
@@ -186,6 +228,12 @@ pub async fn api_k8s_scale(Json(body): Json<K8sScaleBody>) -> (StatusCode, Json<
     let replicas = format!("--replicas={}", body.replicas);
     let ns = body.namespace;
     let dep = body.deployment;
+    if !is_valid_k8s_name(&ns) {
+        return validation_err(format!("Invalid namespace: {ns}"));
+    }
+    if !is_valid_k8s_name(&dep) {
+        return validation_err(format!("Invalid deployment name: {dep}"));
+    }
     match run_blocking(move || {
         run_cmd(
             "kubectl",
@@ -210,6 +258,9 @@ pub async fn api_k8s_nodes() -> (StatusCode, Json<ApiResponse<String>>) {
 
 pub async fn api_k8s_events(Query(q): Query<K8sNsQuery>) -> (StatusCode, Json<ApiResponse<String>>) {
     let ns = q.namespace;
+    if !is_valid_opt_namespace(&ns) {
+        return validation_err(format!("Invalid namespace: {ns}"));
+    }
     match run_blocking(move || {
         if ns.is_empty() || ns == "all" {
             run_cmd(
@@ -263,10 +314,16 @@ pub async fn api_k8s_delete_resource(
     let name = body.name;
     // Validate resource type against whitelist (Fix #5)
     if !K8S_DELETABLE_RESOURCES.contains(&rt.as_str()) {
-        return err(format!(
+        return validation_err(format!(
             "Resource type '{}' is not allowed for deletion",
             rt
         ));
+    }
+    if !is_valid_k8s_name(&ns) {
+        return validation_err(format!("Invalid namespace: {ns}"));
+    }
+    if !is_valid_k8s_name(&name) {
+        return validation_err(format!("Invalid resource name: {name}"));
     }
     match run_blocking(move || run_cmd("kubectl", &["delete", &rt, &name, "-n", &ns])).await {
         Ok(out) => ok(out),
@@ -281,6 +338,15 @@ pub async fn api_k8s_restart(
     let rt = body.resource_type;
     let ns = body.namespace;
     let name = body.name;
+    if !is_valid_k8s_name(&rt) {
+        return validation_err(format!("Invalid resource type: {rt}"));
+    }
+    if !is_valid_k8s_name(&ns) {
+        return validation_err(format!("Invalid namespace: {ns}"));
+    }
+    if !is_valid_k8s_name(&name) {
+        return validation_err(format!("Invalid resource name: {name}"));
+    }
     let target = format!("{}/{}", rt, name);
     match run_blocking(move || run_cmd("kubectl", &["rollout", "restart", &target, "-n", &ns]))
         .await
@@ -295,6 +361,15 @@ pub async fn api_k8s_yaml(Query(q): Query<K8sYamlQuery>) -> (StatusCode, Json<Ap
     let rt = q.resource_type;
     let ns = q.namespace;
     let name = q.name;
+    if !is_valid_k8s_name(&rt) {
+        return validation_err(format!("Invalid resource type: {rt}"));
+    }
+    if !is_valid_opt_namespace(&ns) {
+        return validation_err(format!("Invalid namespace: {ns}"));
+    }
+    if !is_valid_k8s_name(&name) {
+        return validation_err(format!("Invalid resource name: {name}"));
+    }
     match run_blocking(move || {
         if ns.is_empty() || ns == "all" {
             run_cmd("kubectl", &["get", &rt, &name, "-o", "yaml"])
@@ -324,6 +399,9 @@ pub async fn api_k8s_events_json(
     Query(q): Query<K8sNsQuery>,
 ) -> (StatusCode, Json<ApiResponse<String>>) {
     let ns = q.namespace;
+    if !is_valid_opt_namespace(&ns) {
+        return validation_err(format!("Invalid namespace: {ns}"));
+    }
     match run_blocking(move || {
         if ns.is_empty() || ns == "all" {
             run_cmd(
@@ -370,6 +448,9 @@ pub async fn api_k8s_set_context(
     Json(body): Json<K8sContextBody>,
 ) -> (StatusCode, Json<ApiResponse<String>>) {
     let ctx = body.context;
+    if ctx.is_empty() || ctx.starts_with('-') {
+        return validation_err("Invalid context name");
+    }
     match run_blocking(move || run_cmd("kubectl", &["config", "use-context", &ctx])).await {
         Ok(out) => ok(out),
         Err(e) => err(e.to_string()),
@@ -380,15 +461,20 @@ pub async fn api_k8s_set_context(
 pub async fn api_k8s_apply(Json(body): Json<K8sApplyBody>) -> (StatusCode, Json<ApiResponse<String>>) {
     let yaml_content = body.yaml;
     let ns = body.namespace;
+    if !is_valid_opt_namespace(&ns) {
+        return validation_err(format!("Invalid namespace: {ns}"));
+    }
     match run_blocking(move || {
         use std::io::Write;
-        use std::process::{Command, Stdio};
+        use std::process::Stdio;
         let mut args = vec!["apply", "-f", "-"];
         if !ns.is_empty() && ns != "all" {
             args.push("-n");
             args.push(&ns);
         }
-        let mut child = Command::new("kubectl")
+        let mut cmd = Command::new(crate::path_util::resolve_binary("kubectl"));
+        crate::path_util::apply_path_to_cmd(&mut cmd);
+        let mut child = cmd
             .args(&args)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -420,15 +506,28 @@ pub async fn api_k8s_apply(Json(body): Json<K8sApplyBody>) -> (StatusCode, Json<
 pub async fn api_k8s_port_forward_start(
     Json(body): Json<K8sPortForwardBody>,
 ) -> (StatusCode, Json<ApiResponse<String>>) {
-    let _key = format!("{}:{}", body.local_port, body.remote_port);
+    if !is_valid_k8s_name(&body.namespace) {
+        return validation_err(format!("Invalid namespace: {}", body.namespace));
+    }
+    if !is_valid_k8s_name(&body.resource_type) {
+        return validation_err(format!("Invalid resource type: {}", body.resource_type));
+    }
+    if !is_valid_k8s_name(&body.name) {
+        return validation_err(format!("Invalid resource name: {}", body.name));
+    }
+    if body.local_port == 0 || body.remote_port == 0 {
+        return validation_err("Invalid port number");
+    }
     let ns = body.namespace;
     let target = format!("{}/{}", body.resource_type, body.name);
     let ports = format!("{}:{}", body.local_port, body.remote_port);
     let local_port = body.local_port;
 
     match run_blocking(move || {
-        use std::process::{Command, Stdio};
-        let child = Command::new("kubectl")
+        use std::process::Stdio;
+        let mut cmd = Command::new(crate::path_util::resolve_binary("kubectl"));
+        crate::path_util::apply_path_to_cmd(&mut cmd);
+        let child = cmd
             .args(["port-forward", "-n", &ns, &target, &ports])
             .stdout(Stdio::null())
             .stderr(Stdio::null())
@@ -455,31 +554,11 @@ pub async fn api_k8s_port_forward_stop(
     Json(body): Json<K8sPortForwardStopBody>,
 ) -> (StatusCode, Json<ApiResponse<String>>) {
     let port = body.local_port;
+    if port == 0 {
+        return validation_err("Invalid port number");
+    }
     match run_blocking(move || {
-        if let Ok(mut fwds) = PORT_FORWARDS.lock() {
-            let key = format!("{}", port);
-            if let Some(pid) = fwds.remove(&key) {
-                #[cfg(unix)]
-                unsafe {
-                    libc::kill(pid as i32, libc::SIGTERM);
-                }
-                return Ok(format!("Port forward on {} stopped", port));
-            }
-        }
-        // Fallback: kill by port
-        let _ = std::process::Command::new("lsof")
-            .args(["-ti", &format!(":{}", port)])
-            .output()
-            .and_then(|o| {
-                let pids = String::from_utf8_lossy(&o.stdout).trim().to_string();
-                if !pids.is_empty() {
-                    std::process::Command::new("kill")
-                        .args(pids.split('\n'))
-                        .output()?;
-                }
-                Ok(())
-            });
-        Ok(format!("Port forward on {} stopped", port))
+        Ok(crate::commands::k8s_cluster::stop_kubectl_port_forward_on_port(u32::from(port)))
     })
     .await
     {
@@ -580,6 +659,15 @@ pub async fn api_k8s_container_logs(
     let pod = q.pod;
     let container = q.container;
     let previous = q.previous;
+    if !is_valid_k8s_name(&ns) {
+        return validation_err(format!("Invalid namespace: {ns}"));
+    }
+    if !is_valid_k8s_name(&pod) {
+        return validation_err(format!("Invalid pod name: {pod}"));
+    }
+    if !container.is_empty() && !is_valid_k8s_name(&container) {
+        return validation_err(format!("Invalid container name: {container}"));
+    }
     match run_blocking(move || {
         let mut args = vec!["logs", "-n", &ns, &pod, "--tail", &tail, "--timestamps"];
         if !container.is_empty() {
@@ -605,6 +693,12 @@ pub async fn api_k8s_pod_containers(
 ) -> (StatusCode, Json<ApiResponse<String>>) {
     let ns = q.namespace;
     let pod = q.pod;
+    if !is_valid_k8s_name(&ns) {
+        return validation_err(format!("Invalid namespace: {ns}"));
+    }
+    if !is_valid_k8s_name(&pod) {
+        return validation_err(format!("Invalid pod name: {pod}"));
+    }
     match run_blocking(move || {
         run_cmd(
             "kubectl",
@@ -632,6 +726,9 @@ pub async fn api_k8s_node_action(
 ) -> (StatusCode, Json<ApiResponse<String>>) {
     let name = body.name;
     let action = body.action;
+    if !is_valid_k8s_name(&name) {
+        return validation_err(format!("Invalid node name: {name}"));
+    }
     match run_blocking(move || match action.as_str() {
         "cordon" => run_cmd("kubectl", &["cordon", &name]),
         "uncordon" => run_cmd("kubectl", &["uncordon", &name]),
@@ -668,6 +765,16 @@ pub async fn api_kind_create(
 ) -> (StatusCode, Json<ApiResponse<String>>) {
     let name = body.name;
     let image = body.image;
+    if !is_valid_k8s_name(&name) {
+        return validation_err(format!("Invalid cluster name: {name}"));
+    }
+    if !image.is_empty()
+        && (image.starts_with('-')
+            || crate::validation::contains_shell_injection(&image)
+            || image.chars().any(char::is_whitespace))
+    {
+        return validation_err(format!("Invalid node image reference: {image}"));
+    }
     match run_blocking(move || {
         let mut args = vec!["create", "cluster", "--name", &name];
         if !image.is_empty() {
@@ -688,6 +795,9 @@ pub async fn api_kind_delete(
     Json(body): Json<KindDeleteBody>,
 ) -> (StatusCode, Json<ApiResponse<String>>) {
     let name = body.name;
+    if !is_valid_k8s_name(&name) {
+        return validation_err(format!("Invalid cluster name: {name}"));
+    }
     match run_blocking(move || run_cmd("kind", &["delete", "cluster", "--name", &name])).await {
         Ok(out) => ok(out),
         Err(e) => err(e.to_string()),
@@ -702,6 +812,15 @@ pub async fn api_k8s_generic_scale(
     let ns = body.namespace;
     let name = body.name;
     let rt = body.resource_type;
+    if !is_valid_k8s_name(&ns) {
+        return validation_err(format!("Invalid namespace: {ns}"));
+    }
+    if !is_valid_k8s_name(&name) {
+        return validation_err(format!("Invalid resource name: {name}"));
+    }
+    if !is_valid_k8s_name(&rt) {
+        return validation_err(format!("Invalid resource type: {rt}"));
+    }
     match run_blocking(move || run_cmd("kubectl", &["scale", &rt, &name, "-n", &ns, &replicas]))
         .await
     {
@@ -737,13 +856,11 @@ pub async fn api_k8s_crd_resources(
 ) -> (StatusCode, Json<ApiResponse<String>>) {
     let resource = q.resource;
     let ns = q.namespace;
-    // Validate: must look like a valid k8s resource name (alphanumeric, dots, hyphens)
-    if resource.is_empty()
-        || !resource
-            .chars()
-            .all(|c| c.is_alphanumeric() || c == '.' || c == '-')
-    {
-        return err(format!("Invalid CRD resource: {}", resource));
+    if !is_valid_k8s_name(&resource) {
+        return validation_err(format!("Invalid CRD resource: {}", resource));
+    }
+    if !is_valid_opt_namespace(&ns) {
+        return validation_err(format!("Invalid namespace: {}", ns));
     }
     match run_blocking(move || {
         if ns.is_empty() || ns == "all" {
@@ -772,6 +889,14 @@ pub async fn api_k8s_log_stream(
     let tail = q.tail.to_string();
 
     let stream = async_stream::stream! {
+        if !is_valid_k8s_name(&ns)
+            || !is_valid_k8s_name(&pod)
+            || (!container.is_empty() && !is_valid_k8s_name(&container))
+        {
+            yield Ok(Event::default().data("[error] Invalid Kubernetes namespace, pod, or container name"));
+            return;
+        }
+
         let mut args = vec![
             "logs".to_string(), "-f".to_string(),
             "-n".to_string(), ns,
@@ -783,11 +908,14 @@ pub async fn api_k8s_log_stream(
             args.push("-c".to_string());
             args.push(container);
         }
-        let child = tokio::process::Command::new("kubectl")
-            .args(&args)
+        let mut std_cmd = Command::new(crate::path_util::resolve_binary("kubectl"));
+        crate::path_util::apply_path_to_cmd(&mut std_cmd);
+        let mut cmd = tokio::process::Command::from(std_cmd);
+        cmd.args(&args)
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
-            .spawn();
+            .kill_on_drop(true);
+        let child = cmd.spawn();
 
         match child {
             Ok(mut child) => {

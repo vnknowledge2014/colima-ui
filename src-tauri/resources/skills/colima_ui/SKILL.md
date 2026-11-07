@@ -1,11 +1,11 @@
 ---
 name: colima_ui
-description: Core App Event Catalog — 92 events across 10 domains. Use [QUERY] for SAFE events and [EVENT_APPROVE] for NORMAL/DANGEROUS.
+description: Core App Event Catalog — 100 events across all ColimaUI domains. Use [QUERY] for SAFE events and [EVENT_APPROVE] for NORMAL/DANGEROUS.
 ---
 
 # ColimaUI App Event Catalog
 
-You are the intelligence behind ColimaUI. This catalog lists **every** action you can perform through the App Event Bus.
+You are the intelligence behind ColimaUI. This catalog lists **every** action you can perform through the App Event Bus (`100` events total).
 
 ## How to Use Events
 
@@ -15,29 +15,30 @@ You are the intelligence behind ColimaUI. This catalog lists **every** action yo
 | **NORMAL** | `[EVENT_APPROVE: eventName \| payload]` | User Allow/Deny | State changes |
 | **DANGEROUS** | `[EVENT_APPROVE: eventName \| payload]` | User Allow/Deny + Warning | Destructive/irreversible |
 
-> **Rule**: NEVER use raw CLI commands (`docker ps`, `kubectl get pods`) for operations listed below. Use Event Bus instead.
+> **Rule**: NEVER use raw CLI commands (`docker ps`, `kubectl get pods`, `docker build`) for operations listed below. Use Event Bus instead.
 
 ---
 
 ## UI Navigation
 
-The UI provides **16 navigable pages** via `[NAVIGATE: pageName]`:
+The UI provides **17 navigable pages** via `[NAVIGATE: pageName]`:
 
 - `[NAVIGATE: dashboard]` — Overview of instances, CPU/Memory, and quick status
 - `[NAVIGATE: instances]` — Colima VM management
-- `[NAVIGATE: containers]` — Docker containers & container file copy (`cp`)
+- `[NAVIGATE: environment]` — Resolved path provenance (`colima-home`, `lima-home`, `docker-socket`, `kubeconfig`) and `launchd`-vs-shell environment duality
+- `[NAVIGATE: containers]` — Docker containers, interactive Container PTY shell (`dockerExec`), & container file copy (`cp`)
 - `[NAVIGATE: images]` — Docker images & TAR save/load transfers
 - `[NAVIGATE: volumes]` — Docker volumes
 - `[NAVIGATE: networks]` — Docker networks
+- `[NAVIGATE: compose]` — Docker Compose projects, Compose Diagnose, and AI Autofix
 - `[NAVIGATE: topology]` — Visual container, network, and volume relationship graph
 - `[NAVIGATE: activity]` — Live resource metrics, activity feed, alerts, and self-heal rules
 - `[NAVIGATE: security]` — Image scanning (Trivy, SBOM, rule packs), Falco runtime events, and Detonation sandbox
-- `[NAVIGATE: compose]` — Docker Compose projects, Compose Diagnose, and AI Autofix
 - `[NAVIGATE: kubernetes]` — Kubernetes & Kind cluster dashboard
 - `[NAVIGATE: linux-vms]` — Lima VMs
-- `[NAVIGATE: terminal]` — Built-in persistent PTY terminal
 - `[NAVIGATE: models]` — Local AI model management
-- `[NAVIGATE: settings]` — Application settings, AI providers, and `colima.yaml` editor
+- `[NAVIGATE: terminal]` — Built-in persistent PTY terminal (Colima SSH, Lima VM, Container `dockerExec`, Pod `k8sExec`)
+- `[NAVIGATE: settings]` — Application settings, AI providers, updates, and `colima.yaml` editor
 - `[NAVIGATE: help]` — Built-in documentation & Knowledge Bank articles
 
 > **Note**: The **AI Command Center** is a toggleable side panel (`⌘K` / `Ctrl+K`) alongside the active page — it is NOT a navigable page tab.
@@ -54,7 +55,7 @@ The UI provides **16 navigable pages** via `[NAVIGATE: pageName]`:
 | `start-instance` | NORMAL | `{"profile"}` | `[EVENT_APPROVE: start-instance \| {"profile": "default"}]` |
 | `stop-instance` | NORMAL | `{"profile"}` | `[EVENT_APPROVE: stop-instance \| {"profile": "default"}]` |
 | `colima-restart` | NORMAL | `{"profile"}` | `[EVENT_APPROVE: colima-restart \| {"profile": "default"}]` |
-| `delete-instance` | DANGER | `{"profile"}` | `[EVENT_APPROVE: delete-instance \| {"profile": "default"}]` |
+| `delete-instance` | DANGEROUS | `{"profile"}` | `[EVENT_APPROVE: delete-instance \| {"profile": "default"}]` |
 
 ## Docker Containers
 
@@ -74,7 +75,9 @@ The UI provides **16 navigable pages** via `[NAVIGATE: pageName]`:
 | `rename-container` | NORMAL | `{"id", "newName"}` | `[EVENT_APPROVE: rename-container \| {"id": "nginx", "newName": "web"}]` |
 | `container-exec` | NORMAL | `{"id", "command"}` | `[EVENT_APPROVE: container-exec \| {"id": "nginx", "command": "ls -la"}]` |
 | `run-container` | NORMAL | `{"image", "name?", "ports?", "envVars?", "volumes?", "detach?"}` | `[EVENT_APPROVE: run-container \| {"image": "nginx:latest", "name": "web", "ports": ["8080:80"]}]` |
-| `remove-container` | DANGER | `{"id"}` | `[EVENT_APPROVE: remove-container \| {"id": "nginx"}]` |
+| `remove-container` | DANGEROUS | `{"id"}` | `[EVENT_APPROVE: remove-container \| {"id": "nginx"}]` |
+
+> **Interactive Container PTY (`dockerExec`)**: `container-exec` is strictly for non-interactive one-shot commands. For an interactive shell inside a running container, guide the user to `[NAVIGATE: containers]` (Terminal action) or `[NAVIGATE: terminal]`.
 
 ## Docker Images
 
@@ -83,9 +86,10 @@ The UI provides **16 navigable pages** via `[NAVIGATE: pageName]`:
 | `list-images` | SAFE | — | `[QUERY: list-images]` |
 | `inspect-image` | SAFE | `{"id"}` | `[QUERY: inspect-image \| {"id": "nginx:latest"}]` |
 | `pull-image` | NORMAL | `{"image"}` | `[EVENT_APPROVE: pull-image \| {"image": "nginx:latest"}]` |
+| `build-image` | NORMAL | `{"contextPath", "dockerfile?", "tag?"}` | `[EVENT_APPROVE: build-image \| {"contextPath": ".", "dockerfile": "Dockerfile", "tag": "my-app:latest"}]` |
 | `tag-image` | NORMAL | `{"source", "target"}` | `[EVENT_APPROVE: tag-image \| {"source": "myapp", "target": "reg.io/myapp:v1"}]` |
-| `remove-image` | DANGER | `{"id"}` | `[EVENT_APPROVE: remove-image \| {"id": "nginx:latest"}]` |
-| `prune-images` | DANGER | — | `[EVENT_APPROVE: prune-images]` |
+| `remove-image` | DANGEROUS | `{"id"}` | `[EVENT_APPROVE: remove-image \| {"id": "nginx:latest"}]` |
+| `prune-images` | DANGEROUS | — | `[EVENT_APPROVE: prune-images]` |
 
 ## Volumes
 
@@ -94,8 +98,8 @@ The UI provides **16 navigable pages** via `[NAVIGATE: pageName]`:
 | `volume-list` | SAFE | — | `[QUERY: volume-list]` |
 | `volume-inspect` | SAFE | `{"name"}` | `[QUERY: volume-inspect \| {"name": "data"}]` |
 | `volume-create` | NORMAL | `{"name"}` | `[EVENT_APPROVE: volume-create \| {"name": "data"}]` |
-| `volume-remove` | DANGER | `{"name"}` | `[EVENT_APPROVE: volume-remove \| {"name": "data"}]` |
-| `volume-prune` | DANGER | — | `[EVENT_APPROVE: volume-prune]` |
+| `volume-remove` | DANGEROUS | `{"name"}` | `[EVENT_APPROVE: volume-remove \| {"name": "data"}]` |
+| `volume-prune` | DANGEROUS | — | `[EVENT_APPROVE: volume-prune]` |
 
 ## Networks
 
@@ -104,8 +108,8 @@ The UI provides **16 navigable pages** via `[NAVIGATE: pageName]`:
 | `network-list` | SAFE | — | `[QUERY: network-list]` |
 | `network-inspect` | SAFE | `{"name"}` | `[QUERY: network-inspect \| {"name": "bridge"}]` |
 | `network-create` | NORMAL | `{"name"}` | `[EVENT_APPROVE: network-create \| {"name": "my-net"}]` |
-| `network-remove` | DANGER | `{"name"}` | `[EVENT_APPROVE: network-remove \| {"name": "my-net"}]` |
-| `network-prune` | DANGER | — | `[EVENT_APPROVE: network-prune]` |
+| `network-remove` | DANGEROUS | `{"name"}` | `[EVENT_APPROVE: network-remove \| {"name": "my-net"}]` |
+| `network-prune` | DANGEROUS | — | `[EVENT_APPROVE: network-prune]` |
 
 ## Docker Compose
 
@@ -113,6 +117,8 @@ The UI provides **16 navigable pages** via `[NAVIGATE: pageName]`:
 |:---|:---:|:---|:---|
 | `compose-list` | SAFE | — | `[QUERY: compose-list]` |
 | `compose-logs` | SAFE | `{"projectName", "lines?"}` | `[QUERY: compose-logs \| {"projectName": "app", "lines": 100}]` |
+| `compose-build` | NORMAL | `{"projectDir", "service?"}` | `[EVENT_APPROVE: compose-build \| {"projectDir": "/path/to/project", "service": "api"}]` |
+| `compose-pull` | NORMAL | `{"projectDir", "service?"}` | `[EVENT_APPROVE: compose-pull \| {"projectDir": "/path/to/project", "service": "api"}]` |
 | `compose-up` | NORMAL | `{"dir"}` | `[EVENT_APPROVE: compose-up \| {"dir": "/path/to/project"}]` |
 | `compose-down` | NORMAL | `{"projectName"}` | `[EVENT_APPROVE: compose-down \| {"projectName": "app"}]` |
 | `compose-restart` | NORMAL | `{"projectName"}` | `[EVENT_APPROVE: compose-restart \| {"projectName": "app"}]` |
@@ -136,7 +142,7 @@ The UI provides **16 navigable pages** via `[NAVIGATE: pageName]`:
 | `k8s-crds` | SAFE | — | `[QUERY: k8s-crds]` |
 | `k8s-crd-resources` | SAFE | `{"resource", "namespace?"}` | `[QUERY: k8s-crd-resources \| {"resource": "certificates.cert-manager.io"}]` |
 | `k8s-port-forward-list` | SAFE | — | `[QUERY: k8s-port-forward-list]` |
-| `k8s-benchmark` | SAFE | `{"url", "concurrency?", "requests?", "method?"}` | `[QUERY: k8s-benchmark \| {"url": "http://localhost:8080"}]` |
+| `k8s-benchmark` | NORMAL | `{"url", "concurrency?", "requests?", "method?"}` | `[EVENT_APPROVE: k8s-benchmark \| {"url": "http://localhost:8080", "concurrency": 5, "requests": 50}]` |
 | `k8s-set-context` | NORMAL | `{"context"}` | `[EVENT_APPROVE: k8s-set-context \| {"context": "colima"}]` |
 | `k8s-scale` | NORMAL | `{"namespace", "deployment", "replicas"}` | `[EVENT_APPROVE: k8s-scale \| {"namespace": "default", "deployment": "api", "replicas": 3}]` |
 | `k8s-generic-scale` | NORMAL | `{"resourceType", "namespace", "name", "replicas"}` | `[EVENT_APPROVE: k8s-generic-scale \| {"resourceType": "statefulset", "namespace": "default", "name": "db", "replicas": 2}]` |
@@ -145,8 +151,8 @@ The UI provides **16 navigable pages** via `[NAVIGATE: pageName]`:
 | `k8s-port-forward-start` | NORMAL | `{"namespace", "name", "localPort", "remotePort"}` | `[EVENT_APPROVE: k8s-port-forward-start \| {"namespace": "default", "name": "pod", "localPort": 8080, "remotePort": 80}]` |
 | `k8s-port-forward-stop` | NORMAL | `{"localPort"}` | `[EVENT_APPROVE: k8s-port-forward-stop \| {"localPort": 8080}]` |
 | `k8s-exec` | NORMAL | `{"namespace", "pod", "container?"}` | `[EVENT_APPROVE: k8s-exec \| {"namespace": "default", "pod": "nginx"}]` |
-| `k8s-delete` | DANGER | `{"kind", "namespace", "name"}` | `[EVENT_APPROVE: k8s-delete \| {"kind": "pod", "namespace": "default", "name": "old"}]` |
-| `k8s-node-action` | DANGER | `{"name", "action"}` | `[EVENT_APPROVE: k8s-node-action \| {"name": "node-1", "action": "drain"}]` |
+| `k8s-delete` | DANGEROUS | `{"kind", "namespace", "name"}` | `[EVENT_APPROVE: k8s-delete \| {"kind": "pod", "namespace": "default", "name": "old"}]` |
+| `k8s-node-action` | DANGEROUS | `{"name", "action"}` | `[EVENT_APPROVE: k8s-node-action \| {"name": "node-1", "action": "drain"}]` |
 
 ## Kind Clusters
 
@@ -154,7 +160,7 @@ The UI provides **16 navigable pages** via `[NAVIGATE: pageName]`:
 |:---|:---:|:---|:---|
 | `kind-list` | SAFE | — | `[QUERY: kind-list]` |
 | `kind-create` | NORMAL | `{"name"}` | `[EVENT_APPROVE: kind-create \| {"name": "test-cluster"}]` |
-| `kind-delete` | DANGER | `{"name"}` | `[EVENT_APPROVE: kind-delete \| {"name": "test-cluster"}]` |
+| `kind-delete` | DANGEROUS | `{"name"}` | `[EVENT_APPROVE: kind-delete \| {"name": "test-cluster"}]` |
 
 ## Lima VMs
 
@@ -167,7 +173,7 @@ The UI provides **16 navigable pages** via `[NAVIGATE: pageName]`:
 | `lima-start` | NORMAL | `{"name"}` | `[EVENT_APPROVE: lima-start \| {"name": "ubuntu"}]` |
 | `lima-stop` | NORMAL | `{"name"}` | `[EVENT_APPROVE: lima-stop \| {"name": "ubuntu"}]` |
 | `lima-shell` | NORMAL | `{"name", "command"}` | `[EVENT_APPROVE: lima-shell \| {"name": "ubuntu", "command": "uname -a"}]` |
-| `lima-delete` | DANGER | `{"name"}` | `[EVENT_APPROVE: lima-delete \| {"name": "ubuntu"}]` |
+| `lima-delete` | DANGEROUS | `{"name"}` | `[EVENT_APPROVE: lima-delete \| {"name": "ubuntu"}]` |
 
 ## AI Models & Settings
 
@@ -176,14 +182,14 @@ The UI provides **16 navigable pages** via `[NAVIGATE: pageName]`:
 | `model-list` | SAFE | `{"profile?"}` | `[QUERY: model-list \| {"profile": "default"}]` |
 | `model-pull` | NORMAL | `{"profile?", "name"}` | `[EVENT_APPROVE: model-pull \| {"name": "llama3"}]` |
 | `model-serve` | NORMAL | `{"profile?", "name", "port"}` | `[EVENT_APPROVE: model-serve \| {"name": "llama3", "port": 11434}]` |
-| `model-delete` | DANGER | `{"profile?", "name"}` | `[EVENT_APPROVE: model-delete \| {"name": "llama3"}]` |
+| `model-delete` | DANGEROUS | `{"profile?", "name"}` | `[EVENT_APPROVE: model-delete \| {"name": "llama3"}]` |
 | `ai-config-status` | SAFE | — | `[QUERY: ai-config-status]` |
 | `ai-update-config` | NORMAL | `{"provider?", "model?", "endpoint?", "api_key?", "settings?"}` | `[EVENT_APPROVE: ai-update-config \| {"settings": {"colimaui_auto_pause": "true", "colimaui_auto_pause_mins": "15"}}]` (Values MUST be strings) |
 | `list-presets` | SAFE | — | `[QUERY: list-presets]` |
 | `save-preset` | NORMAL | `{"id", "cpus?", "memory?", "disk?"}` | `[EVENT_APPROVE: save-preset \| {"id": "gaming", "cpus": 4}]` |
-| `delete-preset` | DANGER | `{"id"}` | `[EVENT_APPROVE: delete-preset \| {"id": "gaming"}]` |
+| `delete-preset` | DANGEROUS | `{"id"}` | `[EVENT_APPROVE: delete-preset \| {"id": "gaming"}]` |
 
-## System
+## System & Environment
 
 | Event | Cat. | Payload | Example |
 |:---|:---:|:---|:---|
@@ -191,13 +197,15 @@ The UI provides **16 navigable pages** via `[NAVIGATE: pageName]`:
 | `system-check` | SAFE | — | `[QUERY: system-check]` |
 | `system-check-tool` | SAFE | `{"name"}` | `[QUERY: system-check-tool \| {"name": "helm"}]` |
 | `system-host-specs` | SAFE | — | `[QUERY: system-host-specs]` |
-| `system-prune` | DANGER | — | `[EVENT_APPROVE: system-prune]` |
+| `environment-resolutions` | SAFE | `{}` | `[QUERY: environment-resolutions]` |
+| `system-prune` | DANGEROUS | — | `[EVENT_APPROVE: system-prune]` |
 
-## Internal Gateway
+## Navigation & Internal Gateway
 
 | Event | Cat. | Payload | Example |
 |:---|:---:|:---|:---|
-| `cli-exec` | NORMAL | `{"command", "args"}` | `[EVENT_APPROVE: cli-exec \| {"command": "docker", "args": ["build", "."]}]` |
+| `navigate` | SAFE | `{"page"}` | `[QUERY: navigate \| {"page": "environment"}]` (or `[NAVIGATE: environment]`) |
+| `cli-exec` | NORMAL | `{"command", "args"}` | `[EVENT_APPROVE: cli-exec \| {"command": "helm", "args": ["install", "my-release", "bitnami/nginx"]}]` |
 
 ---
 

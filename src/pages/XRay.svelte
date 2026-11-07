@@ -1,5 +1,4 @@
 <script lang="ts">
-  import { onMount } from "svelte";
   import { k8sApi } from "../lib/api";
   import { t } from "../lib/i18n.svelte";
 
@@ -44,37 +43,51 @@
 
   // Selection for highlighting relationships
   let hoveredId = $state<string | null>(null);
+  let fetchSeq = 0;
 
-  onMount(() => {
-    fetchData();
+  $effect(() => {
+    void fetchData(namespace);
   });
 
-  async function fetchData() {
+  async function fetchData(targetNs = namespace) {
+    const seq = ++fetchSeq;
     loading = true;
     error = null;
     try {
-      // fetch all basic resources and ingress
-      const rawAll = await k8sApi.resources("all", namespace);
-      const rawIngress = await k8sApi.resources("ingress", namespace);
+      const resourceSpecs: Array<{ resource: string; defaultKind: string }> = [
+        { resource: "pods", defaultKind: "Pod" },
+        { resource: "services", defaultKind: "Service" },
+        { resource: "deployments", defaultKind: "Deployment" },
+        { resource: "ingresses", defaultKind: "Ingress" },
+      ];
+      const results = await Promise.allSettled(
+        resourceSpecs.map(({ resource }) => k8sApi.resources(resource, targetNs))
+      );
+      if (seq !== fetchSeq) return;
 
-      let items: XrayResource[] = [];
-      try {
-        const parsedAll = JSON.parse(rawAll) as { items?: XrayResource[] };
-        if (parsedAll && parsedAll.items) {
-          items = items.concat(parsedAll.items);
-        }
-      } catch (e) {
-        console.warn("Failed to parse all resources", e);
+      const firstRejection = results.find((r): r is PromiseRejectedResult => r.status === "rejected");
+      if (results.every((r) => r.status === "rejected") && firstRejection) {
+        throw firstRejection.reason;
       }
 
-      try {
-        const parsedIngress = JSON.parse(rawIngress) as { items?: XrayResource[] };
-        if (parsedIngress && parsedIngress.items) {
-          items = items.concat(parsedIngress.items);
+      const items: XrayResource[] = [];
+      results.forEach((res, idx) => {
+        if (res.status !== "fulfilled") return;
+        const defaultKind = resourceSpecs[idx].defaultKind;
+        try {
+          const parsed = (typeof res.value === "string" ? JSON.parse(res.value) : res.value) as { items?: XrayResource[] };
+          if (parsed && Array.isArray(parsed.items)) {
+            for (const item of parsed.items) {
+              items.push({
+                ...item,
+                kind: item.kind || defaultKind,
+              });
+            }
+          }
+        } catch (e) {
+          console.warn(`Failed to parse ${resourceSpecs[idx].resource} resources`, e);
         }
-      } catch (e) {
-        console.warn("Failed to parse ingress resources", e);
-      }
+      });
 
       // Group them
       ingresses = items.filter(i => i.kind === "Ingress");
@@ -83,9 +96,12 @@
       pods = items.filter(i => i.kind === "Pod");
 
     } catch (e) {
+      if (seq !== fetchSeq) return;
       error = e instanceof Error ? e.message : String(e);
     } finally {
-      loading = false;
+      if (seq === fetchSeq) {
+        loading = false;
+      }
     }
   }
 
@@ -147,7 +163,7 @@
   <div class="header">
     <h3>{t('xray.title', { default: 'X-Ray Analysis' })}</h3>
     <p>{t('xray.subtitle', { default: 'Visualizing resource dependencies in namespace' })} <code>{namespace}</code>. {t('xray.hover_hint', { default: 'Hover over a card to see connections.' })}</p>
-    <button class="btn btn-secondary" onclick={fetchData}>
+    <button class="btn btn-secondary" onclick={() => fetchData(namespace)}>
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.59-8.36l5.67-5.67"/></svg>
       {t('xray.refresh', { default: 'Refresh' })}
     </button>

@@ -35,9 +35,9 @@ ColimaUI runs a localhost Axum HTTP & SSE server on `127.0.0.1:11420` (automatic
 
 | Method | Endpoint | Auth | Description |
 |--------|----------|------|-------------|
-| `GET` | `/api/events` | `?token=<token>` | Server-Sent Events stream (`?topics=metrics.sample,...`) |
+| `GET` | `/api/events` | `?token=<token>` | Server-Sent Events stream (`?topics=instances-update,docker-state-updated,...`) |
 
-Common event topics: `docker-state`, `instances`, `docker-event`, `metrics.sample`, `transfer.progress`, `transfer.done`, `transfer.failed`, `security-scan-progress`, `detonation.event`, `detonation.status`.
+Common event topics: `docker-state-updated`, `instances-update`, `metrics.sample`, `transfer.progress`, `transfer.done`, `transfer.failed`, `security-scan-progress`, `detonation.event`, `detonation.status` (plus `stream-lagged` if a slow consumer drops frames).
 
 ---
 
@@ -49,11 +49,13 @@ Common event topics: `docker-state`, `instances`, `docker-event`, `metrics.sampl
 | `GET` | `/api/system/version` | Cached Colima version string |
 | `GET` | `/api/system/homebrew` | Homebrew installation status |
 | `GET` | `/api/system/check-tool` | Check whitelisted tool (`?name=kubectl\|kind\|helm\|krunkit\|nerdctl`) |
-| `GET` | `/api/system/capabilities` | Host runtime/OS capability summary |
-| `GET` | `/api/capabilities` | Feature & external tool capability probes (e.g. `trivy`) with install hints |
+| `GET` | `/api/system/capabilities` | Host external tool capability probes (e.g. `colima`, `docker`, `kubectl`, `trivy`) with state & `install_hint` |
+| `GET` | `/api/capabilities` | Static AI Agent capabilities & 100-event App Event Bus schema |
 | `GET` | `/api/system/platform` | OS, CPU architecture, and package manager detection |
 | `GET` | `/api/system/host-specs` | Host CPU core count and total memory |
+| `GET` | `/api/system/runtime` | Active container runtime detection (`docker` vs `nerdctl`) |
 | `GET` | `/api/system/engine-resources` | Aggregate CPU, memory, and disk figures for the active container engine |
+| `POST` | `/api/system/resource-saver` | Configure idle VM auto-stop Resource Saver (`{enabled, idle_minutes}`) |
 | `POST` | `/api/system/install` | Install dependency (`{name, method}`) |
 | `GET` | `/api/system/autostart` | Read launch-at-login status |
 | `POST` | `/api/system/autostart` | Configure launch-at-login (`{enable}`) |
@@ -67,10 +69,13 @@ Common event topics: `docker-state`, `instances`, `docker-event`, `metrics.sampl
 | `POST` | `/api/telemetry/consent` | Update telemetry consent (`{granted}`) |
 | `GET` | `/api/telemetry/should-prompt` | Whether the one-time telemetry consent prompt should appear |
 | `GET` | `/api/telemetry/preview` | Inspect buffered in-memory telemetry events |
+| `GET` | `/api/pro/status` | Read local Pro sidecar status (`{"state": "free"}` on MIT build) |
+| `GET` | `/api/subscription` | Read local offline entitlement state (`entitled: true` on MIT build) |
+| `POST` | `/api/subscription/store` | Store a signed offline entitlement token locally |
 
 ---
 
-## Colima Instances & YAML Config
+## Colima Instances, Presets & YAML Config
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
@@ -81,9 +86,16 @@ Common event topics: `docker-state`, `instances`, `docker-event`, `metrics.sampl
 | `GET` | `/api/instances/status` | Instance runtime status (`?profile=default`) |
 | `GET` | `/api/instances/ssh` | Get SSH connection command (`?profile=default`) |
 | `POST` | `/api/instances/k8s` | Instance Kubernetes control (`?profile=default&action=start\|stop\|reset`) |
+| `POST` | `/api/instances/create-worker` | Provision & join a Colima K3s worker node (`{master_profile, worker_profile, cpu, memory}`) |
 | `GET` | `/api/instances/config` | Read structured `colima.yaml` snapshot & `mtime` (`?profile=default`) |
 | `POST` | `/api/instances/config/preview` | Preview `colima.yaml` diff & restart requirements (`{profile, changes}`) |
 | `POST` | `/api/instances/config/apply` | Apply `colima.yaml` edits guarded by optimistic lock (`{profile, changes, expectedMtime}`) |
+| `GET` | `/api/presets` | List custom VM hardware presets stored in SQLite (`user_presets`) |
+| `POST` | `/api/presets` | Create or update a custom VM hardware preset (`{id, name, presetJson}`) |
+| `POST` | `/api/presets/delete` | Delete a custom VM hardware preset (`{id}`) |
+| `GET` | `/api/presets/snapshot` | Read container snapshot for a preset & profile (`?preset_id=...&instance_profile=...`) |
+| `POST` | `/api/presets/snapshot` | Save container snapshot (`{preset_id, instance_profile, containers_json, is_manual_override}`) |
+| `GET` | `/api/presets/snapshots` | List all saved container snapshots for an instance profile (`?profile=...`) |
 
 ---
 
@@ -334,7 +346,7 @@ Live metric samples stream over `GET /api/events?token=<token>&topics=metrics.sa
 | `POST` | `/api/ai/conversations` | Create a conversation thread (`{id, title}`) |
 | `POST` | `/api/ai/conversations/rename` | Rename a conversation thread (`{id, title}`) |
 | `POST` | `/api/ai/conversations/delete` | Delete a conversation thread (`{id}`; empties `"default"` instead of removing it) |
-| `POST` | `/api/cli/chat` | Headless CLI agent endpoint (`{prompt, provider?, model?}`) used by `cui` |
+| `POST` | `/api/cli/chat` | Multi-turn headless CLI agent endpoint (`{prompt, provider?, model?, allow_mutations?}`) reading `app_settings` from `~/.colima-ui/knowledge.db` (used by `cui`) |
 
 ### Knowledge Bank, Offline Help Articles & Shell Sandbox
 

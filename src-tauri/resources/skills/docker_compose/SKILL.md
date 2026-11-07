@@ -9,7 +9,7 @@ Manage Docker Compose multi-container projects through the App Event Bus and bui
 
 ## Core Rule: App-First
 
-**ALWAYS use `[QUERY]` for introspection, `[EVENT_APPROVE]` for lifecycle, and `[NAVIGATE: compose]` for Compose Diagnose & AI Autofix.** Only use CLI for `docker compose up --build` and `docker compose config`.
+**ALWAYS use `[QUERY]` for introspection, `[EVENT_APPROVE]` for lifecycle, and `[NAVIGATE: compose]` for Compose Diagnose & AI Autofix.** Only use CLI via `cli-exec` for `docker compose config` and `docker compose ps`.
 
 ## 1. Introspection (Read-Only)
 
@@ -21,6 +21,8 @@ Manage Docker Compose multi-container projects through the App Event Bus and bui
 - **Start project**: `[EVENT_APPROVE: compose-up | {"dir": "/path/to/project"}]`
 - **Stop project**: `[EVENT_APPROVE: compose-down | {"projectName": "myapp"}]`
 - **Restart project**: `[EVENT_APPROVE: compose-restart | {"projectName": "myapp"}]`
+- **Build images** (`service` optional): `[EVENT_APPROVE: compose-build | {"projectDir": "/path/to/project", "service": "api"}]`
+- **Pull images** (`service` optional): `[EVENT_APPROVE: compose-pull | {"projectDir": "/path/to/project", "service": "api"}]`
 
 ## 3. Built-in Compose Diagnose & AI Autofix
 
@@ -30,8 +32,7 @@ Navigate to `[NAVIGATE: compose]` to use ColimaUI's native Compose diagnostics a
 
 ## 4. CLI Escape Hatch
 
-- **Build + start**: `[EVENT_APPROVE: cli-exec | {"command": "docker", "args": ["compose", "-f", "/path/to/docker-compose.yml", "up", "-d", "--build"]}]`
-- **Validate config**: `[EVENT_APPROVE: cli-exec | {"command": "docker", "args": ["compose", "-f", "/path/to/docker-compose.yml", "config"]}]`
+- **Validate rendered config**: `[EVENT_APPROVE: cli-exec | {"command": "docker", "args": ["compose", "-f", "/path/to/docker-compose.yml", "config"]}]`
 - **View service status**: `[EVENT_APPROVE: cli-exec | {"command": "docker", "args": ["compose", "-p", "myapp", "ps"]}]`
 
 ## 5. Troubleshooting
@@ -39,12 +40,12 @@ Navigate to `[NAVIGATE: compose]` to use ColimaUI's native Compose diagnostics a
 ### Service won't start
 1. `[QUERY: compose-logs | {"projectName": "myapp", "lines": 50}]`
 2. Open `[NAVIGATE: compose]` to run **Compose Diagnose** for port conflicts, missing env vars, or volume mount errors, and preview an **AI Autofix** patch.
-3. If image rebuild is needed, use CLI escape: `docker compose -f /path/to/docker-compose.yml up -d --build`.
+3. If an image rebuild is needed, run `[EVENT_APPROVE: compose-build | {"projectDir": "/path/to/project"}]` followed by `[EVENT_APPROVE: compose-up | {"dir": "/path/to/project"}]`.
 
 ## Advanced References
 - `[READ_REFERENCE: skills/docker_compose/references/secrets_management.md]`
 
 ## Anti-Patterns
 
-- **Never use `cli-exec` for basic `compose ls`, `up`, `down`, `restart`, or `logs`** — always use `compose-list`, `compose-up`, `compose-down`, `compose-restart`, and `compose-logs`.
+- **Never use `cli-exec` for `compose ls`, `up`, `down`, `restart`, `build`, `pull`, or `logs`** — always use `compose-list`, `compose-up`, `compose-down`, `compose-restart`, `compose-build`, `compose-pull`, and `compose-logs`.
 - **Never manually rewrite broken `compose.yaml` files via shell commands** — guide the user to `[NAVIGATE: compose]` to run **Compose Diagnose** and preview **AI Autofix** diffs with undo safety.

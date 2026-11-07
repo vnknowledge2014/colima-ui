@@ -117,5 +117,4 @@ passed as a query parameter — exactly what `redact()` strips.
 ## Deferred
 
 - The network sink and batching queue (no endpoint exists yet).
-- Auto-update, code signing, and notarization (need an Apple Developer ID and
-  are tracked in the Phase 4 plan, not here).
+- Apple Developer ID code signing and macOS notarization remain optional in CI until `APPLE_SIGNING_IDENTITY` / `APPLE_ID` repository secrets are configured (in-app auto-updates via `tauri-plugin-updater` and `UpdateSettings.svelte` are already implemented and activate automatically when `TAURI_SIGNING_PRIVATE_KEY` is set).

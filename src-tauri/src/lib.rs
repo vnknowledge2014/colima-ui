@@ -15,6 +15,7 @@ mod poller;
 mod terminal_session;
 pub mod adapters;
 pub mod services;
+pub mod mcp;
 
 // Extracted from api_server.rs for single-responsibility
 pub mod auth;
@@ -463,6 +464,7 @@ pub fn run() {
             // for SSE, which cannot send an Authorization header.
             api_server::api_token,
             system::set_resource_saver,
+            commands::agent_loop::run_headless_agent,
         ])
         .build(tauri::generate_context!())
         .expect("error while running tauri application")

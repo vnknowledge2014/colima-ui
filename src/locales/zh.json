@@ -33,6 +33,8 @@
     "colima_missing": "未检测到 Colima",
     "colima_missing_hint": "打开帮助进行安装",
     "colima_running": "{count} 个运行中",
+    "colima_starting": "{count} 个启动中",
+    "colima_unhealthy": "{count} 个异常",
     "colima_stopped": "已停止",
     "colima_instances": "实例",
     "security": "安全",
@@ -180,8 +182,10 @@
     "unpause": "Unpause",
     "restart": "Restart",
     "no_containers": "No containers",
+    "empty_text": "点击“Run”从镜像启动一个容器。",
     "open_terminal": "打开终端",
-    "open_interactive_terminal": "打开交互式终端 (PTY)"
+    "open_interactive_terminal": "打开交互式终端 (PTY)",
+    "terminal_desktop_only": "交互式 PTY 终端需要 ColimaUI 桌面版应用。"
   },
   "diff": {
     "no_changes": "没有变更",
@@ -412,7 +416,11 @@
       "dashboard_resources_title": "检查资源使用情况",
       "dashboard_resources_prompt": "检查所有运行中的容器和虚拟机的资源占用情况",
       "dashboard_health_title": "运行时健康检查",
-      "dashboard_health_prompt": "检查集群和运行时的健康状态"
+      "dashboard_health_prompt": "检查集群和运行时的健康状态",
+      "environment_resolutions_title": "检查路径解析",
+      "environment_resolutions_prompt": "检查 ColimaUI 环境解析（COLIMA_HOME、DOCKER_HOST、LIMA_HOME 与 PATH）",
+      "environment_duality_title": "对比 Shell 与应用环境变量",
+      "environment_duality_prompt": "解释 Shell 环境变量与本 GUI 应用运行时环境之间的差异"
     },
     "fallback": {
       "check_cpu_mem": "检查 CPU 和内存",
@@ -500,7 +508,11 @@
       "inspect_active_vm": "检查活动虚拟机",
       "inspect_active_vm_prompt": "检查活动虚拟机的资源分配和磁盘使用情况",
       "system_overview": "系统概览",
-      "system_overview_prompt": "汇总系统状态、活动实例和容器"
+      "system_overview_prompt": "汇总系统状态、活动实例和容器",
+      "inspect_env_resolutions": "检查解析记录",
+      "inspect_env_resolutions_prompt": "检查 COLIMA_HOME、DOCKER_HOST 与 LIMA_HOME 的 ColimaUI 环境解析",
+      "compare_shell_env": "对比 Shell 环境",
+      "compare_shell_env_prompt": "对比 Shell 环境变量与 ColimaUI 运行时环境"
     }
   },
   "terminal": {
@@ -512,7 +524,9 @@
     "new_session": "New Session",
     "no_sessions": "No terminal sessions",
     "instructions": "Open a new SSH session to a running instance.",
-    "docker_containers": "Docker 容器"
+    "docker_containers": "Docker 容器",
+    "desktop_only_title": "需要桌面版应用",
+    "desktop_only_desc": "交互式 PTY 终端会话通过原生 Tauri IPC 运行，需要 ColimaUI 桌面版应用。"
   },
   "compose": {
     "diagnose": {
@@ -557,6 +571,7 @@
     },
     "title": "Docker Compose",
     "projects_count": "projects",
+    "start": "启动",
     "stop": "Stop",
     "restart": "Restart",
     "down": "Down",
@@ -861,6 +876,7 @@
     "remove_action": "删除",
     "remove_confirm": "删除数据卷“{name}”？",
     "remove_selected_title": "删除选中的数据卷",
+    "remove_selected": "删除选中的 {count} 个",
     "remove_count": "删除 {count} 个",
     "remove_batch_confirm": "删除 {count} 个数据卷？\n\n{names}\n\n此操作无法撤销。",
     "title": "Volumes",
@@ -1204,12 +1220,19 @@
     "no_models": "No models installed",
     "start_colima": "Start a Colima instance first to manage AI models.",
     "pull_to_start": "Pull a model to get started with AI inference.",
-    "popular": "Popular Models"
+    "popular": "Popular Models",
+    "count": "个模型",
+    "deleted": "已删除模型 '{name}'",
+    "pull_failed": "拉取失败: {error}",
+    "pulled": "模型 '{name}' 拉取成功",
+    "pulling": "正在拉取模型 '{name}'... 这可能需要一点时间。",
+    "serving": "模型 '{name}' 正在端口 11434 提供服务"
   },
   "networks": {
     "title": "Networks",
     "count": "networks",
     "removing": "Removing...",
+    "remove_selected": "删除选中的 {count} 个",
     "pruning": "Pruning...",
     "prune": "Prune",
     "create_button": "Create Network",
@@ -1244,7 +1267,7 @@
   "environment": {
     "shellEnv": "Shell 环境",
     "dualityExplain": "GUI 进程继承的是 launchd 的环境变量，而非你 shell 的（快照：经由 $SHELL 启动一次非登录 shell——zsh 对应 .zshenv；bash 对应 $BASH_ENV/.bashrc 等）。两列出现差异属正常现象——重要的是下方的解析记录。",
-    "diverges": "在 Shell (.zshenv) 与本应用两列中的取值不同",
+    "diverges": "在 Shell 环境与本应用两列中的取值不同",
     "resolutionExplain": "本应用实际使用的值，以及为每个值选定所依据的规则。红色表示配置的路径已不存在。",
     "title": "环境",
     "subtitle": "本应用对你的设置的认知，以及它所基于的规则。",

@@ -671,9 +671,11 @@ pub fn correlate(event: &FalcoEvent, containers: &[serde_json::Value]) -> Option
 // The reader
 // ---------------------------------------------------------------------------
 
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::LazyLock;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{LazyLock, Mutex};
 
+static WATCH_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
+static WATCH_GEN: LazyLock<AtomicU64> = LazyLock::new(|| AtomicU64::new(0));
 static WATCHING: LazyLock<AtomicBool> = LazyLock::new(|| AtomicBool::new(false));
 static SHOULD_WATCH: LazyLock<AtomicBool> = LazyLock::new(|| AtomicBool::new(false));
 
@@ -687,9 +689,40 @@ const POLL_SECS: u64 = 5;
 /// stream that cries wolf is one the user turns off.
 const ALERT_AT: FalcoPriority = FalcoPriority::Critical;
 
-/// Whether the reader is running.
+/// Whether the reader is actively watching.
 pub fn is_watching() -> bool {
-    WATCHING.load(Ordering::Relaxed)
+    SHOULD_WATCH.load(Ordering::Acquire) && WATCHING.load(Ordering::Acquire)
+}
+
+/// Apply a start/stop transition atomically under `WATCH_LOCK`.
+/// Returns `Some(generation)` when a new reader task must be spawned.
+fn apply_watch_transition(enabled: bool) -> Option<u64> {
+    let _guard = WATCH_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    if !enabled {
+        SHOULD_WATCH.store(false, Ordering::Release);
+        WATCHING.store(false, Ordering::Release);
+        WATCH_GEN.fetch_add(1, Ordering::AcqRel);
+        return None;
+    }
+
+    if SHOULD_WATCH.load(Ordering::Acquire) && WATCHING.load(Ordering::Acquire) {
+        return None;
+    }
+
+    let next_gen = WATCH_GEN.fetch_add(1, Ordering::AcqRel) + 1;
+    SHOULD_WATCH.store(true, Ordering::Release);
+    WATCHING.store(true, Ordering::Release);
+    Some(next_gen)
+}
+
+/// Mark a reader generation finished; only clears `WATCHING`/`SHOULD_WATCH` if
+/// no newer generation has superseded `my_gen`.
+fn finish_watch_generation(my_gen: u64) {
+    let _guard = WATCH_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    if WATCH_GEN.load(Ordering::Acquire) == my_gen {
+        WATCHING.store(false, Ordering::Release);
+        SHOULD_WATCH.store(false, Ordering::Release);
+    }
 }
 
 /// Turn the reader on or off.
@@ -704,9 +737,8 @@ pub fn set_watching(enabled: bool) -> Result<bool, String> {
     // The user has just acted on whatever the screen told them to change, so a
     // cached reading from before that is stale by definition.
     invalidate_detect();
-    SHOULD_WATCH.store(enabled, Ordering::Relaxed);
-    if enabled && !WATCHING.swap(true, Ordering::Relaxed) {
-        spawn_reader();
+    if let Some(gen_id) = apply_watch_transition(enabled) {
+        spawn_reader(gen_id);
     }
     Ok(enabled)
 }
@@ -735,7 +767,7 @@ fn should_seek_to_end(previous: Option<&str>, current: Option<&str>) -> bool {
 /// Entitlement is re-read every pass rather than once at startup: a
 /// subscription that lapses while the app is open must stop the work, not
 /// merely hide the page.
-fn spawn_reader() {
+fn spawn_reader(my_gen: u64) {
     tauri::async_runtime::spawn(async move {
         let mut offset: u64 = 0;
         let mut file: Option<String> = None;
@@ -749,7 +781,9 @@ fn spawn_reader() {
         loop {
             tokio::time::sleep(std::time::Duration::from_secs(POLL_SECS)).await;
 
-            if !SHOULD_WATCH.load(Ordering::Relaxed) {
+            if !SHOULD_WATCH.load(Ordering::Acquire)
+                || WATCH_GEN.load(Ordering::Acquire) != my_gen
+            {
                 break;
             }
             if !crate::commands::metrics_store::entitled_now_cached() {
@@ -835,7 +869,7 @@ fn spawn_reader() {
             }
         }
 
-        WATCHING.store(false, Ordering::Relaxed);
+        finish_watch_generation(my_gen);
     });
 }
 
@@ -1324,5 +1358,32 @@ file_output:
         let event = parse_event(REAL_HOST_EVENT).expect("event");
         let containers = vec![serde_json::json!({ "ID": "01cdef08d09b", "Names": "web" })];
         assert!(correlate(&event, &containers).is_none());
+    }
+
+    #[test]
+    fn stale_watcher_generation_cannot_clobber_restarted_watcher() {
+        let _ = apply_watch_transition(false);
+        assert!(!is_watching());
+
+        // Start watcher #1
+        let gen1 = apply_watch_transition(true).expect("must spawn gen1");
+        assert!(is_watching());
+        // Calling enable again while running is a no-op
+        assert!(apply_watch_transition(true).is_none());
+
+        // Stop then immediately restart before gen1 wakes up from sleep
+        assert!(apply_watch_transition(false).is_none());
+        assert!(!is_watching());
+        let gen2 = apply_watch_transition(true).expect("must spawn gen2");
+        assert!(gen2 > gen1);
+        assert!(is_watching());
+
+        // Stale gen1 unwinds — must NOT clear WATCHING for gen2!
+        finish_watch_generation(gen1);
+        assert!(is_watching(), "stale generation exit must not clear active watcher");
+
+        // Active gen2 unwinds — clears WATCHING cleanly
+        finish_watch_generation(gen2);
+        assert!(!is_watching());
     }
 }

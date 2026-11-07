@@ -9,9 +9,27 @@ use crate::instance_reader;
 use crate::routes::payloads::*;
 
 pub async fn api_list_instances() -> (StatusCode, Json<ApiResponse<Vec<colima::ColimaInstance>>>) {
-    // Direct filesystem read — instant (<1ms) vs CLI (30-60s)
-    let instances = instance_reader::list_instances_fast();
-    ok(instances)
+    // Direct filesystem read (plus cached kubectl fallback) — run on blocking pool
+    match run_blocking(|| Ok(instance_reader::list_instances_fast())).await {
+        Ok(instances) => ok(instances),
+        Err(e) => err(e),
+    }
+}
+
+pub async fn api_create_worker_node(
+    Json(body): Json<CreateWorkerBody>,
+) -> (StatusCode, Json<ApiResponse<String>>) {
+    match colima::create_worker_node(
+        body.master_profile,
+        body.worker_profile,
+        body.cpu,
+        body.memory,
+    )
+    .await
+    {
+        Ok(msg) => ok(msg),
+        Err(e) => err(e),
+    }
 }
 
 

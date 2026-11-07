@@ -36,8 +36,13 @@ pub async fn kind_list() -> Result<String, ColimaError> {
 pub async fn kind_create(name: String, image: String) -> Result<String, ColimaError> {
     async move {
         ensure_valid_cluster_name(&name)?;
-        // The node image is a container reference, not a k8s name, so it is
-        // checked for emptiness only — the same as the HTTP route.
+        if !image.is_empty()
+            && (image.starts_with('-')
+                || crate::validation::contains_shell_injection(&image)
+                || image.chars().any(char::is_whitespace))
+        {
+            return Err(format!("Invalid node image reference: {image}"));
+        }
         run_blocking(move || {
             let mut args = vec!["create", "cluster", "--name", &name];
             if !image.is_empty() {

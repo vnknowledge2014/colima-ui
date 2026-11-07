@@ -162,9 +162,33 @@ pub async fn api_pause_container(
 
 
 pub async fn api_unpause_container(
-    Query(q): Query<ContainerIdQuery>,
+    Query(q): Query<OptionalContainerIdQuery>,
+    body: axum::body::Bytes,
 ) -> (StatusCode, Json<ApiResponse<String>>) {
-    match containers::unpause_container(q.container_id).await {
+    let from_query = q
+        .container_id
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
+    let container_id = match from_query {
+        Some(id) => id,
+        None => {
+            if body.is_empty() {
+                return err("Missing containerId".to_string());
+            }
+            match serde_json::from_slice::<OptionalContainerIdBody>(&body) {
+                Ok(parsed) => match parsed
+                    .container_id
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty())
+                {
+                    Some(id) => id,
+                    None => return err("Missing containerId".to_string()),
+                },
+                Err(e) => return err(format!("Invalid unpause payload: {}", e)),
+            }
+        }
+    };
+    match containers::unpause_container(container_id).await {
         Ok(out) => ok(out),
         Err(e) => err(e.to_string()),
     }

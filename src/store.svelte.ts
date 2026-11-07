@@ -36,6 +36,34 @@ export const dashboardState = $state({
   engineResources: null as EngineResources | null,
 });
 
+export const VALID_PAGES = [
+  "dashboard",
+  "instances",
+  "environment",
+  "containers",
+  "images",
+  "volumes",
+  "networks",
+  "compose",
+  "topology",
+  "activity",
+  "security",
+  "kubernetes",
+  "linux-vms",
+  "models",
+  "terminal",
+  "settings",
+  "help",
+] as const;
+
+export type ValidPage = (typeof VALID_PAGES)[number];
+
+const VALID_PAGE_SET: ReadonlySet<string> = new Set(VALID_PAGES);
+
+export function isValidPage(p: string): p is ValidPage {
+  return typeof p === "string" && VALID_PAGE_SET.has(p);
+}
+
 // Read saved tab ONCE at module init — runs before any Svelte reactivity or effects.
 // This eliminates all race conditions between $effect and onMount.
 const _savedPage = typeof localStorage !== "undefined"
@@ -44,7 +72,7 @@ const _savedPage = typeof localStorage !== "undefined"
 
 export const uiState = $state({
   aiPanelOpen: false,
-  currentPage: (_savedPage && _savedPage !== "dashboard") ? _savedPage : "dashboard",
+  currentPage: (_savedPage && isValidPage(_savedPage) ? _savedPage : "dashboard") as string,
   globalError: null as string | null,
   sidebarCollapsed: false,
   /**

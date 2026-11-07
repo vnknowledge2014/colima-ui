@@ -4,8 +4,8 @@
 **Problem**: A container fails to start with `Permission denied` on a volume mount.
 **Solution**: Docker in Colima runs in rootless mode by default. The internal container user (often root, UID 0) is mapped to the unprivileged user on the host. If the host directory doesn't allow access by the mapped UID, it fails.
 **Procedure**:
-1. Check the mapped UID/GID inside the container shell:
-   `[RUN_APPROVE: docker exec <container> id]`
+1. Check the mapped UID/GID inside the container via the App Event Bus:
+   `[EVENT_APPROVE: container-exec | {"id": "<container>", "command": "id"}]`
 2. Adjust permissions on the host directory to allow the mapped UID.
 3. Alternatively, force the container to run as the correct UID by modifying the run command or Compose file:
    `user: "1000:1000"`
