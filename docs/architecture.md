@@ -1,31 +1,42 @@
 # Architecture
 
-ColimaUI uses a **dual-mode, event-driven architecture** that works as both a native desktop app and a browser-based web application, sharing the same Rust backend.
+ColimaUI uses a **dual-mode (Desktop / Browser), dual-surface (In-App AI / External CLI-First, A2A & MCP), event-driven architecture** sharing a single Rust backend.
 
 ## High-Level Overview
 
 ```mermaid
 graph TD
-    subgraph Frontend["Frontend — Svelte 5 + TypeScript"]
+    subgraph Frontend["Inside App — Svelte 5 + TypeScript"]
         APP["App.svelte"]
         PAGES["Pages (20)"]
+        PANEL["AiChatPanel + agentCore.ts (100 Events)"]
         STORE["Rune Stores"]
         API["api.ts (dual-mode)"]
     end
 
+    subgraph Outside["Outside App — v0.3.0 Agent Ecosystem"]
+        CUI["cui / colimaui (22 subcommands <5ms --json)"]
+        MCP["cui mcp (22 stdio MCP tools)"]
+        A2A["A2A Peers (GET /.well-known/agent.json, POST /a2a)"]
+    end
+
     APP --> PAGES --> API
+    APP --> PANEL --> API
     APP --> STORE
 
-    subgraph Dual["Dual-Mode API Layer"]
+    subgraph Dual["Dual-Mode & External Transport Layer"]
         TAURI_IPC["Tauri IPC (invoke)"]
-        HTTP["Axum HTTP (:11420)"]
+        HTTP["Axum HTTP, UI Bridge & A2A (:11420–11429)"]
     end
 
     API -->|"Desktop"| TAURI_IPC
     API -->|"Browser"| HTTP
+    CUI -->|"<5ms HTTP (Desktop open)"| HTTP
+    MCP -->|"Proxy (Desktop open)"| HTTP
+    A2A -->|"Bearer Auth"| HTTP
 
-    subgraph Events["Real-time Push"]
-        TAURI_EVT["Tauri Events"]
+    subgraph Events["Real-time Push & Live UI Bridge"]
+        TAURI_EVT["Tauri Events (incl. ui-navigate & agent-external-chat-turn)"]
         SSE["SSE /api/events"]
     end
 
@@ -34,13 +45,15 @@ graph TD
 
     subgraph Backend["Backend — Rust"]
         CMD["commands/ (business logic)"]
-        ROUTES["routes/ (HTTP thin layer)"]
+        ROUTES["routes/ (HTTP & A2A thin layer)"]
         BROADCAST["tokio::broadcast"]
         WATCHER["Docker Event Watcher"]
     end
 
     TAURI_IPC --> CMD
     HTTP --> ROUTES --> CMD
+    CUI -.->|"Standalone fallback (Desktop closed)"| CMD
+    MCP -.->|"Standalone fallback (Desktop closed)"| CMD
     WATCHER --> BROADCAST
     BROADCAST --> SSE
     BROADCAST --> TAURI_EVT
@@ -54,6 +67,15 @@ graph TD
 
     CMD --> CLI
 ```
+
+## Dual-Surface Agent Design (`v0.3.0`)
+
+ColimaUI `v0.3.0` cleanly separates interactive human-in-the-loop workflows inside the app from deterministic programmatic automation outside the app:
+
+| Surface | Entry Points | Session & UI Behavior |
+|---------|-------------|-----------------------|
+| **Inside App** | `AiChatPanel.svelte`, `agentCore.ts`, `aiEventBus.ts` (**100** events), Internal Skills (`system_prompt.md`, `router.md`, `src-tauri/resources/skills/*`), Knowledge Bank RAG + FTS5 Memories | Interactive `[EVENT_APPROVE]` cards, 3-tier guided UX, personal multi-thread SQLite conversations (`"default"` & custom threads), and Live UI Bridge receivers (`ui-navigate`, `agent-external-chat-turn`). |
+| **Outside App** | `cui` `v0.3.0` (`colimaui` alias) **22 subcommands** (`< 5ms` HTTP `:11420..11429` + automatic standalone Rust fallback when Desktop is closed + global `--json`), **22-tool MCP stdio server** (`cui mcp`), and **Native HTTP A2A** (`GET /.well-known/agent.json`, `POST /a2a`) | Deterministic subcommands return `{"ok": true, "data": ...}` with zero LLM overhead. Automated `cui chat`, MCP `colima_ai_ask`, and `/a2a` calls default to **`colima-a2a-default-session`** so they never pollute personal UI chat history unless `--mirror-ui` (`"mirror_ui": true`) is explicitly passed; `POST /api/ui/navigate` (`cui ui navigate`) remotely switches any of the 17 UI pages. |
 
 ## Dual-Mode Design
 
@@ -256,8 +278,8 @@ The HTTP API uses **Bearer token** authentication:
    - **Desktop webview (Tauri):** Obtains the token over IPC (`auth::api_token`)
    - **`cui` CLI & local host agents:** Read `~/.colima-ui/api_token` paired with `~/.colima-ui/api_port` (`0600` permissions inside `0700` `~/.colima-ui`), written via `O_NOFOLLOW` + atomic rename from a temp sibling and unlinked on exit after ownership/token verification
    - **Development browser UI:** Debug builds (`npm run tauri dev`) print `http://localhost:1420/#token=…` to stdout; the frontend consumes the URL fragment once and strips it from the address bar
-3. All endpoints require `Authorization: Bearer <token>`, compared in constant time
-4. `/api/health` is the only unauthenticated route (allowing port discovery across `11420–11429`); the list is explicit in `api_server.rs`, not pattern-matched
+3. All REST, UI Remote Control (`/api/ui/state`, `/api/ui/navigate`), internal reference (`/api/ai/reference`), and Native A2A (`/.well-known/agent.json`, `/a2a`) endpoints require `Authorization: Bearer <token>`, compared in constant time
+4. `/api/health` is the **only** unauthenticated route (allowing port discovery across `11420–11429`); the list is explicit in `api_server.rs`, not pattern-matched
 5. SSE endpoints authenticate via `?token=` because `EventSource` cannot set headers. The set of such endpoints is an explicit allowlist (`auth::QUERY_TOKEN_PATHS`: `/api/events`, `/api/k8s/pods/logs/stream`) — a route is never switched to query-token auth just because its path ends in `/stream`
 
 **No HTTP endpoint hands the token out.** `GET /api/auth/token` used to, from the

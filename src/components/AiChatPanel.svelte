@@ -32,12 +32,12 @@
   import { t, getLanguage } from "../lib/i18n.svelte";
   import {
     uiState,
-    isValidPage,
     openSettingsSection,
     dockerState,
     dashboardState,
   } from "../store.svelte";
   import { closeNotificationPanel } from "../store/notifications.svelte";
+  import { applyUiNavigatePayload } from "../lib/uiBridge";
   import { aiApi } from "../lib/api";
   import { onError, globalToast } from "../lib/globalToast";
   import { appState, setAppSetting, getAppSetting } from "../lib/settingsStore.svelte";
@@ -292,6 +292,7 @@
 
   /** Hides the panel. The agent run, if any, carries on behind the bubble. */
   function hidePanel() {
+    aiState.isOpen = false;
     uiState.aiPanelOpen = false;
   }
 
@@ -300,8 +301,30 @@
     // sit on top of this panel and swallow every click meant for it. One side
     // panel at a time, enforced from both directions.
     closeNotificationPanel();
+    aiState.isOpen = true;
     uiState.aiPanelOpen = true;
   }
+
+  // Keep `aiState.isOpen` and `uiState.aiPanelOpen` coherent when external callers
+  // open via `aiState.isOpen = true` or when keyboard/sidebar closes `uiState.aiPanelOpen`.
+  let lastSyncedAiOpen = false;
+  $effect(() => {
+    const open = aiState.isOpen;
+    if (open && !lastSyncedAiOpen) {
+      closeNotificationPanel();
+      uiState.aiPanelOpen = true;
+    }
+    lastSyncedAiOpen = open;
+  });
+
+  let prevPanelOpen = uiState.aiPanelOpen;
+  $effect(() => {
+    const panelOpen = uiState.aiPanelOpen;
+    if (prevPanelOpen && !panelOpen && aiState.isOpen) {
+      aiState.isOpen = false;
+    }
+    prevPanelOpen = panelOpen;
+  });
 
   // Anything visible is read. Done as an effect rather than inside `showPanel`
   // because the sidebar toggles the same flag directly, and a second entry
@@ -571,14 +594,7 @@
         });
       },
       onNavigate: (page) => {
-        const target = page.trim().toLowerCase();
-        if (target === "ai-chat") {
-          showPanel();
-          return;
-        }
-        if (isValidPage(target)) {
-          uiState.currentPage = target;
-        }
+        applyUiNavigatePayload({ page });
       },
       onTimerSchedule: (id, ms, prompt) => {
         if (activeSchedules.size >= MAX_ACTIVE_SCHEDULES) return;

@@ -1,6 +1,8 @@
-# Command Center AI
+# Command Center AI & Dual-Surface Agent Architecture (`v0.3.0`)
 
-ColimaUI ships an integrated **Command Center AI** agent that inspects live system state, drives UI and backend operations through a typed App Event Bus, guides multi-step decisions with interactive cards, and persists multi-thread conversations and learned remedies locally in SQLite.
+ColimaUI `v0.3.0` implements a **Dual-Surface Agent Architecture**:
+- **Inside App (Desktop / Webview)**: An integrated **Command Center AI** (`AiChatPanel.svelte` + `agentCore.ts`) that inspects live system state, drives **100** typed App Event Bus operations across **17** UI pages, loads Internal Skills (`system_prompt.md`, `router.md`, `src-tauri/resources/skills/*`), recalls SQLite Knowledge Bank RAG remedies and FTS5 memories, and connects to external agents through the **Live UI Bridge** (`ui-navigate` & `agent-external-chat-turn`).
+- **Outside App (`cui` `v0.3.0`, with `colimaui` preserved as a backward-compatible alias)**: A deterministic **CLI-First control plane** (**22 subcommands**: 20 `< 5ms` direct subcommands + `chat` + `mcp` with global `--json` and automatic standalone Rust fallback when Desktop is closed), a **22-tool JSON-RPC 2.0 MCP stdio server** (`cui mcp`), and **Native HTTP A2A** (`GET /.well-known/agent.json`, `POST /a2a`) isolated by default to `colima-a2a-default-session`.
 
 ---
 
@@ -8,13 +10,14 @@ ColimaUI ships an integrated **Command Center AI** agent that inspects live syst
 
 ```mermaid
 graph TD
-    subgraph UI["Command Center UI (Svelte 5)"]
+    subgraph UI["Inside App — Command Center UI (Svelte 5)"]
         PANEL["AiChatPanel.svelte"]
         EMPTY["AiEmptyState (Tier 1)"]
         CHOICE["InteractiveChoiceCard (Tier 2)"]
         FOLLOW["AiFollowUpBar (Tier 3)"]
         STEP["ToolStepCard"]
         BODY["AiMessageBody + CodeBlock"]
+        BRIDGE["Live UI Bridge (ui-navigate / agent-external-chat-turn)"]
     end
 
     PANEL --> CORE["agentCore.ts (5-round orchestrator)"]
@@ -29,15 +32,25 @@ graph TD
     CORE --> STEP
     PANEL --> BODY
 
-    subgraph Backend["Rust Backend, Headless CLI & MCP"]
+    subgraph Outside["Outside App — CLI-First, A2A & MCP (v0.3.0)"]
+        CUI["cui (22 subcommands <5ms --json + standalone fallback)"]
+        MCP["mcp.rs (cui mcp / colimaui mcp — 22 MCP tools)"]
+        A2A["Native HTTP A2A (/.well-known/agent.json + POST /a2a)"]
+    end
+
+    subgraph Backend["Rust Backend & Persistence"]
         KB["knowledge_bank.rs (~/.colima-ui/knowledge.db)"]
-        CLI["agent_loop.rs (POST /api/cli/chat & cui CLI)"]
-        MCP["mcp.rs (cui mcp / colimaui mcp — 15 MCP tools)"]
+        CLI["agent_loop.rs (colima-a2a-default-session & --mirror-ui)"]
     end
 
     CORE --> KB
-    CLI --> KB
+    CUI --> CLI
     MCP --> CLI
+    A2A --> CLI
+    CLI --> KB
+    CLI -->|"--mirror-ui"| BRIDGE
+    CUI -->|"cui ui navigate"| BRIDGE
+    BRIDGE --> PANEL
 ```
 
 ### Core Layers
@@ -57,9 +70,11 @@ graph TD
    - `ollama-cloud` — Remote Ollama host or Ollama Cloud configured via `ai_endpoint` (+ optional `ai_api_key`)
 
    Streaming chunks normalize native `thinking` / `reasoning_content` fields and inline tags into unified multi-packet `<think>...</think>` blocks, while `redact()` scrubs credentials from any surfaced HTTP error.
-5. **Headless CLI Agent & Native MCP Server (`src-tauri/src/commands/agent_loop.rs`, `src-tauri/src/mcp.rs`, `src-tauri/src/bin/cui.rs`)**:
-   - **`cui` Headless AI CLI & `POST /api/cli/chat`**: Real multi-turn LLM agent reading `app_settings` from `~/.colima-ui/knowledge.db`. Supports `cui "<prompt>"` (read-only by default), `cui --yes "<prompt>"` (enables mutating actions), `cui --json "<prompt>"`, `cui --provider <id> --model <name> "<prompt>"`, `cui --help`, `cui --version`, and `cui mcp`.
-   - **Native MCP Stdio Server (`cui mcp` / `colimaui mcp`)**: Exposes **15 typed JSON-RPC 2.0 MCP tools** over `stdin`/`stdout` (`colima_list_instances`, `colima_instance_action`, `docker_list_containers`, `docker_container_action`, `docker_container_logs`, `docker_list_images`, `docker_pull_image`, `docker_list_volumes`, `docker_list_networks`, `compose_list_projects`, `k8s_list_pods`, `k8s_cluster_status`, `environment_resolutions`, `system_diagnostics`, `colima_ai_ask`). Works seamlessly whether ColimaUI Desktop is running (proxying via `127.0.0.1:<api_port>` + `~/.colima-ui/api_token`) or closed (direct native fallback):
+5. **External CLI-First Control Plane (`cui` `v0.3.0`), Native A2A & 22-Tool MCP Server (`src-tauri/src/commands/agent_loop.rs`, `src-tauri/src/mcp.rs`, `src-tauri/src/bin/cui.rs`)**:
+   - **CLI-First Deterministic Subcommands (`< 5ms` + Standalone Fallback)**: `cui` (with `colimaui` preserved as a backward-compatible alias) exposes **22 subcommands** (`vm`, `config`, `presets`, `container`, `image`, `volume`, `network`, `compose`, `k8s`, `kind`, `lima`, `security`, `models`, `alerts`, `self-heal`, `memories` / `kb`, `sessions`, `ui`, `events`, `doctor`, `chat`, `mcp`). Direct subcommands run in `< 5ms` over `127.0.0.1:11420..11429` when Desktop is open, automatically fall back to standalone Rust execution when Desktop is closed, and accept `--json` in any position returning `{"ok": true, "data": ...}` or `{"ok": false, "error": "..."}`.
+   - **A2A Session Isolation (`colima-a2a-default-session`) & Live UI Mirroring (`--mirror-ui`)**: `cui chat "<prompt>" --session colima-a2a-default-session [--yes] [--mirror-ui] [--provider <id>] [--model <m>] --json` (plus shorthand `cui "<prompt>"`), `POST /api/cli/chat`, MCP `colima_ai_ask`, and Native A2A `POST /a2a` default to `colima-a2a-default-session` so automated runs never hijack or pollute the user's personal Desktop UI chat history. Passing `--mirror-ui` (`"mirror_ui": true`) broadcasts `agent-external-chat-turn` to mirror the turn live in `AiChatPanel`.
+   - **Native HTTP A2A Protocol**: Exposes `GET /.well-known/agent.json` (A2A Agent Card) and `POST /a2a` (JSON-RPC 2.0: `message/send`, `tasks/send`, `tasks/get`, `tasks/cancel`) authenticated via `Authorization: Bearer <TOKEN>` (`~/.colima-ui/api_token`, `0600`), keeping `GET /api/health` as the only public unauthenticated route.
+   - **Native MCP Stdio Server (`cui mcp` / `colimaui mcp`)**: Exposes **22 typed JSON-RPC 2.0 MCP tools** over `stdin`/`stdout` (`colima_list_instances`, `colima_instance_action`, `docker_list_containers`, `docker_container_action`, `docker_container_logs`, `docker_list_images`, `docker_pull_image`, `docker_list_volumes`, `docker_list_networks`, `compose_list_projects`, `k8s_list_pods`, `k8s_cluster_status`, `environment_resolutions`, `system_diagnostics`, `colima_ai_ask`, `security_scan_image`, `compose_diagnose_autofix`, `lima_manage`, `colima_config`, `kb_memories`, `chat_sessions`, `ui_navigate`), working seamlessly whether ColimaUI Desktop is running or closed:
      - **Claude Desktop**, **Cursor**, **Antigravity**, **Windsurf**: `{"mcpServers": {"colima-ui": {"command": "cui", "args": ["mcp"]}}}`
      - **Zed** (`settings.json`): `{"context_servers": {"colima-ui": {"command": {"path": "cui", "args": ["mcp"]}}}}`
      - **Claude Code**: `claude mcp add colima-ui -- cui mcp`
@@ -77,7 +92,7 @@ graph TD
 If `~/.colima-ui/plugins.yaml` exists, custom user shortcuts are appended and mapped to `[EVENT_APPROVE: cli-exec | ...]`.
 
 ### On-Demand Reference Loading & Path Containment
-When deeper domain rules are needed, the agent emits `[READ_REFERENCE: path/to/file.md]`. Both `read_reference` (Tauri IPC) and `GET /api/system/reference?path=...` call `read_reference_from_dir`, which:
+When deeper domain rules are needed, the agent emits `[READ_REFERENCE: path/to/file.md]`. `read_reference` (Tauri IPC), `GET /api/system/reference?path=...`, and `GET /api/ai/reference?path=...` all call `read_reference_from_dir`, which:
 - Strips optional leading `/` and `resources/` prefixes.
 - Canonicalizes both the bundled `resources/` root and target path.
 - Verifies `canon_target.starts_with(&canon_base)` and `canon_target.is_file()`, rejecting directory reads and `../` path traversal (`403 Forbidden`).
@@ -146,8 +161,8 @@ All directives use bracket-balanced colon syntax (`[TAG: ...]`) parsed by `src/l
 
 All persistent AI state lives in `~/.colima-ui/knowledge.db` (`0600` permissions inside `0700` `~/.colima-ui`).
 
-### Multi-Conversation SQLite Schema
-- **`chat_conversations`** (`id`, `title`, `created_at`, `updated_at`) — Thread metadata ordered by `updated_at DESC`, with automatic first-user-message preview fallback. Deleting the `"default"` conversation clears its messages while keeping the row intact.
+### Multi-Conversation SQLite Schema & A2A Session Isolation
+- **`chat_conversations`** (`id`, `title`, `created_at`, `updated_at`) — Thread metadata ordered by `updated_at DESC`, with automatic first-user-message preview fallback. Deleting the `"default"` conversation clears its messages while keeping the row intact. Automated CLI/MCP/A2A turns write to the dedicated **`"colima-a2a-default-session"`** thread (excluded from standard personal UI thread listings) so background automation never pollutes the user's personal chat history unless `--mirror-ui` (`"mirror_ui": true`) is explicitly passed.
 - **`chat_messages`** (`id`, `role`, `content`, `created_at`, `conversation_id`) — Queried with `ORDER BY created_at ASC, rowid ASC` so user prompts, inline `ToolStepCard` system rows, and assistant replies always replay in exact visual turn order even when multiple rows share the same Unix-second timestamp. `rebuildAssistantTurnContent` preserves `[ASK_CHOICE]` and `[SUGGEST]` tags while stripping execution tags before saving.
 
 ### Knowledge Bank & Long-Term Memory (`knowledge_bank.rs`)

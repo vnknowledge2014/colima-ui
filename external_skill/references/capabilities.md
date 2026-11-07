@@ -1,6 +1,9 @@
-# Danh sách Năng lực (Capabilities) của ColimaUI
+# Danh sách Năng lực (Capabilities) của ColimaUI (`v0.3.0`)
 
-Đây là cuốn "từ điển" liệt kê chính xác mọi hành động mà **ColimaUI AI Agent** và hệ thống REST/Event Bus của ColimaUI có thể hiểu và thực thi.
+Đây là cuốn "từ điển" liệt kê chính xác mọi hành động trên kiến trúc **Hai Bề Mặt (Dual-Surface)** của **ColimaUI `v0.3.0`**:
+- **Bên trong ứng dụng (Inside App)**: `AiChatPanel` + `agentCore.ts` + **100** sự kiện App Event Bus + Internal Skills (`system_prompt.md`, `router.md`, `src-tauri/resources/skills/*`) + Knowledge Bank RAG + FTS5 Memories + Live UI Bridge (`ui-navigate` & `agent-external-chat-turn`).
+- **Bên ngoài ứng dụng (Outside App)**: CLI-First `cui` (`v0.3.0`, bí danh `colimaui`) với **22 lệnh con** (`< 5ms --json` qua HTTP `:11420..11429` hoặc tự động fallback native Rust khi Desktop đóng), **22 công cụ MCP** (`cui mcp`), và giao thức **Native A2A** (`GET /.well-known/agent.json`, `POST /a2a` cô lập mặc định vào `colima-a2a-default-session`).
+
 Khi phân tích yêu cầu của User, hãy tham chiếu danh sách này để biết ColimaUI có khả năng thực hiện hay không. **TUYỆT ĐỐI KHÔNG** bịa ra các hành động nằm ngoài danh sách dưới đây.
 
 ## Colima / Máy ảo (Instances & Config)
@@ -99,3 +102,11 @@ Khi phân tích yêu cầu của User, hãy tham chiếu danh sách này để b
 **Output:** Confirmation. (Sau khi update xong, hãy nhắc User refresh UI).
 
 - `list-presets`, `save-preset`, `delete-preset`: Xem, lưu và xóa các cấu hình phần cứng máy ảo Custom (lưu trữ bền vững trong SQLite `~/.colima-ui/knowledge.db`).
+
+## Bề mặt Ngoài Ứng dụng: CLI-First (`cui` v0.3.0), 22 MCP Tools, UI Bridge & Native A2A
+- **Live UI Bridge Events**:
+  - `ui-navigate`: Chuyển trang/phân mục từ xa và hiển thị thông báo nhanh (`POST /api/ui/navigate` hoặc `cui ui navigate <page> [--section <sec>] [--toast <msg>] --json` hoặc MCP `ui_navigate`).
+  - `agent-external-chat-turn`: Phản chiếu trực tiếp lượt hội thoại từ CLI/MCP/A2A bên ngoài vào `AiChatPanel` khi bật `--mirror-ui` / `"mirror_ui": true`.
+- **Cô lập Phiên A2A (`colima-a2a-default-session`)**: Mọi tác vụ tự động qua `cui chat`, `POST /api/cli/chat`, MCP `colima_ai_ask`, và Native A2A `POST /a2a` (`message/send`, `tasks/send`, `tasks/get`, `tasks/cancel`) mặc định chạy trên phiên `colima-a2a-default-session` để không xâm phạm lịch sử hội thoại cá nhân của người dùng trên Desktop UI.
+- **22 Lệnh con `cui` (`< 5ms --json` + Standalone Fallback, bí danh `colimaui`)**: `vm`, `config`, `presets`, `container`, `image`, `volume`, `network`, `compose`, `k8s`, `kind`, `lima`, `security`, `models`, `alerts`, `self-heal`, `memories` (`kb`), `sessions`, `ui`, `events`, `doctor`, `chat`, `mcp`.
+- **22 Công cụ MCP (`cui mcp` / `colimaui mcp`)**: `colima_list_instances`, `colima_instance_action`, `docker_list_containers`, `docker_container_action`, `docker_container_logs`, `docker_list_images`, `docker_pull_image`, `docker_list_volumes`, `docker_list_networks`, `compose_list_projects`, `k8s_list_pods`, `k8s_cluster_status`, `environment_resolutions`, `system_diagnostics`, `colima_ai_ask`, `security_scan_image`, `compose_diagnose_autofix`, `lima_manage`, `colima_config`, `kb_memories`, `chat_sessions`, `ui_navigate`.

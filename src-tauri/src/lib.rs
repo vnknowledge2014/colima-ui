@@ -16,6 +16,8 @@ mod terminal_session;
 pub mod adapters;
 pub mod services;
 pub mod mcp;
+pub mod cli_engine;
+pub mod a2a;
 
 // Extracted from api_server.rs for single-responsibility
 pub mod auth;
@@ -136,8 +138,8 @@ pub fn run() {
         // they all have to reach the same set of live ptys.
         .manage(terminal_session::create_session_manager())
         .setup(|app| {
-            // Initialize Knowledge Bank (SQLite)
-            knowledge_bank::init_knowledge_bank();
+            // Initialize Knowledge Bank (SQLite) idempotently
+            let _ = ai_chat::ensure_knowledge_bank_initialized();
 
             // Record app startup (consent-gated; no-ops unless telemetry is on).
             // After DB init so the consent read has a table to read from.

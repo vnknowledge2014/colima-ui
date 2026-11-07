@@ -1,6 +1,6 @@
 # HTTP API Reference
 
-ColimaUI runs a localhost Axum HTTP & SSE server on `127.0.0.1:11420` (automatically falling back across `11420–11429` if port `11420` is occupied) for the `cui` CLI, local host AI agents, and development-mode browser debugging.
+ColimaUI runs a localhost Axum HTTP, SSE, UI Bridge & Native A2A server on `127.0.0.1:11420` (automatically falling back across `11420–11429` if port `11420` is occupied) for the `cui` CLI (`v0.3.0`, `< 5ms` deterministic subcommands & isolated `cui chat`), `cui mcp` (22-tool MCP proxy), A2A peer agents, and development-mode browser debugging.
 
 > **No static web frontend on `:11420`:** Release builds do not mount static assets on the API server. Opening `http://127.0.0.1:11420` directly in a browser returns `401 Unauthorized`.
 
@@ -18,7 +18,7 @@ ColimaUI runs a localhost Axum HTTP & SSE server on `127.0.0.1:11420` (automatic
 
 ### Protected Endpoints
 
-- **Standard REST routes**: Require `Authorization: Bearer <token>`, verified in constant time (`auth::constant_time_eq`).
+- **Standard REST, UI Bridge & Native A2A routes**: Require `Authorization: Bearer <token>`, verified in constant time (`auth::constant_time_eq`). This includes `GET /.well-known/agent.json`, `POST /a2a`, `GET /api/ui/state`, `POST /api/ui/navigate`, and `GET /api/ai/reference` — `GET /api/health` remains the **only** unauthenticated endpoint.
 - **SSE `EventSource` allowlist (`auth::QUERY_TOKEN_PATHS`)**: Because browser `EventSource` cannot set custom HTTP headers, **only** `/api/events` and `/api/k8s/pods/logs/stream` authenticate via the parsed `?token=<token>` query parameter (and reject header auth so the two mechanisms never overlap).
 
 ### Obtaining `<token>`
@@ -37,7 +37,24 @@ ColimaUI runs a localhost Axum HTTP & SSE server on `127.0.0.1:11420` (automatic
 |--------|----------|------|-------------|
 | `GET` | `/api/events` | `?token=<token>` | Server-Sent Events stream (`?topics=instances-update,docker-state-updated,...`) |
 
-Common event topics: `docker-state-updated`, `instances-update`, `metrics.sample`, `transfer.progress`, `transfer.done`, `transfer.failed`, `security-scan-progress`, `detonation.event`, `detonation.status` (plus `stream-lagged` if a slow consumer drops frames).
+Common event topics: `docker-state-updated`, `instances-update`, `metrics.sample`, `transfer.progress`, `transfer.done`, `transfer.failed`, `security-scan-progress`, `detonation.event`, `detonation.status`, `ui-navigate` (remote UI page/section switch + optional toast), and `agent-external-chat-turn` (live Desktop mirroring of opted-in `--mirror-ui` external agent turns), plus `stream-lagged` if a slow consumer drops frames.
+
+---
+
+## UI Remote Control Bridge & Native A2A Protocol (`v0.3.0`)
+
+All routes below require `Authorization: Bearer <token>` from `~/.colima-ui/api_token` (`0600`):
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/api/ui/state` | Live UI state snapshot (`page`, `section`, theme, Desktop bridge connection status, and instance/container/K8s summary) |
+| `POST` | `/api/ui/navigate` | Navigate the active Desktop/Browser UI across all 17 pages (`{page, section?, toast?}`); emits `ui-navigate` over Tauri events & SSE |
+| `GET` | `/.well-known/agent.json` | ColimaUI `v0.3.0` A2A Agent Card (version, capabilities, skills, `/a2a` endpoint, Bearer auth metadata) |
+| `POST` | `/a2a` | Native A2A JSON-RPC 2.0 endpoint supporting `message/send`, `tasks/send`, `tasks/get`, and `tasks/cancel` |
+
+### A2A Session Isolation (`colima-a2a-default-session`) & Live Mirroring
+
+Automated external calls across `POST /api/cli/chat`, `POST /a2a`, `cui chat`, and MCP `colima_ai_ask` default `session_id` / `sessionId` to **`"colima-a2a-default-session"`** so background agent runs never hijack or pollute the user's personal Desktop `AiChatPanel` threads (`"default"` or custom threads). Pass `"mirror_ui": true` (`--mirror-ui` on `cui chat`) when live mirroring into the Desktop `AiChatPanel` via `agent-external-chat-turn` is explicitly desired.
 
 ---
 
@@ -339,14 +356,15 @@ Live metric samples stream over `GET /api/events?token=<token>&topics=metrics.sa
 | `POST` | `/api/ai/search` | SearXNG / DuckDuckGo web search (`{query, instances?, max_results?, timeout_secs?}`) |
 | `POST` | `/api/ai/fetch-page` | Fetch web page and convert HTML to Markdown (`{url, max_length?, mode?}`) |
 | `GET` | `/api/ai/context` | Deterministic 3-file core prompt + `~/.colima-ui/plugins.yaml` context |
+| `GET` | `/api/ai/reference` | Read bundled internal skill/reference markdown (`?path=skills/colima_ui/SKILL.md`, path-confined to `resources/`) |
 | `GET` | `/api/ai/history` | Load messages for a thread (`?conversationId=default`, ordered by `created_at ASC, rowid ASC`) |
 | `POST` | `/api/ai/history` | Upsert a chat message (`{message: {id, role, content}, conversationId?}`) |
 | `POST` | `/api/ai/history/clear` | Clear messages in a thread (`{conversationId?}`) |
-| `GET` | `/api/ai/conversations` | List all conversation threads (`id`, `title`, `updated_at`, `message_count`, `preview`) |
+| `GET` | `/api/ai/conversations` | List personal UI conversation threads (`id`, `title`, `updated_at`, `message_count`, `preview`; excludes isolated `colima-a2a-default-session` by default) |
 | `POST` | `/api/ai/conversations` | Create a conversation thread (`{id, title}`) |
 | `POST` | `/api/ai/conversations/rename` | Rename a conversation thread (`{id, title}`) |
 | `POST` | `/api/ai/conversations/delete` | Delete a conversation thread (`{id}`; empties `"default"` instead of removing it) |
-| `POST` | `/api/cli/chat` | Multi-turn headless CLI agent endpoint (`{prompt, provider?, model?, allow_mutations?}`) reading `app_settings` from `~/.colima-ui/knowledge.db` (used by `cui`) |
+| `POST` | `/api/cli/chat` | Multi-turn headless CLI/A2A agent endpoint (`{prompt, session_id?, provider?, model?, allow_mutations?, mirror_ui?}`) defaulting `session_id` to `"colima-a2a-default-session"` and reading `app_settings` from `~/.colima-ui/knowledge.db` |
 
 ### Knowledge Bank, Offline Help Articles & Shell Sandbox
 
@@ -370,7 +388,7 @@ Live metric samples stream over `GET /api/events?token=<token>&topics=metrics.sa
 
 ## Response Format
 
-Every endpoint wraps its result in `ApiResponse<T>`:
+Every standard REST endpoint wraps its result in `ApiResponse<T>` (`POST /a2a` returns standard JSON-RPC 2.0 envelopes, while the `cui ... --json` CLI normalizes all direct subcommands and chat turns into `{"ok": true, "data": ...}` or `{"ok": false, "error": "..."}`):
 
 ```json
 {

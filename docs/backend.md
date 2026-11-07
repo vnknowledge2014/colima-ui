@@ -8,9 +8,9 @@ The Rust backend (~42,000 lines across modular layers) is organized into **comma
 src-tauri/src/
 ├── lib.rs                 # App setup, plugin registration, command handler registration
 ├── main.rs                # Entry point (calls lib::run())
-├── api_server.rs          # Axum router + HTTP server startup (~160 HTTP/SSE endpoints on 127.0.0.1:11420–11429)
+├── api_server.rs          # Axum router + HTTP/SSE/UI-Bridge/A2A server startup (127.0.0.1:11420–11429)
 ├── auth.rs                # CSPRNG Bearer token, IPC & 0600 ~/.colima-ui/api_token handoff
-├── mcp.rs                 # Native JSON-RPC 2.0 MCP stdio server (cui mcp / colimaui mcp, 15 typed tools)
+├── mcp.rs                 # Native JSON-RPC 2.0 MCP stdio server (cui mcp / colimaui mcp, 22 typed tools)
 ├── crash.rs               # Redacted panic hook & ~/.colima-ui/crashes crash report store
 ├── sse.rs                 # SSE broadcast, topic subscriber tracking, Docker & instance watchers
 ├── error.rs               # Structured ColimaError classification & remediation hints
@@ -30,9 +30,9 @@ src-tauri/src/
 ├── telemetry/             # Opt-in closed-vocabulary telemetry & consent state
 ├── pro/                   # MIT-side Pro sidecar boundary (mod.rs, bridge.rs, protocol.rs; free by default)
 ├── subscription/          # Local offline entitlement state cache (mod.rs, cache.rs)
-├── bin/                   # Standalone CLIs & MCP servers: cui.rs (headless AI + mcp) & cli.rs (colimaui + mcp)
-├── commands/              # Business logic (54 command modules)
-├── routes/                # HTTP route handlers (27 route modules + telemetry, pro & subscription routes; ~160 endpoints)
+├── bin/                   # Standalone CLIs & MCP servers: cui.rs (v0.3.0 22 subcommands <5ms --json + fallback + mcp) & cli.rs (colimaui alias)
+├── commands/              # Business logic (54+ command modules)
+├── routes/                # HTTP, UI Bridge & Native A2A route handlers (thin delegation to commands/)
 ├── adapters/              # Unified DevOps adapter traits (7 modules)
 └── services/              # High-level orchestration (4 modules)
 ```
@@ -56,7 +56,7 @@ The central business logic layer. Both Tauri IPC and HTTP routes call into these
 | `compose.rs` | 156 | Docker Compose project management |
 | `networks.rs` | 166 | Docker network CRUD + prune |
 | `volumes.rs` | 178 | Docker volume CRUD + prune |
-| `agent_loop.rs` | — | Multi-turn headless AI agent loop reading `app_settings` from `~/.colima-ui/knowledge.db` (`POST /api/cli/chat` & `cui`) |
+| `agent_loop.rs` | — | Multi-turn headless AI & A2A agent loop (`POST /api/cli/chat`, `POST /a2a`, `cui chat`, MCP `colima_ai_ask`); isolates sessions to `colima-a2a-default-session` by default and emits `agent-external-chat-turn` when `mirror_ui` is enabled |
 | `runtime.rs` | 159 | Runtime detection (docker vs nerdctl) |
 | `self_heal.rs` | 1122 | Self-healing rules & kill switch (no route performs a repair) |
 | `colima_config.rs` | 1101 | Read/write Colima instance configuration |
@@ -123,7 +123,7 @@ Thin HTTP handlers that extract request parameters and delegate to `commands/`:
 | `payloads.rs` | 896 | All request/response struct definitions |
 | `system.rs` | 217 | System info, tool checks, install deps, prune |
 | `containers.rs` | 171 | Container CRUD, logs, stats, exec, run |
-| `ai.rs` | 255 | AI chat, CLI chat, tool execution |
+| `ai.rs` | 255+ | AI chat, CLI chat (`colima-a2a-default-session` + `mirror_ui`), `GET /api/ai/reference`, UI Bridge (`GET /api/ui/state`, `POST /api/ui/navigate`), and Native A2A (`GET /.well-known/agent.json`, `POST /a2a`) |
 | `kb.rs` | 184 | Knowledge bank queries, feedback, memory |
 | `images.rs` | 87 | Image CRUD, pull, prune |
 | `lima.rs` | 77 | Lima VM operations |
@@ -194,13 +194,13 @@ Higher-level orchestration (currently lightweight):
 - Delivers credentials via Tauri IPC (`api_token`), atomic `0600` `~/.colima-ui/api_token` + `~/.colima-ui/api_port` files inside `0700` `~/.colima-ui` (`O_NOFOLLOW`, ownership-verified exit cleanup) for `cui` and local host agents, and debug-only `#token=` URL fragments — never via an unauthenticated HTTP route
 
 ### api_server.rs
-- Builds the Axum router (`public_routes` exposing only `GET /api/health` merged with `protected_routes` behind `auth_middleware`)
+- Builds the Axum router (`public_routes` exposing **only** `GET /api/health`, merged with `protected_routes` behind `auth_middleware` — including UI Remote Control `/api/ui/state` & `/api/ui/navigate`, `/api/ai/reference`, and Native A2A `GET /.well-known/agent.json` & `POST /a2a`)
 - Restricts CORS to localhost origins (`1420`, `11420`, `tauri://localhost`)
 - Binds `127.0.0.1:11420` (falling back across `11420–11429`), serves no static frontend (`ServeDir`) in release builds, prints `Browser mode: http://localhost:1420/#token=...` only under `#[cfg(debug_assertions)]`, and terminates tracked `kubectl port-forward` children on shutdown
 
 ### mcp.rs
 - Implements a native JSON-RPC 2.0 Model Context Protocol (MCP) server over `stdin`/`stdout` (`cui mcp` and `colimaui mcp`)
-- Exposes **15 typed MCP tools** (`colima_list_instances`, `colima_instance_action`, `docker_list_containers`, `docker_container_action`, `docker_container_logs`, `docker_list_images`, `docker_pull_image`, `docker_list_volumes`, `docker_list_networks`, `compose_list_projects`, `k8s_list_pods`, `k8s_cluster_status`, `environment_resolutions`, `system_diagnostics`, `colima_ai_ask`)
+- Exposes **22 typed MCP tools**: `colima_list_instances`, `colima_instance_action`, `docker_list_containers`, `docker_container_action`, `docker_container_logs`, `docker_list_images`, `docker_pull_image`, `docker_list_volumes`, `docker_list_networks`, `compose_list_projects`, `k8s_list_pods`, `k8s_cluster_status`, `environment_resolutions`, `system_diagnostics`, `colima_ai_ask` (`session_id` defaulting to `"colima-a2a-default-session"`, `allow_actions`, `mirror_ui`), `security_scan_image`, `compose_diagnose_autofix`, `lima_manage`, `colima_config`, `kb_memories`, `chat_sessions`, and `ui_navigate`
 - Proxies seamlessly to the live Desktop backend via `127.0.0.1:<api_port>` + `~/.colima-ui/api_token` when ColimaUI Desktop is running, and automatically falls back to direct native execution when Desktop is closed
 
 ### crash.rs

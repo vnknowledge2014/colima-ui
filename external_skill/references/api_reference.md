@@ -15,25 +15,30 @@ TOKEN="$(cat ~/.colima-ui/api_token)"
 - **Phân loại xác thực**:
   - **Public (không cần token)**: Duy nhất `GET /api/health`.
   - **SSE Streams (xác thực qua query `?token=<TOKEN>`)**: `GET /api/events` và `GET /api/k8s/pods/logs/stream`.
-  - **Tất cả REST endpoints còn lại**: Bắt buộc có header `Authorization: Bearer <TOKEN>` (kèm `Content-Type: application/json` cho các lệnh `POST` có JSON body).
+  - **Tất cả REST, UI Bridge & Native A2A endpoints còn lại**: Bắt buộc có header `Authorization: Bearer <TOKEN>` (kèm `Content-Type: application/json` cho các lệnh `POST` có JSON body), bao gồm cả `GET /.well-known/agent.json` và `POST /a2a`.
 
 ---
 
-## 1. Health, Capabilities, Entitlement, Telemetry & Realtime SSE
+## 1. Health, Capabilities, UI Remote Control Bridge, Native A2A & Realtime SSE
 - `GET /api/health`: Kiểm tra trạng thái sống của API server (public, không cần token).
 - `GET /api/capabilities`: Lấy schema năng lực và Event Bus (100 sự kiện) dành cho AI Agent / Orchestrator.
+- `GET /api/ui/state`: Đọc trạng thái giao diện trực tiếp (trang hiện hành `page`, `section`, theme, trạng thái kết nối Desktop bridge và tóm tắt tài nguyên).
+- `POST /api/ui/navigate`: Điều khiển chuyển trang từ xa trên Desktop/Browser UI (`{"page": "kubernetes", "section"?: "pods", "toast"?: "..."}`), phát sự kiện `ui-navigate` qua Tauri Events & SSE.
+- `GET /.well-known/agent.json`: Lấy hồ sơ năng lực A2A Agent Card của ColimaUI `v0.3.0` (yêu cầu `Authorization: Bearer <TOKEN>`).
+- `POST /a2a`: Giao thức Native A2A JSON-RPC 2.0 (yêu cầu `Authorization: Bearer <TOKEN>`), hỗ trợ các phương thức chuẩn `message/send`, `tasks/send`, `tasks/get`, `tasks/cancel` (mặc định cô lập vào phiên `colima-a2a-default-session`, hỗ trợ `mirror_ui` và `allow_actions`).
 - `GET /api/announcements`: Lấy thông báo hệ thống mới nhất.
 - `GET /api/telemetry/consent`, `POST /api/telemetry/consent`, `GET /api/telemetry/should-prompt`, `GET /api/telemetry/preview`: Quản lý trạng thái đồng ý (opt-in) và xem trước dữ liệu telemetry ẩn danh.
 - `GET /api/pro/status`: Kiểm tra trạng thái Pro sidecar cục bộ (mặc định `{"state": "free"}` trên bản MIT).
 - `GET /api/subscription`, `POST /api/subscription/store`: Đọc / lưu bộ nhớ đệm quyền sử dụng offline cục bộ.
-- `GET /api/events?token=<TOKEN>&topics=instances-update,docker-state-updated,metrics.sample`: Đăng ký luồng sự kiện thời gian thực (SSE). Tham số `topics` tùy chọn (tối đa 16 topics; các topic chuẩn gồm `docker-state-updated`, `instances-update`, `metrics.sample`, `transfer.progress`, `transfer.done`, `transfer.failed`, `security-scan-progress`, `detonation.event`, `detonation.status`).
+- `GET /api/events?token=<TOKEN>&topics=instances-update,docker-state-updated,metrics.sample`: Đăng ký luồng sự kiện thời gian thực (SSE). Tham số `topics` tùy chọn (tối đa 16 topics; các topic chuẩn gồm `docker-state-updated`, `instances-update`, `metrics.sample`, `transfer.progress`, `transfer.done`, `transfer.failed`, `security-scan-progress`, `detonation.event`, `detonation.status`, `ui-navigate`, `agent-external-chat-turn`).
 
-## 2. AI Chat, Đa hội thoại (Multi-Conversation History) & Settings
-- `POST /api/cli/chat`: Ủy quyền tác vụ cho vòng lặp Headless AI Agent đa bước. Body: `{"prompt": "...", "provider": "...", "model": "...", "allow_mutations": false}` → trả về `{"result": "..."}`.
+## 2. AI Chat, Đa hội thoại (Multi-Conversation History), A2A Isolation & Settings
+- `POST /api/cli/chat`: Ủy quyền tác vụ cho vòng lặp Headless AI Agent đa bước. Body: `{"prompt": "...", "session_id": "colima-a2a-default-session", "provider"?: "...", "model"?: "...", "allow_mutations": false, "mirror_ui": false}` → trả về `{"result": "...", "session_id": "..."}`. Mặc định cô lập vào `colima-a2a-default-session`; khi `"mirror_ui": true`, lượt hội thoại được phát qua sự kiện `agent-external-chat-turn` lên `AiChatPanel`.
 - `POST /api/ai/chat`: Gửi hội thoại trực tiếp tới LLM đang cấu hình (`provider`, `model`, `api_key`, `endpoint`, `messages`).
 - `POST /api/ai/models`: Liệt kê danh sách model khả dụng từ provider.
 - `POST /api/ai/search`, `POST /api/ai/fetch-page`: Tìm kiếm tài liệu web (SearXNG) và trích xuất trang thành Markdown.
 - `GET /api/ai/context`: Đọc ngữ cảnh hệ thống (`system_prompt.md`, `router.md`, core skill & plugins).
+- `GET /api/ai/reference`: Đọc tài liệu kỹ năng/tham chiếu nội bộ trong `resources/` (`?path=skills/docker/SKILL.md`, bảo vệ chống path traversal tương đương `GET /api/system/reference`).
 - `GET /api/ai/conversations`: Lấy danh sách các cuộc hội thoại AI.
 - `POST /api/ai/conversations`: Tạo cuộc hội thoại mới (`{"id": "...", "title": "..."}`).
 - `POST /api/ai/conversations/rename`: Đổi tên cuộc hội thoại (`{"id": "...", "title": "..."}`).

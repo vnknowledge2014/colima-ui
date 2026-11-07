@@ -51,7 +51,7 @@ src/
 
 | Component | Purpose |
 |-----------|---------|
-| `AiChatPanel.svelte` | Command Center AI panel: multi-thread chat, live context toggle, 1-touch error diagnostic banner, schedule timers |
+| `AiChatPanel.svelte` | Command Center AI panel: multi-thread personal chat, Live UI Bridge (`agent-external-chat-turn` live mirroring for `--mirror-ui` turns while keeping `colima-a2a-default-session` isolated), live context toggle, 1-touch error diagnostic banner, schedule timers |
 | `ai/AiMessageBody.svelte` | Streaming `<think>` disclosure, GFM tables, and XSS-safe Markdown AST renderer |
 | `ai/CodeBlock.svelte` | Code block viewer with Copy, Insert-to-chat, and safe paste-without-Enter Terminal handoff |
 | `ai/ToolStepCard.svelte` | Unified in-place card for queries, approvals (`SAFE`/`NORMAL`/`DANGEROUS`), sandbox commands, diagnostics & security tasks |
@@ -89,7 +89,7 @@ export const uiState = $state({ currentPage: 'dashboard' as Page, theme: 'dark',
 
 | Store | Contents |
 |-------|----------|
-| `ai.svelte.ts` | Multi-conversation threads, chat messages, provider config (`6` modes), model selection, agent state |
+| `ai.svelte.ts` | Personal multi-conversation threads (isolating background `colima-a2a-default-session` turns unless `--mirror-ui` is enabled), chat messages, provider config (`6` modes), model selection, agent state |
 | `k8s.svelte.ts` | Namespaces, pods, deployments, services, CRDs, selected context |
 | `confirm.svelte.ts` | Confirmation dialog visibility and callbacks |
 | `capabilities.svelte.ts` | Host external tool capability probes (`colima`, `docker`, `kubectl`, `trivy`, etc.) and `install_hint` cache |
@@ -145,6 +145,16 @@ listen('docker-state-updated', (event) => {
 listen('instances-update', (event) => {
   dashboardState.colimaInstances = event.payload;
 });
+
+// v0.3.0 Live UI Bridge: remote page/section navigation (`cui ui navigate`, MCP `ui_navigate`, POST /api/ui/navigate)
+listen('ui-navigate', (event) => {
+  uiState.currentPage = event.payload.page;
+});
+
+// v0.3.0 Live UI Bridge: opt-in `--mirror-ui` external CLI / MCP / A2A chat turn mirroring
+listen('agent-external-chat-turn', (event) => {
+  // Appends mirrored external turn into AiChatPanel when mirror_ui is true
+});
 ```
 
 ### Browser Mode (SSE)
@@ -162,6 +172,12 @@ es.addEventListener('docker-state-updated', (e) => {
 es.addEventListener('instances-update', (e) => {
   const data = JSON.parse(e.data);
   dashboardState.colimaInstances = data.instances ?? data;
+});
+
+// Live UI Bridge events (`ui-navigate` and `agent-external-chat-turn`) also fan out over `/api/events`
+es.addEventListener('ui-navigate', (e) => {
+  const data = JSON.parse(e.data);
+  uiState.currentPage = data.page;
 });
 ```
 

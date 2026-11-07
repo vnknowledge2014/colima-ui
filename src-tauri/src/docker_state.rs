@@ -14,6 +14,11 @@ pub fn init_global_docker_state(state: Arc<RwLock<DockerState>>, app: AppHandle)
     let _ = GLOBAL_APP_HANDLE.set(app);
 }
 
+/// Access the Desktop `AppHandle` when running inside the Tauri application.
+pub fn global_app_handle() -> Option<&'static AppHandle> {
+    GLOBAL_APP_HANDLE.get()
+}
+
 /// Centralized lifecycle helper called when an instance is stopping or being deleted.
 /// Suppresses watcher reconnection, clears Docker caches, invalidates socket probe cache,
 /// and broadcasts connection-lost and empty state events over both SSE and Tauri IPC.

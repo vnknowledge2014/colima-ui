@@ -11,6 +11,22 @@ export interface AiMessage {
 /** Matches `DEFAULT_CONVERSATION_ID` in `ai_chat.rs`. */
 export const DEFAULT_CONVERSATION_ID = "default";
 
+/** Dedicated isolated conversation ID for automated external CLI / MCP / A2A turns. */
+export const A2A_DEFAULT_SESSION_ID = "colima-a2a-default-session";
+
+/**
+ * Normalize a candidate conversation ID so transient A2A sessions can never
+ * hijack `aiState.activeConversationId` or persist into `ai_active_conversation`.
+ */
+function sanitizeConversationId(id: string | null | undefined): string {
+  if (!id) return DEFAULT_CONVERSATION_ID;
+  const trimmed = id.trim();
+  if (!trimmed || trimmed === A2A_DEFAULT_SESSION_ID) {
+    return DEFAULT_CONVERSATION_ID;
+  }
+  return trimmed;
+}
+
 export const aiState = $state({
   messages: [] as AiMessage[],
   conversations: [] as AiConversation[],
@@ -22,7 +38,10 @@ export const aiState = $state({
 
 export async function refreshConversations() {
   try {
-    aiState.conversations = (await aiApi.listConversations()) ?? [];
+    const list = (await aiApi.listConversations()) ?? [];
+    aiState.conversations = list.filter(
+      (c) => c.id.trim() !== A2A_DEFAULT_SESSION_ID,
+    );
   } catch (e) {
     console.error("Failed to list AI conversations:", e);
   }
@@ -33,7 +52,8 @@ export async function refreshConversations() {
  * the app lands back where the conversation left off rather than in `default`.
  */
 export async function initAiHistory() {
-  const saved = getAppSetting("ai_active_conversation", DEFAULT_CONVERSATION_ID);
+  const rawSaved = getAppSetting("ai_active_conversation", DEFAULT_CONVERSATION_ID);
+  const saved = sanitizeConversationId(rawSaved);
   await refreshConversations();
   const exists = aiState.conversations.some((c) => c.id === saved);
   const targetId = exists ? saved : DEFAULT_CONVERSATION_ID;
@@ -58,10 +78,11 @@ export async function initAiHistory() {
 }
 
 export async function switchConversation(id: string) {
-  aiState.activeConversationId = id;
-  setAppSetting("ai_active_conversation", id);
+  const targetId = sanitizeConversationId(id);
+  aiState.activeConversationId = targetId;
+  setAppSetting("ai_active_conversation", targetId);
   try {
-    const history = await aiApi.loadHistory(id);
+    const history = await aiApi.loadHistory(targetId);
     // Empty rows carry no conversation and render as a bare "Colima AI" label.
     // Threads saved before assistant turns were persisted correctly are full of
     // them, so they are dropped on the way in rather than left to accumulate on

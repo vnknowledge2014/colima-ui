@@ -39,6 +39,78 @@ pub struct AiConversation {
 /// bucket pre-thread history is migrated into, so it must always exist.
 pub const DEFAULT_CONVERSATION_ID: &str = "default";
 
+/// Dedicated isolated conversation ID for automated external CLI / MCP / A2A turns.
+pub const A2A_DEFAULT_CONVERSATION_ID: &str = "colima-a2a-default-session";
+
+/// Idempotently initialize `knowledge_bank::init_knowledge_bank()` at most once
+/// per process without panicking if it was already initialized elsewhere.
+pub fn ensure_knowledge_bank_initialized() -> Option<&'static std::sync::Mutex<rusqlite::Connection>>
+{
+    use std::sync::atomic::{AtomicBool, Ordering};
+    static KB_INIT_ONCE: std::sync::Once = std::sync::Once::new();
+    static KB_READY: AtomicBool = AtomicBool::new(false);
+
+    if KB_READY.load(Ordering::Acquire) {
+        return Some(crate::commands::knowledge_bank::get_db());
+    }
+
+    KB_INIT_ONCE.call_once(|| {
+        if std::panic::catch_unwind(crate::commands::knowledge_bank::init_knowledge_bank).is_ok()
+            || std::panic::catch_unwind(crate::commands::knowledge_bank::get_db).is_ok()
+        {
+            KB_READY.store(true, Ordering::Release);
+        }
+    });
+
+    if KB_READY.load(Ordering::Acquire) {
+        Some(crate::commands::knowledge_bank::get_db())
+    } else {
+        std::panic::catch_unwind(crate::commands::knowledge_bank::get_db).ok()
+    }
+}
+
+fn ensure_chat_schema(conn: &rusqlite::Connection) -> Result<(), String> {
+    conn.execute_batch(
+        "
+        CREATE TABLE IF NOT EXISTS chat_conversations (
+            id TEXT PRIMARY KEY,
+            title TEXT NOT NULL DEFAULT '',
+            created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
+            updated_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now'))
+        );
+
+        CREATE TABLE IF NOT EXISTS chat_messages (
+            id TEXT PRIMARY KEY,
+            role TEXT NOT NULL,
+            content TEXT NOT NULL,
+            created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
+            conversation_id TEXT NOT NULL DEFAULT 'default'
+        );
+        ",
+    )
+    .map_err(|e| e.to_string())
+}
+
+/// Run a closure against the Knowledge Bank SQLite connection, initializing it
+/// on demand or falling back to a direct connection to `~/.colima-ui/knowledge.db`
+/// so standalone `cui` invocations never panic.
+fn with_chat_db<T, F>(f: F) -> Result<T, String>
+where
+    F: FnOnce(&rusqlite::Connection) -> Result<T, String>,
+{
+    if let Some(db_mutex) = ensure_knowledge_bank_initialized() {
+        let conn = db_mutex.lock().unwrap_or_else(|e| e.into_inner());
+        return f(&conn);
+    }
+
+    let dir = crate::path_util::app_data_dir();
+    let _ = std::fs::create_dir_all(&dir);
+    let db_path = dir.join("knowledge.db");
+    let conn = rusqlite::Connection::open(&db_path).map_err(|e| e.to_string())?;
+    ensure_chat_schema(&conn)?;
+    f(&conn)
+}
+
 /// Create the row on demand. Messages carry a `conversation_id` the panel picks
 /// before the thread has ever been named, so an insert must never fail on a
 /// missing parent.
@@ -51,95 +123,136 @@ fn ensure_conversation(conn: &rusqlite::Connection, id: &str) -> Result<(), Stri
     Ok(())
 }
 
-#[tauri::command]
-pub async fn ai_chat_list_conversations() -> Result<Vec<AiConversation>, crate::error::ColimaError> {
-    async move {
-    let conn = crate::commands::knowledge_bank::get_db().lock().unwrap();
-    ensure_conversation(&conn, DEFAULT_CONVERSATION_ID)?;
+fn list_conversations_on_conn(
+    conn: &rusqlite::Connection,
+    include_a2a: bool,
+) -> Result<Vec<AiConversation>, String> {
+    ensure_conversation(conn, DEFAULT_CONVERSATION_ID)?;
 
-    let mut stmt = conn
-        .prepare(
-            "SELECT c.id,
-                    c.title,
-                    c.updated_at,
-                    (SELECT COUNT(*) FROM chat_messages m WHERE m.conversation_id = c.id),
-                    COALESCE((SELECT m.content FROM chat_messages m
-                              WHERE m.conversation_id = c.id AND m.role = 'user'
-                              ORDER BY m.created_at ASC, m.rowid ASC LIMIT 1), '')
-             FROM chat_conversations c
-             ORDER BY c.updated_at DESC",
-        )
-        .map_err(|e| e.to_string())?;
+    let sql = if include_a2a {
+        "SELECT c.id,
+                c.title,
+                c.updated_at,
+                (SELECT COUNT(*) FROM chat_messages m WHERE m.conversation_id = c.id),
+                COALESCE((SELECT m.content FROM chat_messages m
+                          WHERE m.conversation_id = c.id AND m.role = 'user'
+                          ORDER BY m.created_at ASC, m.rowid ASC LIMIT 1), '')
+         FROM chat_conversations c
+         ORDER BY c.updated_at DESC"
+    } else {
+        "SELECT c.id,
+                c.title,
+                c.updated_at,
+                (SELECT COUNT(*) FROM chat_messages m WHERE m.conversation_id = c.id),
+                COALESCE((SELECT m.content FROM chat_messages m
+                          WHERE m.conversation_id = c.id AND m.role = 'user'
+                          ORDER BY m.created_at ASC, m.rowid ASC LIMIT 1), '')
+         FROM chat_conversations c
+         WHERE c.id != ?1
+         ORDER BY c.updated_at DESC"
+    };
 
-    let conversations = stmt
-        .query_map([], |row| {
-            let preview: String = row.get(4)?;
-            Ok(AiConversation {
-                id: row.get(0)?,
-                title: row.get(1)?,
-                updated_at: row.get(2)?,
-                message_count: row.get(3)?,
-                preview: preview.chars().take(120).collect(),
-            })
+    let mut stmt = conn.prepare(sql).map_err(|e| e.to_string())?;
+    let map_row = |row: &rusqlite::Row<'_>| -> rusqlite::Result<AiConversation> {
+        let preview: String = row.get(4)?;
+        Ok(AiConversation {
+            id: row.get(0)?,
+            title: row.get(1)?,
+            updated_at: row.get(2)?,
+            message_count: row.get(3)?,
+            preview: preview.chars().take(120).collect(),
         })
-        .map_err(|e| e.to_string())?
-        .filter_map(Result::ok)
-        .collect();
+    };
+
+    let conversations: Vec<AiConversation> = if include_a2a {
+        stmt.query_map([], map_row)
+            .map_err(|e| e.to_string())?
+            .filter_map(Result::ok)
+            .collect()
+    } else {
+        stmt.query_map(rusqlite::params![A2A_DEFAULT_CONVERSATION_ID], map_row)
+            .map_err(|e| e.to_string())?
+            .filter_map(Result::ok)
+            .collect()
+    };
 
     Ok(conversations)
-    }
-    .await.map_err(|e: String| crate::error::ColimaError::from(e))
+}
+
+pub async fn ai_chat_list_conversations_filtered(
+    include_a2a: bool,
+) -> Result<Vec<AiConversation>, crate::error::ColimaError> {
+    async move { with_chat_db(|conn| list_conversations_on_conn(conn, include_a2a)) }
+        .await
+        .map_err(crate::error::ColimaError::from)
 }
 
 #[tauri::command]
-pub async fn ai_chat_create_conversation(id: String, title: String) -> Result<(), crate::error::ColimaError> {
-    async move {
-    let conn = crate::commands::knowledge_bank::get_db().lock().unwrap();
-    conn.execute(
-        "INSERT OR IGNORE INTO chat_conversations (id, title) VALUES (?1, ?2)",
-        rusqlite::params![id, title],
-    )
-    .map_err(|e| e.to_string())?;
-    Ok(())
-    }
-    .await.map_err(|e: String| crate::error::ColimaError::from(e))
+pub async fn ai_chat_list_conversations() -> Result<Vec<AiConversation>, crate::error::ColimaError> {
+    ai_chat_list_conversations_filtered(false).await
 }
 
 #[tauri::command]
-pub async fn ai_chat_rename_conversation(id: String, title: String) -> Result<(), crate::error::ColimaError> {
+pub async fn ai_chat_create_conversation(
+    id: String,
+    title: String,
+) -> Result<(), crate::error::ColimaError> {
     async move {
-    let conn = crate::commands::knowledge_bank::get_db().lock().unwrap();
-    conn.execute(
-        "UPDATE chat_conversations SET title = ?2 WHERE id = ?1",
-        rusqlite::params![id, title],
-    )
-    .map_err(|e| e.to_string())?;
-    Ok(())
+        with_chat_db(|conn| {
+            conn.execute(
+                "INSERT OR IGNORE INTO chat_conversations (id, title) VALUES (?1, ?2)",
+                rusqlite::params![id, title],
+            )
+            .map_err(|e| e.to_string())?;
+            Ok(())
+        })
     }
-    .await.map_err(|e: String| crate::error::ColimaError::from(e))
+    .await
+    .map_err(crate::error::ColimaError::from)
+}
+
+#[tauri::command]
+pub async fn ai_chat_rename_conversation(
+    id: String,
+    title: String,
+) -> Result<(), crate::error::ColimaError> {
+    async move {
+        with_chat_db(|conn| {
+            conn.execute(
+                "UPDATE chat_conversations SET title = ?2 WHERE id = ?1",
+                rusqlite::params![id, title],
+            )
+            .map_err(|e| e.to_string())?;
+            Ok(())
+        })
+    }
+    .await
+    .map_err(crate::error::ColimaError::from)
 }
 
 #[tauri::command]
 pub async fn ai_chat_delete_conversation(id: String) -> Result<(), crate::error::ColimaError> {
     async move {
-    let conn = crate::commands::knowledge_bank::get_db().lock().unwrap();
-    conn.execute(
-        "DELETE FROM chat_messages WHERE conversation_id = ?1",
-        rusqlite::params![id],
-    )
-    .map_err(|e| e.to_string())?;
-    // The default thread is the landing spot for every new message, so it is
-    // emptied rather than removed.
-    if id != DEFAULT_CONVERSATION_ID {
-        conn.execute(
-            "DELETE FROM chat_conversations WHERE id = ?1",
-            rusqlite::params![id],
-        )
-        .map_err(|e| e.to_string())?;
+        with_chat_db(|conn| {
+            conn.execute(
+                "DELETE FROM chat_messages WHERE conversation_id = ?1",
+                rusqlite::params![id],
+            )
+            .map_err(|e| e.to_string())?;
+            // The default thread is the landing spot for every new message, so it is
+            // emptied rather than removed.
+            if id != DEFAULT_CONVERSATION_ID {
+                conn.execute(
+                    "DELETE FROM chat_conversations WHERE id = ?1",
+                    rusqlite::params![id],
+                )
+                .map_err(|e| e.to_string())?;
+            }
+            Ok(())
+        })
     }
-    Ok(())
-    }
-    .await.map_err(|e: String| crate::error::ColimaError::from(e))
+    .await
+    .map_err(crate::error::ColimaError::from)
 }
 
 #[tauri::command]
@@ -147,30 +260,32 @@ pub async fn ai_chat_load_history(
     conversation_id: Option<String>,
 ) -> Result<Vec<AiChatHistoryMessage>, crate::error::ColimaError> {
     async move {
-    let conversation_id = conversation_id.unwrap_or_else(|| DEFAULT_CONVERSATION_ID.to_string());
-    let conn = crate::commands::knowledge_bank::get_db().lock().unwrap();
-    let mut stmt = conn
-        .prepare(
-            "SELECT id, role, content FROM chat_messages
-             WHERE conversation_id = ?1 ORDER BY created_at ASC, rowid ASC",
-        )
-        .map_err(|e| e.to_string())?;
+        let conversation_id = conversation_id.unwrap_or_else(|| DEFAULT_CONVERSATION_ID.to_string());
+        with_chat_db(|conn| {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT id, role, content FROM chat_messages
+                     WHERE conversation_id = ?1 ORDER BY created_at ASC, rowid ASC",
+                )
+                .map_err(|e| e.to_string())?;
 
-    let messages = stmt
-        .query_map(rusqlite::params![conversation_id], |row| {
-            Ok(AiChatHistoryMessage {
-                id: row.get(0)?,
-                role: row.get(1)?,
-                content: row.get(2)?,
-            })
+            let messages = stmt
+                .query_map(rusqlite::params![conversation_id], |row| {
+                    Ok(AiChatHistoryMessage {
+                        id: row.get(0)?,
+                        role: row.get(1)?,
+                        content: row.get(2)?,
+                    })
+                })
+                .map_err(|e| e.to_string())?
+                .filter_map(Result::ok)
+                .collect();
+
+            Ok(messages)
         })
-        .map_err(|e| e.to_string())?
-        .filter_map(Result::ok)
-        .collect();
-
-    Ok(messages)
     }
-    .await.map_err(|e: String| crate::error::ColimaError::from(e))
+    .await
+    .map_err(crate::error::ColimaError::from)
 }
 
 #[tauri::command]
@@ -179,24 +294,26 @@ pub async fn ai_chat_save_message(
     conversation_id: Option<String>,
 ) -> Result<(), crate::error::ColimaError> {
     async move {
-    let conversation_id = conversation_id.unwrap_or_else(|| DEFAULT_CONVERSATION_ID.to_string());
-    let conn = crate::commands::knowledge_bank::get_db().lock().unwrap();
-    ensure_conversation(&conn, &conversation_id)?;
-    conn.execute(
-        "INSERT INTO chat_messages (id, role, content, conversation_id) VALUES (?1, ?2, ?3, ?4)
-         ON CONFLICT(id) DO UPDATE SET content = excluded.content",
-        rusqlite::params![message.id, message.role, message.content, conversation_id],
-    )
-    .map_err(|e| e.to_string())?;
-    // Drives the ordering of the conversation list.
-    conn.execute(
-        "UPDATE chat_conversations SET updated_at = strftime('%s', 'now') WHERE id = ?1",
-        rusqlite::params![conversation_id],
-    )
-    .map_err(|e| e.to_string())?;
-    Ok(())
+        let conversation_id = conversation_id.unwrap_or_else(|| DEFAULT_CONVERSATION_ID.to_string());
+        with_chat_db(|conn| {
+            ensure_conversation(conn, &conversation_id)?;
+            conn.execute(
+                "INSERT INTO chat_messages (id, role, content, conversation_id) VALUES (?1, ?2, ?3, ?4)
+                 ON CONFLICT(id) DO UPDATE SET content = excluded.content",
+                rusqlite::params![message.id, message.role, message.content, conversation_id],
+            )
+            .map_err(|e| e.to_string())?;
+            // Drives the ordering of the conversation list.
+            conn.execute(
+                "UPDATE chat_conversations SET updated_at = strftime('%s', 'now') WHERE id = ?1",
+                rusqlite::params![conversation_id],
+            )
+            .map_err(|e| e.to_string())?;
+            Ok(())
+        })
     }
-    .await.map_err(|e: String| crate::error::ColimaError::from(e))
+    .await
+    .map_err(crate::error::ColimaError::from)
 }
 
 #[tauri::command]
@@ -204,16 +321,18 @@ pub async fn ai_chat_clear_history(
     conversation_id: Option<String>,
 ) -> Result<(), crate::error::ColimaError> {
     async move {
-    let conversation_id = conversation_id.unwrap_or_else(|| DEFAULT_CONVERSATION_ID.to_string());
-    let conn = crate::commands::knowledge_bank::get_db().lock().unwrap();
-    conn.execute(
-        "DELETE FROM chat_messages WHERE conversation_id = ?1",
-        rusqlite::params![conversation_id],
-    )
-    .map_err(|e| e.to_string())?;
-    Ok(())
+        let conversation_id = conversation_id.unwrap_or_else(|| DEFAULT_CONVERSATION_ID.to_string());
+        with_chat_db(|conn| {
+            conn.execute(
+                "DELETE FROM chat_messages WHERE conversation_id = ?1",
+                rusqlite::params![conversation_id],
+            )
+            .map_err(|e| e.to_string())?;
+            Ok(())
+        })
     }
-    .await.map_err(|e: String| crate::error::ColimaError::from(e))
+    .await
+    .map_err(crate::error::ColimaError::from)
 }
 
 /// Shared HTTP client — connection pooling across requests
@@ -946,5 +1065,46 @@ mod tests {
             );
         }
         let _ = server.await;
+    }
+
+    #[test]
+    fn a2a_default_session_is_hidden_from_personal_conversations_unless_requested() {
+        let conn = rusqlite::Connection::open_in_memory().expect("in-memory sqlite");
+        super::ensure_chat_schema(&conn).expect("chat schema");
+
+        conn.execute(
+            "INSERT INTO chat_conversations (id, title) VALUES (?1, ?2)",
+            rusqlite::params![super::A2A_DEFAULT_CONVERSATION_ID, "External A2A"],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO chat_messages (id, role, content, conversation_id) VALUES (?1, 'user', 'automated check', ?2)",
+            rusqlite::params!["m-a2a-1", super::A2A_DEFAULT_CONVERSATION_ID],
+        )
+        .unwrap();
+
+        conn.execute(
+            "INSERT INTO chat_conversations (id, title) VALUES ('personal-1', 'My Thread')",
+            [],
+        )
+        .unwrap();
+
+        let personal_only = super::list_conversations_on_conn(&conn, false).unwrap();
+        assert!(
+            personal_only
+                .iter()
+                .all(|c| c.id != super::A2A_DEFAULT_CONVERSATION_ID),
+            "A2A default session must never appear in personal list"
+        );
+        assert!(personal_only.iter().any(|c| c.id == "personal-1"));
+        assert!(personal_only.iter().any(|c| c.id == super::DEFAULT_CONVERSATION_ID));
+
+        let with_a2a = super::list_conversations_on_conn(&conn, true).unwrap();
+        assert!(
+            with_a2a
+                .iter()
+                .any(|c| c.id == super::A2A_DEFAULT_CONVERSATION_ID),
+            "include_a2a=true must include A2A default session"
+        );
     }
 }

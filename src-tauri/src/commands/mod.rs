@@ -15,6 +15,7 @@ pub mod compose_services;
 pub mod containers;
 pub mod diagnostics;
 pub mod dockerfile_parse;
+pub mod embedded_resources;
 pub mod engine_resources;
 pub mod file_transfer;
 pub mod k8s_cluster;

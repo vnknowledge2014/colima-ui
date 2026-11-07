@@ -128,6 +128,15 @@ pub fn publish_sse_event(event_type: &str, data: &serde_json::Value) {
     });
 }
 
+/// Emit an event to both the Desktop Tauri webview (when `AppHandle` is present)
+/// and all connected SSE clients.
+pub fn emit_all(event_type: &str, data: &serde_json::Value) {
+    if let Some(app) = crate::docker_state::global_app_handle() {
+        let _ = tauri::Emitter::emit(app, event_type, data);
+    }
+    publish_sse_event(event_type, data);
+}
+
 // ===== Background Watchers =====
 
 /// Push Docker state to SSE clients whenever it changes.

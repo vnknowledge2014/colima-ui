@@ -7,6 +7,7 @@
   import { startTransferNotifications } from "./lib/transferNotifications";
   import { startAnnouncements } from "./lib/announcements";
   import { startAlertNotifications } from "./lib/alertNotifications";
+  import { startUiBridge } from "./lib/uiBridge";
   import * as Icons from "./components/Icons.svelte";
 
   import Dashboard from "./pages/Dashboard.svelte";
@@ -66,6 +67,7 @@
   let cleanupPoller: (() => void) | null = null;
   let cleanupTransfers: (() => void) | null = null;
   let cleanupAlerts: (() => void) | null = null;
+  let cleanupUiBridge: (() => void) | null = null;
   /**
    * Starts out as a "do not start" switch and becomes the real teardown once
    * polling begins — the start happens after several awaits, so a teardown that
@@ -124,6 +126,9 @@
     // Alerts are worth knowing about whether or not the Activity page is open,
     // so this subscribes at app level like transfers do.
     cleanupAlerts = startAlertNotifications();
+    // Remote UI navigation + external chat turn bridge (`ui-navigate` &
+    // `agent-external-chat-turn`), active whether AiChatPanel is open or hidden.
+    cleanupUiBridge = startUiBridge();
 
     (async () => {
       await loadAllSettings();
@@ -140,6 +145,7 @@
     if (cleanupPoller) cleanupPoller();
     if (cleanupTransfers) cleanupTransfers();
     if (cleanupAlerts) cleanupAlerts();
+    if (cleanupUiBridge) cleanupUiBridge();
     if (cleanupAnnouncements) cleanupAnnouncements();
   });
 </script>
