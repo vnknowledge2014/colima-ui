@@ -31,6 +31,29 @@ export function sessionLabel(k: SessionKind): string {
   }
 }
 
+/** Max age (ms) after session creation to treat 126/127 as a missing `/bin/sh`. */
+export const SHELL_MISSING_WINDOW_MS = 3000;
+
+/** Compare two session targets for tab deduplication. */
+export function isSameSessionTarget(a: SessionKind, b: SessionKind): boolean {
+  if (a.kind !== b.kind) return false;
+  switch (a.kind) {
+    case "colima":
+      return b.kind === "colima" && a.profile === b.profile;
+    case "lima":
+      return b.kind === "lima" && a.instance === b.instance;
+    case "dockerExec":
+      return b.kind === "dockerExec" && a.container === b.container;
+    case "k8sExec":
+      return (
+        b.kind === "k8sExec" &&
+        a.namespace === b.namespace &&
+        a.pod === b.pod &&
+        a.container === b.container
+      );
+  }
+}
+
 /**
  * Explain an exit code when the raw one is useless on its own.
  *
@@ -40,10 +63,21 @@ export function sessionLabel(k: SessionKind): string {
  * their binary. No argv fixes that, so the honest response is to say so and
  * point at what does work.
  *
+ * Only shown when the exit occurs within `SHELL_MISSING_WINDOW_MS` of session
+ * creation (`openedAt`) so normal shell exits after running an unknown command
+ * do not trigger a false distroless warning.
+ *
  * Returns null when the code speaks for itself.
  */
-export function exitHint(kind: SessionKind, code: number): string | null {
-  if (kind.kind === "k8sExec" && code === 127) {
+export function exitHint(
+  kind: SessionKind,
+  code: number,
+  openedAt?: number,
+): string | null {
+  if (openedAt !== undefined && Date.now() - openedAt > SHELL_MISSING_WINDOW_MS) {
+    return null;
+  }
+  if (kind.kind === "k8sExec" && (code === 126 || code === 127)) {
     return (
       "This image has no shell, so there is nothing to attach to. " +
       "Images built FROM scratch or on a distroless base ship only their " +

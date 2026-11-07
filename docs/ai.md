@@ -18,10 +18,10 @@ graph TD
     end
 
     PANEL --> CORE["agentCore.ts (5-round orchestrator)"]
-    CORE --> STREAM["llmProviders.ts / ai_chat.rs (9 providers)"]
+    CORE --> STREAM["llmProviders.ts / ai_chat.rs (6 provider modes)"]
     STREAM --> PARSER["aiToolParser.ts (bracket-balanced parser)"]
 
-    PARSER --> BUS["aiEventBus.ts (92+ SAFE / NORMAL / DANGEROUS events)"]
+    PARSER --> BUS["aiEventBus.ts (100 SAFE / NORMAL / DANGEROUS events)"]
     PARSER --> SANDBOX["shell_sandbox.rs (Safe / NeedsApproval / Banned)"]
     PARSER --> REF["read_reference_from_dir (canonical path guard)"]
     PARSER --> CHOICE
@@ -29,25 +29,40 @@ graph TD
     CORE --> STEP
     PANEL --> BODY
 
-    subgraph Backend["Rust Backend & Storage"]
+    subgraph Backend["Rust Backend, Headless CLI & MCP"]
         KB["knowledge_bank.rs (~/.colima-ui/knowledge.db)"]
         CLI["agent_loop.rs (POST /api/cli/chat & cui CLI)"]
+        MCP["mcp.rs (cui mcp / colimaui mcp — 15 MCP tools)"]
     end
 
     CORE --> KB
     CLI --> KB
+    MCP --> CLI
 ```
 
 ### Core Layers
 
 1. **Frontend Orchestrator (`src/lib/agentCore.ts`)** — Drives up to 5 reasoning rounds (`MAX_SEARCH_ROUNDS = 5`), injects Knowledge Bank matches and FTS5 memories, deduplicates repeated read-only tool calls across rounds (`normalizeToolCallKey`), and coordinates user approval promises without blocking panel minimize/restore.
 2. **Bracket-Balanced Tag Parser (`src/lib/aiToolParser.ts`)** — Extracts `[TAG: payload]` and `[TAG: arg1 | arg2]` directives with full JSON string, escape, brace `{...}`, and bracket `[...]` depth tracking rather than fragile regexes or XML tags.
-3. **App Event Bus (`src/lib/aiEventBus.ts` & `src/lib/aiEvents/`)** — Wraps **92 cataloged operations** (across `docker`, `colima`, `k8s`, `lima`, `compose`, `volumes`, `system`, and `config` modules) classified into three safety tiers:
-   - `SAFE`: Read-only queries executed automatically via `[QUERY: ...]`.
+3. **App Event Bus (`src/lib/aiEventBus.ts` & `src/lib/aiEvents/`)** — Wraps **100 cataloged operations** (across `docker`, `colima`, `k8s`, `lima`, `compose`, `volumes`, `system`, `config`, and `shell` modules) plus navigation across all **17 UI pages** (`dashboard`, `instances`, `environment`, `containers`, `images`, `volumes`, `networks`, `compose`, `topology`, `activity`, `security`, `kubernetes`, `linux-vms`, `models`, `terminal`, `settings`, `help`), classified into three safety tiers:
+   - `SAFE`: Read-only queries and UI navigation executed automatically via `[QUERY: ...]` / `[NAVIGATE: ...]`.
    - `NORMAL`: State mutations gated behind `[EVENT_APPROVE: ...]` user confirmation.
    - `DANGEROUS`: Destructive or irreversible actions rendered with an explicit warning banner before approval.
-4. **Multi-Provider Streaming Client (`src/lib/llmProviders.ts`, `src/lib/aiProviderConfig.ts`, `src-tauri/src/commands/ai_chat.rs`)** — Supports **9 provider ecosystems** (**Ollama**, **OpenAI**, **Anthropic**, **Google Gemini**, **OpenRouter**, **Groq**, **Together**, **Mistral**, and **DeepSeek**) across native Anthropic `/v1/messages`, OpenAI & OpenAI-compatible `/v1/chat/completions` gateways (with presets for LiteLLM, 9router, OpenRouter, Groq, vLLM/LM Studio), Gemini `:streamGenerateContent?alt=sse` (sending `x-goog-api-key` in headers, never URL query strings), and Ollama Local/Cloud `/api/chat`. Streaming chunks normalize native `thinking` / `reasoning_content` fields and inline tags into unified multi-packet `<think>...</think>` blocks, while `redact()` scrubs credentials from any surfaced HTTP error.
-5. **Headless CLI Agent (`src-tauri/src/commands/agent_loop.rs` & `src-tauri/src/bin/cui.rs`)** — Exposes `POST /api/cli/chat` for the `cui` terminal client and external host orchestrators using `~/.colima-ui/api_token`.
+4. **Multi-Provider Streaming Client (`src/lib/llmProviders.ts`, `src/lib/aiProviderConfig.ts`, `src-tauri/src/commands/ai_chat.rs`)** — Uses **6 built-in provider modes** covering Anthropic, OpenAI, Gemini, local/remote Ollama, and any OpenAI-compatible gateway:
+   - `anthropic` — Native Anthropic `/v1/messages` (Claude)
+   - `openai` — OpenAI `/v1/chat/completions`
+   - `gemini` — Google Gemini `:streamGenerateContent?alt=sse` (sending `x-goog-api-key` in HTTP headers, never URL query strings)
+   - `openai-compatible` — Any OpenAI-compatible `/v1/chat/completions` gateway or provider (OpenRouter, Groq, DeepSeek, Mistral, Together AI, LiteLLM, 9router, vLLM, LM Studio) configured via `ai_endpoint` + `ai_api_key`
+   - `ollama-local` — Local Ollama daemon at `http://localhost:11434` (`/api/chat`)
+   - `ollama-cloud` — Remote Ollama host or Ollama Cloud configured via `ai_endpoint` (+ optional `ai_api_key`)
+
+   Streaming chunks normalize native `thinking` / `reasoning_content` fields and inline tags into unified multi-packet `<think>...</think>` blocks, while `redact()` scrubs credentials from any surfaced HTTP error.
+5. **Headless CLI Agent & Native MCP Server (`src-tauri/src/commands/agent_loop.rs`, `src-tauri/src/mcp.rs`, `src-tauri/src/bin/cui.rs`)**:
+   - **`cui` Headless AI CLI & `POST /api/cli/chat`**: Real multi-turn LLM agent reading `app_settings` from `~/.colima-ui/knowledge.db`. Supports `cui "<prompt>"` (read-only by default), `cui --yes "<prompt>"` (enables mutating actions), `cui --json "<prompt>"`, `cui --provider <id> --model <name> "<prompt>"`, `cui --help`, `cui --version`, and `cui mcp`.
+   - **Native MCP Stdio Server (`cui mcp` / `colimaui mcp`)**: Exposes **15 typed JSON-RPC 2.0 MCP tools** over `stdin`/`stdout` (`colima_list_instances`, `colima_instance_action`, `docker_list_containers`, `docker_container_action`, `docker_container_logs`, `docker_list_images`, `docker_pull_image`, `docker_list_volumes`, `docker_list_networks`, `compose_list_projects`, `k8s_list_pods`, `k8s_cluster_status`, `environment_resolutions`, `system_diagnostics`, `colima_ai_ask`). Works seamlessly whether ColimaUI Desktop is running (proxying via `127.0.0.1:<api_port>` + `~/.colima-ui/api_token`) or closed (direct native fallback):
+     - **Claude Desktop**, **Cursor**, **Antigravity**, **Windsurf**: `{"mcpServers": {"colima-ui": {"command": "cui", "args": ["mcp"]}}}`
+     - **Zed** (`settings.json`): `{"context_servers": {"colima-ui": {"command": {"path": "cui", "args": ["mcp"]}}}}`
+     - **Claude Code**: `claude mcp add colima-ui -- cui mcp`
 
 ---
 
@@ -57,7 +72,7 @@ graph TD
 `build_app_context_from_dir` (`src-tauri/src/commands/system.rs`, exposed via `get_app_context` IPC and `GET /api/ai/context`) deterministically loads exactly **3 bundled markdown files** instead of dumping every skill into every prompt:
 1. `resources/system_prompt.md` — Core principles, terminology glossary, safety tiers, and bracket-tag syntax.
 2. `resources/router.md` — Intent-to-reference routing table.
-3. `resources/skills/colima_ui/SKILL.md` — Authoritative 92-event catalog and payload schemas.
+3. `resources/skills/colima_ui/SKILL.md` — Authoritative 100-event catalog and payload schemas.
 
 If `~/.colima-ui/plugins.yaml` exists, custom user shortcuts are appended and mapped to `[EVENT_APPROVE: cli-exec | ...]`.
 
@@ -89,12 +104,11 @@ All directives use bracket-balanced colon syntax (`[TAG: ...]`) parsed by `src/l
 | `[EVENT_APPROVE: eventName \| jsonPayload]` | Approval (`NORMAL`/`DANGEROUS`) | Pauses on an inline `ToolStepCard` until the user clicks **Allow** or **Deny** (auto-runs if event is `SAFE`) |
 | `[ASK_CHOICE: {...}]` / `[ASK_CHOICE: Q \| A \| B]` | Guided UX (Tier 2) | Renders `InteractiveChoiceCard` (JSON or pipe shorthand; `[multi]` prefix enables multi-select). Does not loop `hasTools` |
 | `[SUGGEST: label \| prompt]` | Guided UX (Tier 3) | Renders up to 3 clickable `AiFollowUpBar` chips at the end of a turn |
-| `[NAVIGATE: pageName]` | Auto-run (`SAFE`) | Switches the active ColimaUI view (`containers`, `kubernetes`, `security`, `topology`, etc.) |
+| `[NAVIGATE: pageName]` | Auto-run (`SAFE`) | Switches the active ColimaUI view across all 17 pages (`dashboard`, `instances`, `environment`, `containers`, `images`, `volumes`, `networks`, `compose`, `topology`, `activity`, `security`, `kubernetes`, `linux-vms`, `models`, `terminal`, `settings`, `help`) |
 | `[READ_REFERENCE: path]` | Auto-run (`SAFE`) | Loads bundled reference markdown inside `resources/` |
 | `[DIAGNOSE]` | Auto-run (`SAFE`) | Collects Lima/Colima VM diagnostic logs (`ha.stderr.log`, `serial.log`, socket/lock checks) |
 | `[RUN: command]` | Sandbox-gated | Runs through `shell_sandbox`; auto-executes if `Safe`, upgrades to inline approval if `NeedsApproval`, rejects if `Banned` |
 | `[RUN_APPROVE: command]` | Approval (`DANGEROUS`) | Always prompts for explicit user approval before calling `sandbox_execute_approved` |
-| `[SEARCH: query]` | Research | Queries SearXNG (with DuckDuckGo fallback) via `/api/ai/search` |
 | `[SECURITY_THREAT_MODEL: dir \| mode]` | Approval (`NORMAL`) | Runs threat modeling (`interview`, `bootstrap`, `bootstrap-then-interview`) via `cli-exec` |
 | `[SECURITY_VULN_SCAN: dir]` | Approval (`NORMAL`) | Runs directory vulnerability scan via `cli-exec` |
 | `[SECURITY_TRIAGE: path]` | Approval (`NORMAL`) | Triages scan findings via `cli-exec` |
@@ -102,6 +116,7 @@ All directives use bracket-balanced colon syntax (`[TAG: ...]`) parsed by `src/l
 | `[SCHEDULE_CRON: expr \| prompt]` | Session timer | Registers an in-session recurring check (max 3 active schedules; cleared on chat switch/stop) |
 | `[SCHEDULE_TIMER: seconds \| prompt]` | Session timer | Schedules a one-shot prompt wakeup (`1–86400` seconds) |
 | `[SCHEDULE_CANCEL: id]` | Session timer | Cancels an active timer or cron schedule |
+| `[LEARN: pattern \| solution]` | Knowledge Bank | Persists a verified error pattern → solution pair in SQLite `solutions` (`learnSolution`) |
 | `[LEARN_REASONING: problem \| solution]` | Memory | Stores trajectory in `agent_memory` (`reasoning`) and upserts `solutions` |
 | `[REMEMBER_PREFERENCE: preference]` | Memory | Stores user preference in `agent_memory` (`preference`) |
 

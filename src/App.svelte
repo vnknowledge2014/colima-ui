@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount, onDestroy } from "svelte";
-  import { uiState, dashboardState } from "./store.svelte";
+  import { uiState, dashboardState, isValidPage } from "./store.svelte";
   import { appState, loadAllSettings, getAppSetting, setAppSetting } from "./lib/settingsStore.svelte";
   import { startDataPoller, refreshManual } from "./lib/dataPoller";
   import { handleGlobalKeydown } from "./lib/keyboardShortcuts";
@@ -92,7 +92,7 @@
   // restore it on next load. The initial value is already set from localStorage
   // in store.svelte.ts (module-level, before any reactivity).
   $effect(() => {
-    if (uiState.currentPage) {
+    if (uiState.currentPage && isValidPage(uiState.currentPage)) {
       localStorage.setItem("colima_active_page", uiState.currentPage);
     }
   });

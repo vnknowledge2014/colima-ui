@@ -39,7 +39,7 @@
   <h1>{t("environment.title", { default: "Environment" })}</h1>
   <div class="content-header-actions">
     <button type="button" class="btn btn-ghost" onclick={refresh} disabled={loading}>
-      ↻ {t("environment.refresh", { default: "Re-scan" })}
+      <span class:env-spin={loading} aria-hidden="true">↻</span> {t("environment.refresh", { default: "Re-scan" })}
     </button>
   </div>
 </div>
@@ -52,10 +52,12 @@
     })}
   </p>
 
+  {#if error}
+    <p class="env-status" style="color: var(--accent-red);" role="alert">{error}</p>
+  {/if}
+
   {#if loading && !report}
     <p class="env-status">{t("environment.loading", { default: "Scanning…" })}</p>
-  {:else if error}
-    <p class="env-status" style="color: var(--accent-red);" role="alert">{error}</p>
   {:else if report}
     {#if report.shellSnapshotError}
       <p class="env-status" style="color: var(--accent-yellow);">
@@ -89,7 +91,7 @@
           </thead>
           <tbody>
             {#each report.envDuality as v (v.key)}
-              <tr title={v.diverges ? t("environment.diverges", { default: "differs between Shell env (.zshenv) and This app" }) : undefined}>
+              <tr title={v.diverges ? t("environment.diverges", { default: "differs between Shell env and This app" }) : undefined}>
                 <th scope="row" class="mono row-key">{v.key}</th>
                 <td class="mono" style={v.shell == null ? "opacity: 0.55;" : ""}>{v.shell ?? "—"}</td>
                 <td class="mono" style={v.runtime == null ? "opacity: 0.55;" : ""}>{v.runtime ?? "—"}</td>
@@ -219,5 +221,19 @@
     font-family: var(--font-mono);
     font-size: var(--text-xs);
     word-break: break-all;
+  }
+
+  .env-spin {
+    display: inline-block;
+    animation: envSpin 0.8s linear infinite;
+  }
+
+  @keyframes envSpin {
+    from {
+      transform: rotate(0deg);
+    }
+    to {
+      transform: rotate(360deg);
+    }
   }
 </style>

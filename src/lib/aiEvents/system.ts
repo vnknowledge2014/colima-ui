@@ -1,5 +1,5 @@
 import { EventHandler } from "./types";
-import { sysMethods } from "../api";
+import { sysMethods, environmentApi } from "../api";
 
 export const systemRegistry: Record<string, EventHandler> = {
   "system-df": {
@@ -21,6 +21,11 @@ export const systemRegistry: Record<string, EventHandler> = {
     category: "SAFE",
     description: "Check if a specific tool is installed (e.g., helm, kubectl)",
     handler: async (p) => JSON.stringify(await sysMethods.checkTool(p.name), null, 2)
+  },
+  "environment-resolutions": {
+    category: "SAFE",
+    description: "Inspect ColimaUI environment resolution (COLIMA_HOME, DOCKER_HOST, LIMA_HOME, shell vs GUI PATH)",
+    handler: async () => JSON.stringify(await environmentApi.getResolutions(), null, 2)
   },
   "system-prune": {
     category: "DANGEROUS",

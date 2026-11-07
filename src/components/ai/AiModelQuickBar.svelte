@@ -84,8 +84,16 @@
   });
 
   const displayPageName = $derived.by(() => {
-    const raw = (currentPage || "dashboard").trim();
-    return raw.charAt(0).toUpperCase() + raw.slice(1);
+    const raw = (currentPage || "dashboard").trim().toLowerCase();
+    const sidebarKey =
+      raw === "models"
+        ? "sidebar.local_ai_models"
+        : `sidebar.${raw.replace(/-/g, "_")}`;
+    const fallback =
+      raw === "linux-vms"
+        ? "Linux VMs"
+        : raw.charAt(0).toUpperCase() + raw.slice(1);
+    return t(sidebarKey, { default: fallback });
   });
 
   const currentPresets = $derived(POPULAR_PRESETS[selectedProvider] || []);

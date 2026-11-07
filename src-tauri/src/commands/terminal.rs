@@ -65,6 +65,7 @@ pub async fn terminal_create(
     on_output: Channel<String>,
 ) -> Result<(), crate::error::ColimaError> {
     let mut m = mgr.lock().unwrap();
+    m.prune_closed();
 
     // Re-creating an existing id is a reconnect, not a new session, so it must
     // not count against the cap — otherwise a user at the ceiling can no longer
@@ -119,7 +120,7 @@ pub async fn terminal_resize(
 pub async fn terminal_poll_exit(
     mgr: State<'_, SharedSessionManager>,
     session_id: String,
-) -> Result<Option<u32>, crate::error::ColimaError> {
+) -> Result<Option<i32>, crate::error::ColimaError> {
     let mut m = mgr.lock().unwrap();
     Ok(m.poll_exit(&session_id))
 }

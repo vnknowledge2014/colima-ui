@@ -29,14 +29,28 @@
     confirmState.open = false;
     confirmState.resolve = null;
   }
+
+  function handleWindowKeydown(e: KeyboardEvent) {
+    if (open && e.key === "Escape") {
+      e.preventDefault();
+      handleCancel();
+    }
+  }
 </script>
+
+<svelte:window onkeydown={handleWindowKeydown} />
 
 {#if open}
   <div
+    role="presentation"
     style="position: fixed; inset: 0; z-index: 10000; background: rgba(0, 0, 0, 0.6); backdrop-filter: blur(4px); display: flex; align-items: center; justify-content: center;"
     onclick={(e) => { if (e.target === e.currentTarget) handleCancel(); }}
   >
     <div
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="confirm-dialog-title"
+      aria-describedby="confirm-dialog-message"
       style="background: var(--bg-primary); border-radius: var(--radius-lg); border: 1px solid var(--border-primary); box-shadow: 0 20px 60px rgba(0,0,0,0.5); padding: 24px; min-width: 380px; max-width: 480px; animation: fadeInScale 0.15s ease-out;"
     >
       <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 16px;">
@@ -49,24 +63,27 @@
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
           {/if}
         </span>
-        <h3 style="margin: 0; font-size: var(--text-base); font-weight: 600; color: var(--text-primary);">
+        <h3 id="confirm-dialog-title" style="margin: 0; font-size: var(--text-base); font-weight: 600; color: var(--text-primary);">
           {title}
         </h3>
       </div>
 
-      <p style="margin: 0 0 24px 0; font-size: var(--text-sm); color: var(--text-secondary); line-height: 1.6; white-space: pre-line;">
+      <p id="confirm-dialog-message" style="margin: 0 0 24px 0; font-size: var(--text-sm); color: var(--text-secondary); line-height: 1.6; white-space: pre-line;">
         {message}
       </p>
 
       <div style="display: flex; justify-content: flex-end; gap: 8px;">
-        <button class="btn btn-ghost" onclick={handleCancel} style="font-size: var(--text-sm); padding: 8px 16px;">
+        <button type="button" class="btn btn-ghost" onclick={handleCancel} style="font-size: var(--text-sm); padding: 8px 16px;">
           {cancelText}
         </button>
         <button
+          type="button"
           onclick={handleConfirm}
           style="font-size: var(--text-sm); padding: 8px 20px; border-radius: var(--radius-md); border: 1px solid {v.border}; background: {v.bg}; color: {v.color}; font-weight: 600; cursor: pointer; transition: all 0.15s ease;"
           onmouseover={(e) => { e.currentTarget.style.background = v.color; e.currentTarget.style.color = "#fff"; }}
           onmouseout={(e) => { e.currentTarget.style.background = v.bg; e.currentTarget.style.color = v.color; }}
+          onfocus={(e) => { e.currentTarget.style.background = v.color; e.currentTarget.style.color = "#fff"; }}
+          onblur={(e) => { e.currentTarget.style.background = v.bg; e.currentTarget.style.color = v.color; }}
         >
           {confirmText}
         </button>

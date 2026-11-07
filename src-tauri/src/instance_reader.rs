@@ -49,14 +49,19 @@ struct KubernetesConfig {
 
 /// Get the colima home directory.
 /// Mirrors colima 0.10.x's own XDG resolution (config/files.go):
-/// COLIMA_HOME (if the dir exists) > legacy ~/.colima (if it exists) >
-/// ~/.config/colima (if it exists) > legacy ~/.colima.
+/// COLIMA_HOME (if the dir exists) > legacy ~/.colima (if it holds state) >
+/// $XDG_CONFIG_HOME/colima (or ~/.config/colima, if it exists) > legacy ~/.colima.
 /// Modern colima keeps profile configs, _templates and sockets under the
 /// XDG config home; older installs keep them under ~/.colima.
 pub fn colima_home() -> PathBuf {
     let colima_home_env = std::env::var("COLIMA_HOME").ok();
+    let xdg_config_home_env = std::env::var("XDG_CONFIG_HOME").ok();
     let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
-    resolve_colima_home(colima_home_env.as_deref(), &home)
+    resolve_colima_home_with_xdg(
+        colima_home_env.as_deref(),
+        xdg_config_home_env.as_deref(),
+        &home,
+    )
 }
 
 /// Returns true when the legacy `~/.colima` directory holds real Colima state
@@ -87,14 +92,28 @@ fn holds_colima_config_state(dir: &std::path::Path) -> bool {
 /// mutating process env (tests run in parallel threads; env races forbid
 /// `set_var` here).
 pub fn resolve_colima_home(colima_home_env: Option<&str>, home: &str) -> PathBuf {
+    resolve_colima_home_with_xdg(colima_home_env, None, home)
+}
+
+/// Same as [`resolve_colima_home`], additionally honoring a custom `XDG_CONFIG_HOME`
+/// when set and non-empty (falling back to `{home}/.config/colima` when absent/blank).
+pub fn resolve_colima_home_with_xdg(
+    colima_home_env: Option<&str>,
+    xdg_config_home_env: Option<&str>,
+    home: &str,
+) -> PathBuf {
     // COLIMA_HOME is honored only when the dir exists (colima's own rule).
-    if let Some(dir) = colima_home_env {
-        if std::path::Path::new(dir).is_dir() {
+    match colima_home_env.map(str::trim) {
+        Some(dir) if !dir.is_empty() && std::path::Path::new(dir).is_dir() => {
             return PathBuf::from(dir);
         }
+        _ => {}
     }
     let legacy = PathBuf::from(home).join(".colima");
-    let xdg = PathBuf::from(home).join(".config").join("colima");
+    let xdg = match xdg_config_home_env.map(str::trim) {
+        Some(custom_xdg) if !custom_xdg.is_empty() => PathBuf::from(custom_xdg).join("colima"),
+        _ => PathBuf::from(home).join(".config").join("colima"),
+    };
 
     // Prefer a candidate that actually contains colima state; the plain
     // existence check would let a hollow stub (created by colima's own
@@ -306,36 +325,73 @@ fn read_instance(colima_home: &Path, profile: &str) -> Option<ColimaInstance> {
     })
 }
 
+const K3S_CHECK_TTL: std::time::Duration = std::time::Duration::from_secs(10);
+
+static K3S_CHECK_CACHE: std::sync::OnceLock<
+    std::sync::Mutex<std::collections::HashMap<String, (std::time::Instant, bool)>>,
+> = std::sync::OnceLock::new();
+
+fn check_k3s_cached_with<F>(profile: &str, ttl: std::time::Duration, fetch: F) -> bool
+where
+    F: FnOnce(&str) -> bool,
+{
+    let cache_mutex =
+        K3S_CHECK_CACHE.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()));
+    let now = std::time::Instant::now();
+    {
+        let cache = cache_mutex.lock().unwrap_or_else(|e| e.into_inner());
+        match cache.get(profile) {
+            Some(&(checked_at, running)) if now.duration_since(checked_at) < ttl => {
+                return running;
+            }
+            _ => {}
+        }
+    }
+
+    let running = fetch(profile);
+    {
+        let mut cache = cache_mutex.lock().unwrap_or_else(|e| e.into_inner());
+        cache.insert(profile.to_string(), (std::time::Instant::now(), running));
+    }
+    running
+}
+
 /// Check if k3s is actually running for a profile via kubectl context check.
 /// This is the fallback when colima.yaml says `kubernetes.enabled: false`
 /// but K3s might actually be running (config out of sync).
-/// Fix #11: Uses --request-timeout=3s to avoid blocking instance listing.
+/// Fix #11: Uses --request-timeout=3s to avoid blocking instance listing,
+/// plus a 10-second TTL cache so `list_instances_fast()` does not repeatedly
+/// spawn `kubectl` when `kubernetes: false`.
 fn check_k3s_via_kubectl(profile: &str) -> bool {
-    let context_name = if profile == "default" {
-        "colima".to_string()
-    } else {
-        format!("colima-{}", profile)
-    };
+    check_k3s_cached_with(profile, K3S_CHECK_TTL, |prof| {
+        let context_name = if prof == "default" {
+            "colima".to_string()
+        } else {
+            format!("colima-{}", prof)
+        };
 
-    if let Ok(output) = std::process::Command::new("kubectl")
-        .args([
-            "--context",
-            &context_name,
-            "--request-timeout=3s",
-            "get",
-            "nodes",
-            "-o",
-            "jsonpath={.items[0].status.nodeInfo.kubeletVersion}",
-        ])
-        .stderr(std::process::Stdio::null())
-        .output()
-    {
-        if output.status.success() {
-            let version = String::from_utf8_lossy(&output.stdout);
-            return version.contains("k3s");
+        let mut cmd = std::process::Command::new(crate::path_util::resolve_binary("kubectl"));
+        crate::path_util::apply_path_to_cmd(&mut cmd);
+        match cmd
+            .args([
+                "--context",
+                &context_name,
+                "--request-timeout=3s",
+                "get",
+                "nodes",
+                "-o",
+                "jsonpath={.items[0].status.nodeInfo.kubeletVersion}",
+            ])
+            .stderr(std::process::Stdio::null())
+            .output()
+        {
+            Ok(output) if output.status.success() => {
+                let version = String::from_utf8_lossy(&output.stdout);
+                version.contains("k3s")
+            }
+            _ => false,
         }
-    }
-    false
+    })
 }
 
 /// List all Colima instances by reading the filesystem directly.
@@ -417,7 +473,7 @@ pub fn running_containerd_profiles() -> Vec<String> {
                 continue;
             }
             let lima_name = lima_instance_name(&name);
-            let lima_dir = home.join("_lima").join(&lima_name);
+            let lima_dir = crate::path_util::lima_home().join(lima_name);
             if !crate::path_util::is_lima_instance_alive(&lima_dir) {
                 continue;
             }
@@ -729,5 +785,64 @@ mod tests {
             ),
             "containerd"
         );
+    }
+
+    #[test]
+    fn test_resolve_colima_home_custom_xdg_config_home() {
+        let temp_home = temp_test_dir("res-custom-xdg-home");
+        let custom_xdg = temp_test_dir("res-custom-xdg-root");
+        let _g1 = DirCleanup(temp_home.clone());
+        let _g2 = DirCleanup(custom_xdg.clone());
+
+        let custom_colima = custom_xdg.join("colima");
+        std::fs::create_dir_all(&custom_colima).unwrap();
+        // Default ~/.config/colima also exists — custom XDG_CONFIG_HOME must win over it.
+        std::fs::create_dir_all(temp_home.join(".config").join("colima")).unwrap();
+
+        assert_eq!(
+            resolve_colima_home_with_xdg(
+                None,
+                Some(custom_xdg.to_str().unwrap()),
+                temp_home.to_str().unwrap()
+            ),
+            custom_colima
+        );
+
+        // Blank/whitespace XDG_CONFIG_HOME falls back to {home}/.config/colima.
+        assert_eq!(
+            resolve_colima_home_with_xdg(None, Some("   "), temp_home.to_str().unwrap()),
+            temp_home.join(".config").join("colima")
+        );
+    }
+
+    #[test]
+    fn test_k3s_check_cache_ttl() {
+        use std::sync::atomic::AtomicUsize;
+
+        let calls = AtomicUsize::new(0);
+        let prof = format!("cache-test-{}", std::process::id());
+
+        let first = check_k3s_cached_with(&prof, std::time::Duration::from_secs(10), |_| {
+            calls.fetch_add(1, Ordering::SeqCst);
+            true
+        });
+        assert!(first);
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+
+        // Within TTL: cached result returned without invoking fetch closure.
+        let second = check_k3s_cached_with(&prof, std::time::Duration::from_secs(10), |_| {
+            calls.fetch_add(1, Ordering::SeqCst);
+            false
+        });
+        assert!(second);
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+
+        // Zero TTL forces cache miss and updates cached value.
+        let third = check_k3s_cached_with(&prof, std::time::Duration::ZERO, |_| {
+            calls.fetch_add(1, Ordering::SeqCst);
+            false
+        });
+        assert!(!third);
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
     }
 }

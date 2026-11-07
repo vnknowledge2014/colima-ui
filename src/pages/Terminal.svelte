@@ -1,21 +1,28 @@
 <script lang="ts">
-  import { onMount } from "svelte";
   import { dashboardState, dockerState, uiState } from "../store.svelte";
   import Icon from "../components/Icon.svelte";
   import { t } from "../lib/i18n.svelte";
   import { dockerApi, k8sApi, type DockerContainer } from "../lib/api";
+  import { isTauri } from "../lib/api/client";
+  import { newId } from "../lib/ids";
   import { parseItems } from "../lib/k8sUtils";
-  import { sessionLabel, type SessionKind } from "../lib/terminal-transport";
+  import {
+    isSameSessionTarget,
+    sessionLabel,
+    type SessionKind,
+  } from "../lib/terminal-transport";
   import TerminalInstance from "./TerminalInstance.svelte";
 
   // The API origin and bearer token used to be threaded down to every tab,
   // because each keystroke was an authenticated HTTP request. Sessions run over
   // Tauri IPC now, so there is no origin to resolve and no token to pass.
+  const desktopMode = isTauri();
 
   interface TerminalTab {
     id: string;
     label: string;
     kind: SessionKind;
+    exited?: boolean;
   }
 
   const termTheme = {
@@ -44,10 +51,15 @@
   let tabs = $state<TerminalTab[]>([]);
   let activeTab = $state<string | null>(null);
   let showPicker = $state(false);
+  let fallbackRunningContainers = $state<DockerContainer[]>([]);
 
   let instances = $derived(dashboardState.colimaInstances.filter(i => i.status === "Running"));
   let limaVMs = $derived(dashboardState.linuxVMs.filter(v => v.status === "Running"));
-  let runningContainers = $derived(dockerState.containers.filter((c) => c.State === "running"));
+  let runningContainers = $derived(
+    (dockerState.containers.length > 0 ? dockerState.containers : fallbackRunningContainers).filter(
+      (c) => c.State === "running",
+    ),
+  );
 
   /**
    * Container targets from the connected cluster.
@@ -69,17 +81,18 @@
   let podsLoading = $state(false);
   let podsError = $state("");
 
-  // On mount, not on picker-open: `hasRunning` gates whether the New Session
-  // button renders at all, so targets have to be counted before the user
-  // reaches for it.
-  onMount(() => {
+  // Refresh targets whenever the Terminal page is entered so newly started
+  // pods/containers appear without overwriting `dockerState.containers`.
+  $effect(() => {
+    if (!desktopMode || uiState.currentPage !== "terminal") return;
     loadPodTargets();
     if (dockerState.containers.length === 0) {
-      dockerApi.listContainers(false).then((list) => {
-        if (dockerState.containers.length === 0) {
-          dockerState.containers = list;
-        }
-      }).catch(() => {});
+      dockerApi
+        .listContainers(false)
+        .then((list) => {
+          fallbackRunningContainers = list.filter((c) => c.State === "running");
+        })
+        .catch(() => {});
     }
   });
 
@@ -93,7 +106,7 @@
       );
 
       podTargets = pods.flatMap((p) => {
-        const rawSpec = p._raw.spec as { containers?: { name?: string }[] } | undefined;
+        const rawSpec = (p._raw as { spec?: { containers?: { name?: string }[] } } | undefined)?.spec;
         const containers: string[] = rawSpec?.containers?.map((c) => c.name ?? "") ?? [];
         const ns = p.namespace || "default";
 
@@ -141,6 +154,7 @@
    * or pod and no VM would open a dialog containing a single row.
    */
   function openOrPick() {
+    if (!desktopMode) return;
     const total =
       instances.length +
       limaVMs.length +
@@ -153,7 +167,7 @@
 
     if (instances.length === 1) {
       const name = instances[0].name;
-      addTab(name === "colima" ? "default" : name.replace("colima-", ""), "colima");
+      addTab(name === "colima" ? "default" : name.replace(/^colima-/, ""), "colima");
     } else if (limaVMs.length === 1) {
       addTab(limaVMs[0].name, "lima");
     } else if (runningContainers.length === 1) {
@@ -181,14 +195,24 @@
   }
 
   /**
-   * Open a tab for any session kind.
+   * Open a tab for any session kind, reusing an existing live tab if one is
+   * already attached to the exact same target.
    *
    * The id is minted once here and never re-derived, so remounting a tab
    * reattaches to its existing pty instead of spawning a second one.
    */
   function openSession(kind: SessionKind) {
-    const id = `term-${Date.now()}`;
-    tabs = [...tabs, { id, label: sessionLabel(kind), kind }];
+    if (!desktopMode) return;
+    const existing = tabs.find(
+      (tab) => !tab.exited && isSameSessionTarget(tab.kind, kind),
+    );
+    if (existing) {
+      activeTab = existing.id;
+      showPicker = false;
+      return;
+    }
+    const id = newId("term");
+    tabs = [...tabs, { id, label: sessionLabel(kind), kind, exited: false }];
     activeTab = id;
     showPicker = false;
   }
@@ -200,6 +224,7 @@
     const pending = uiState.pendingTerminalSession as SessionKind | null;
     if (!pending) return;
     uiState.pendingTerminalSession = null;
+    if (!desktopMode) return;
     openSession(pending);
   });
 
@@ -215,7 +240,7 @@
 <div class="content-header" data-tauri-drag-region>
   <h1>{t('terminal.title', { default: 'Terminal' })}</h1>
   <div class="content-header-actions">
-    <button class="btn btn-primary" onclick={openOrPick}>
+    <button class="btn btn-primary" onclick={openOrPick} disabled={!desktopMode}>
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
         <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
       </svg>
@@ -225,7 +250,7 @@
 </div>
 
 <!-- Tab Bar -->
-{#if tabs.length > 0}
+{#if desktopMode && tabs.length > 0}
   <div style="display: flex; align-items: center; gap: 0; border-bottom: 1px solid var(--border-primary); background: var(--bg-content); padding-left: 12px; flex-shrink: 0; overflow: auto;">
     {#each tabs as tab (tab.id)}
       <div
@@ -249,7 +274,24 @@
 
 <!-- Terminal Content -->
 <div style="flex: 1; overflow: hidden; background: #0D1117; display: flex; flex-direction: column;">
-  {#if tabs.length === 0}
+  {#if !desktopMode}
+    <div class="empty-state" style="height: 100%;">
+      <div class="empty-state-icon">
+        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="color: var(--text-muted);" aria-hidden="true">
+          <polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/>
+        </svg>
+      </div>
+      <div class="empty-state-title">
+        {t('terminal.desktop_only_title', { default: 'Desktop App Required' })}
+      </div>
+      <div class="empty-state-text" style="max-width: 440px;">
+        {t('terminal.desktop_only_desc', {
+          default:
+            'Interactive PTY terminal sessions run over native Tauri IPC and require the ColimaUI Desktop app.',
+        })}
+      </div>
+    </div>
+  {:else if tabs.length === 0}
     <div class="empty-state" style="height: 100%;">
       <div class="empty-state-icon">
         <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="color: var(--text-muted);">
@@ -288,6 +330,11 @@
           kind={tab.kind}
           active={activeTab === tab.id}
           {termTheme}
+          onExit={() => {
+            tabs = tabs.map((item) =>
+              item.id === tab.id ? { ...item, exited: true } : item,
+            );
+          }}
         />
       </div>
     {/each}
@@ -295,7 +342,7 @@
 </div>
 
 <!-- Instance Picker Modal -->
-{#if showPicker}
+{#if desktopMode && showPicker}
   <div role="button" tabindex="0" class="modal-overlay" onkeydown={(e) => e.key === 'Enter' && e.currentTarget.click()} onclick={() => showPicker = false}>
     <div role="button" tabindex="0" class="modal" onkeydown={(e) => e.key === 'Enter' && e.currentTarget.click()} onclick={(e) => e.stopPropagation()} style="width: min(400px, 90vw);">
       <div class="modal-header">
@@ -312,7 +359,7 @@
           <div
             class="nav-item"
             style="padding: 12px 16px; border-radius: var(--radius-md);"
-            onclick={() => addTab(inst.name === "colima" ? "default" : inst.name.replace("colima-", ""), "colima")}
+            onclick={() => addTab(inst.name === "colima" ? "default" : inst.name.replace(/^colima-/, ""), "colima")}
           >
             <div style="width: 8px; height: 8px; border-radius: 50%; background: var(--status-running); box-shadow: 0 0 6px var(--status-running);"></div>
             <div>

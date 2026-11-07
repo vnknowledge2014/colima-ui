@@ -21,7 +21,7 @@
 //!    - High-throughput asynchronous Tokio tasks under maximum simultaneous contention
 
 use colima_ui_lib::commands::colima::{normalize_bytes_to_gib, StartConfig, ONE_GIB_BYTES};
-use colima_ui_lib::commands::runtime::{run, DEFAULT_TIMEOUT, LONG_OP_TIMEOUT};
+use colima_ui_lib::commands::runtime::{run, run_with_cmd, DEFAULT_TIMEOUT, LONG_OP_TIMEOUT};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Barrier};
 use std::time::{Duration, Instant};
@@ -314,9 +314,22 @@ fn test_adv_start_config_normalize_resources_lifecycle() {
 
 static ADV_PROC_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
+async fn is_live_runtime_daemon_reachable() -> bool {
+    match run(vec!["info".to_string()], Duration::from_secs(2)).await {
+        Ok(out) => out.status.success(),
+        Err(_) => false,
+    }
+}
+
 #[tokio::test]
 async fn test_adv_subprocess_timeout_returns_promptly() {
     let _lock = ADV_PROC_LOCK.lock().await;
+    if !is_live_runtime_daemon_reachable().await {
+        eprintln!(
+            "[skip] test_adv_subprocess_timeout_returns_promptly: no live Docker/Colima daemon reachable"
+        );
+        return;
+    }
     let start = Instant::now();
     // Requesting `events` from docker without any events will wait indefinitely if not cancelled.
     // Timeout is set to 150ms.
@@ -348,7 +361,14 @@ async fn test_adv_subprocess_timeout_returns_promptly() {
 #[tokio::test]
 async fn test_adv_subprocess_tiny_timeout_cancels_instantly() {
     let start = Instant::now();
-    let result = run(vec!["version".to_string()], Duration::from_nanos(1)).await;
+    // Use `/bin/sleep` via `run_with_cmd` so clean macOS CI runners without `docker`
+    // installed exercise the exact 1ns timeout path instead of ENOENT spawn failure.
+    let result = run_with_cmd(
+        std::process::Command::new("/bin/sleep"),
+        vec!["5".to_string()],
+        Duration::from_nanos(1),
+    )
+    .await;
     let elapsed = start.elapsed();
 
     assert!(result.is_err(), "1-nanosecond deadline must fail with timeout");
@@ -411,6 +431,12 @@ async fn test_adv_subprocess_kill_on_drop_terminates_child_process() {
 #[tokio::test]
 async fn test_adv_runtime_run_repeated_timeouts_no_process_leak() {
     let _lock = ADV_PROC_LOCK.lock().await;
+    if !is_live_runtime_daemon_reachable().await {
+        eprintln!(
+            "[skip] test_adv_runtime_run_repeated_timeouts_no_process_leak: no live Docker/Colima daemon reachable"
+        );
+        return;
+    }
 
     fn count_docker_events_processes() -> usize {
         let output = std::process::Command::new("pgrep")

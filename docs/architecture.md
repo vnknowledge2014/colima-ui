@@ -284,7 +284,7 @@ fix costs a feature the product needs. Revisit it if the threat model changes
 
 | Risk | Why it stays |
 |---|---|
-| `capabilities/default.json` allows `https://*` | This is what lets the app reach OpenRouter, Groq, Together, Mistral, DeepSeek and user-configured endpoints (custom Ollama, private SearXNG). Tauri capabilities are compile-time, so a narrow list cannot be extended at runtime — narrowing would permanently break 6 of the 9 advertised providers. The fix is to route provider calls through Rust (`reqwest` is not bound by capabilities) |
+| `capabilities/default.json` allows `https://*` | This is what lets the app reach OpenAI-compatible gateways (`openai-compatible`: OpenRouter, Groq, Together, Mistral, DeepSeek, LiteLLM, vLLM) and user-configured endpoints (`ollama-cloud`, private SearXNG) across the 6 built-in provider modes. Tauri capabilities are compile-time, so a narrow list cannot be extended at runtime — narrowing would break custom/gateway providers. The fix is to route provider calls through Rust (`reqwest` is not bound by capabilities) |
 
 ## State Management
 
@@ -292,10 +292,12 @@ fix costs a feature the product needs. Revisit it if the threat model changes
 
 | Store | File | Contents |
 |-------|------|----------|
-| Global | `store.svelte.ts` | Instances, containers, images, volumes, networks, compose, system info |
-| AI | `store/ai.svelte.ts` | Chat messages, provider config, agent state |
+| Global | `store.svelte.ts` | Structured `$state` objects (`dockerState`, `resourceState`, `dashboardState`, `uiState`) across all 17 navigable pages |
+| AI | `store/ai.svelte.ts` | Multi-conversation threads, chat messages, 6-mode provider config, agent state |
 | K8s | `store/k8s.svelte.ts` | Namespaces, pods, deployments, services, CRDs |
 | Confirm | `store/confirm.svelte.ts` | Confirmation dialog state |
+| Capabilities | `store/capabilities.svelte.ts` | Host external tool capability probes (`colima`, `docker`, `kubectl`, `trivy`, etc.) & install hints |
+| Notifications | `store/notifications.svelte.ts` | Session-scoped background transfer outcomes, announcements, and error notifications |
 
 ### Backend (Rust)
 

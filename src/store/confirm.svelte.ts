@@ -14,6 +14,10 @@ export const confirmState = $state({
 
 export function confirm(options: ConfirmOptions | string): Promise<boolean> {
   const opts = typeof options === "string" ? { message: options } : options;
+  if (confirmState.open && confirmState.resolve) {
+    confirmState.resolve(false);
+    confirmState.resolve = null;
+  }
   return new Promise((resolve) => {
     confirmState.options = opts;
     confirmState.resolve = resolve;

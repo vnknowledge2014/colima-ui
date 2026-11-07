@@ -16,11 +16,12 @@
     type TerminalHandle,
   } from "../lib/terminal-transport";
 
-  let { sessionId, kind, active, termTheme }: {
+  let { sessionId, kind, active, termTheme, onExit }: {
     sessionId: string;
     kind: SessionKind;
     active: boolean;
     termTheme: NonNullable<ConstructorParameters<typeof XTerm>[0]>["theme"];
+    onExit?: () => void;
   } = $props();
 
   let termRef = $state<HTMLDivElement | null>(null);
@@ -111,6 +112,7 @@
           return;
         }
 
+        const openedAt = Date.now();
         connected = true;
         // Send the real grid now that the pty exists — it starts at 80x24.
         lastRows = 0;
@@ -133,9 +135,10 @@
               );
               // Some exit codes are meaningless on their own — a shell-less
               // image just reports 127 and an OCI error. Say what happened.
-              const hint = exitHint(kind, code);
+              const hint = exitHint(kind, code, openedAt);
               if (hint) xterm?.writeln(`\x1b[36m  ${hint}\x1b[0m`);
               connected = false;
+              onExit?.();
               if (exitPollId) clearInterval(exitPollId);
               exitPollId = null;
             }
@@ -152,6 +155,7 @@
           `\x1b[33m  ${t("terminal.ensure_running", { default: "Make sure the instance is running." })}\x1b[0m`,
         );
         error = String(e);
+        onExit?.();
       }
     };
 
@@ -171,7 +175,10 @@
 
   // Refit when the tab becomes visible: it was measured at zero while hidden.
   $effect(() => {
-    if (active) setTimeout(refit, 50);
+    if (active) {
+      const id = setTimeout(refit, 50);
+      return () => clearTimeout(id);
+    }
   });
 </script>
 

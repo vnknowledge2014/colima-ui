@@ -1,6 +1,7 @@
 <script lang="ts">
    
   import { composeApi, k8sApi, limaApi, kindApi, systemApi, type SystemInfo } from "../lib/api";
+  import { parseItems } from "../lib/k8sUtils";
   import { dashboardState, dockerState, resourceState } from "../store.svelte";
   import { t } from "../lib/i18n.svelte";
 
@@ -103,12 +104,10 @@
       if (connected) {
         const [nsRaw, podsRaw] = await Promise.allSettled([k8sApi.namespaces(), k8sApi.pods("")]);
         if (nsRaw.status === "fulfilled") {
-          const ns = nsRaw.value;
-          namespaces = Array.isArray(ns) ? ns.length : (typeof ns === "string" ? (ns.match(/"name"/gi) || []).length : 0);
+          namespaces = parseItems(nsRaw.value).length;
         }
         if (podsRaw.status === "fulfilled") {
-          const p = podsRaw.value;
-          pods = Array.isArray(p) ? p.length : (typeof p === "string" ? (p.match(/"name"/gi) || []).length : 0);
+          pods = parseItems(podsRaw.value).length;
         }
       }
       const kindClusters = kindRaw.status === "fulfilled"

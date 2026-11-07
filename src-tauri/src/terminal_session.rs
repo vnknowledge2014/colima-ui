@@ -13,7 +13,7 @@
 //! through [`SessionManager::read`], which only hands back whole characters and
 //! keeps the trailing partial sequence for the next call.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::io::{Read, Write};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -49,6 +49,10 @@ const FLUSH_INTERVAL: Duration = Duration::from_millis(16);
 /// Nothing renders at 0×0 and some shells abort on it, so never start there.
 const DEFAULT_ROWS: u16 = 24;
 const DEFAULT_COLS: u16 = 80;
+
+/// Maximum number of idle-reaped session IDs remembered so `poll_exit` can
+/// report `Some(-1)` once to the frontend and stop its poll timer.
+const MAX_REAPED_IDS: usize = 64;
 
 type OutputBuffer = Arc<Mutex<Vec<u8>>>;
 
@@ -126,10 +130,23 @@ pub fn build_spawn(kind: &SessionKind, home: &str) -> Result<Spawn, String> {
 
 /// Build the command for a session kind with an explicit Colima Lima store
 /// directory (e.g. XDG `~/.config/colima/_lima`, `COLIMA_HOME/_lima`, or `LIMA_HOME`).
+#[cfg(test)]
 pub fn build_spawn_with_dirs(
     kind: &SessionKind,
     home: &str,
     colima_lima_dir: &str,
+) -> Result<Spawn, String> {
+    build_spawn_with_env(kind, home, colima_lima_dir, None, ("docker", "default"))
+}
+
+/// Full pure command builder parameterized over `LIMA_HOME` and detected container runtime
+/// `(runtime_name, profile_name)` so unit tests remain deterministic on any host.
+pub fn build_spawn_with_env(
+    kind: &SessionKind,
+    home: &str,
+    colima_lima_dir: &str,
+    lima_home_env: Option<&str>,
+    runtime: (&str, &str),
 ) -> Result<Spawn, String> {
     match kind {
         SessionKind::Colima { profile } | SessionKind::Lima { instance: profile } => {
@@ -137,10 +154,18 @@ pub fn build_spawn_with_dirs(
             let name = if profile.is_empty() { "default" } else { profile };
 
             let (ssh_config, host) = match kind {
-                SessionKind::Lima { .. } => (
-                    format!("{home}/.lima/{name}/ssh.config"),
-                    format!("lima-{name}"),
-                ),
+                SessionKind::Lima { .. } => {
+                    let lima_base = match lima_home_env.map(str::trim) {
+                        Some(custom) if !custom.is_empty() => {
+                            custom.trim_end_matches('/').to_string()
+                        }
+                        _ => format!("{home}/.lima"),
+                    };
+                    (
+                        format!("{lima_base}/{name}/ssh.config"),
+                        format!("lima-{name}"),
+                    )
+                }
                 _ => {
                     let lima_name = if name == "default" {
                         "colima".to_string()
@@ -218,8 +243,8 @@ pub fn build_spawn_with_dirs(
         }
 
         SessionKind::DockerExec { container, .. } => {
-            // Positional container argument in `docker exec -it <container> ...`:
-            // leading `-` would be interpreted as a docker flag (`-e`, `--privileged`),
+            // Positional container argument in `<runtime> exec -it <container> ...`:
+            // leading `-` would be interpreted as a flag (`-e`, `--privileged`),
             // and path separators / `..` / whitespace / shell metacharacters are rejected.
             if container.is_empty()
                 || container.starts_with('-')
@@ -229,30 +254,77 @@ pub fn build_spawn_with_dirs(
                 return Err(format!("Invalid container identifier: {container}"));
             }
 
-            Ok(Spawn {
-                program: "docker".to_string(),
-                args: vec![
-                    "exec".into(),
-                    "-it".into(),
-                    container.clone(),
-                    "sh".into(),
-                    "-c".into(),
-                    "command -v bash >/dev/null 2>&1 && exec bash -l || exec sh".into(),
-                ],
-            })
+            let shell_cmd = "command -v bash >/dev/null 2>&1 && exec bash -l || exec sh";
+            let (runtime_name, runtime_profile) = runtime;
+            match runtime_name {
+                "containerd" => {
+                    let prof = if runtime_profile.is_empty() {
+                        "default"
+                    } else {
+                        runtime_profile
+                    };
+                    ensure_valid_profile(prof)?;
+                    Ok(Spawn {
+                        program: "colima".to_string(),
+                        args: vec![
+                            "-p".into(),
+                            prof.into(),
+                            "nerdctl".into(),
+                            "exec".into(),
+                            "-it".into(),
+                            container.clone(),
+                            "sh".into(),
+                            "-c".into(),
+                            shell_cmd.into(),
+                        ],
+                    })
+                }
+                "podman" => Ok(Spawn {
+                    program: "podman".to_string(),
+                    args: vec![
+                        "exec".into(),
+                        "-it".into(),
+                        container.clone(),
+                        "sh".into(),
+                        "-c".into(),
+                        shell_cmd.into(),
+                    ],
+                }),
+                _ => Ok(Spawn {
+                    program: "docker".to_string(),
+                    args: vec![
+                        "exec".into(),
+                        "-it".into(),
+                        container.clone(),
+                        "sh".into(),
+                        "-c".into(),
+                        shell_cmd.into(),
+                    ],
+                }),
+            }
         }
     }
 }
 
 pub struct SessionManager {
     sessions: HashMap<String, TerminalSession>,
+    reaped_ids: VecDeque<String>,
 }
 
 impl SessionManager {
     pub fn new() -> Self {
         Self {
             sessions: HashMap::new(),
+            reaped_ids: VecDeque::new(),
         }
+    }
+
+    fn record_reaped_id(&mut self, session_id: String) {
+        self.reaped_ids.retain(|existing| existing != &session_id);
+        if self.reaped_ids.len() >= MAX_REAPED_IDS {
+            self.reaped_ids.pop_front();
+        }
+        self.reaped_ids.push_back(session_id);
     }
 
     /// Open a session against a VM or a cluster container.
@@ -268,9 +340,24 @@ impl SessionManager {
     ) -> Result<(), String> {
         let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
         let colima_lima_dir = crate::path_util::lima_home().to_string_lossy().into_owned();
-        // Validation lives in `build_spawn_with_dirs`, so it cannot be skipped by a
+        let lima_home_env = std::env::var("LIMA_HOME").ok();
+        let (runtime_name, runtime_profile, detected_docker_host) =
+            if matches!(kind, SessionKind::DockerExec { .. }) {
+                crate::commands::runtime::detect_runtime()
+            } else {
+                ("docker".to_string(), "default".to_string(), None)
+            };
+        // Validation lives in `build_spawn_with_env`, so it cannot be skipped by a
         // caller that builds a command some other way.
-        let spawn = build_spawn_with_dirs(kind, &home, &colima_lima_dir)?;
+        let spawn = build_spawn_with_env(
+            kind,
+            &home,
+            &colima_lima_dir,
+            lima_home_env.as_deref(),
+            (&runtime_name, &runtime_profile),
+        )?;
+
+        self.reaped_ids.retain(|id| id != session_id);
 
         // Idempotent: a remount must not leave the previous pty orphaned.
         if self.sessions.contains_key(session_id) {
@@ -304,13 +391,13 @@ impl SessionManager {
         let mut cmd = CommandBuilder::new(&program);
         cmd.args(&spawn.args);
         cmd.env("TERM", "xterm-256color");
-        if matches!(kind, SessionKind::DockerExec { .. })
-            && std::env::var("DOCKER_HOST")
-                .ok()
-                .filter(|s| !s.trim().is_empty())
-                .is_none()
-        {
-            if let Some((docker_host, _)) = crate::path_util::detect_docker_host() {
+        if matches!(kind, SessionKind::DockerExec { .. }) && runtime_name != "containerd" {
+            // `detect_runtime()` delegates to `path_util::detect_docker_host()`,
+            // which probes `DOCKER_HOST` first and falls back to the active
+            // Colima socket when `DOCKER_HOST` is unset or points at a dead daemon.
+            if let Some(docker_host) =
+                detected_docker_host.or_else(|| crate::path_util::detect_docker_host().map(|(h, _)| h))
+            {
                 cmd.env("DOCKER_HOST", docker_host);
             }
         }
@@ -371,30 +458,35 @@ impl SessionManager {
         let flush_running = Arc::clone(&running);
         let flush_activity = Arc::clone(&last_activity);
         thread::spawn(move || {
-            let mut carry: Vec<u8> = Vec::new();
-            while flush_running.load(Ordering::Relaxed) {
-                thread::sleep(FLUSH_INTERVAL);
-
+            let drain_once = |carry: &mut Vec<u8>| {
                 let chunk = {
                     let mut buf = flush_buf.lock().unwrap();
                     std::mem::take(&mut *buf)
                 };
                 if chunk.is_empty() {
-                    continue;
+                    return;
                 }
 
-                let mut pending = std::mem::take(&mut carry);
+                let mut pending = std::mem::take(carry);
                 pending.extend_from_slice(&chunk);
 
                 let (text, rest) = split_on_char_boundary(pending);
-                carry = rest;
+                *carry = rest;
                 if !text.is_empty() {
                     if let Ok(mut a) = flush_activity.lock() {
                         *a = Instant::now();
                     }
                     on_output(text);
                 }
+            };
+
+            let mut carry: Vec<u8> = Vec::new();
+            while flush_running.load(Ordering::Relaxed) {
+                thread::sleep(FLUSH_INTERVAL);
+                drain_once(&mut carry);
             }
+            // Final drain so bytes emitted right before child exit are never lost.
+            drain_once(&mut carry);
         });
 
         self.sessions.insert(
@@ -458,6 +550,7 @@ impl SessionManager {
 
         for id in &stale {
             let _ = self.close(id);
+            self.record_reaped_id(id.clone());
         }
         stale
     }
@@ -488,22 +581,44 @@ impl SessionManager {
             .map_err(|e| format!("Resize error: {e}"))
     }
 
-    /// Report the exit code once, if the child has died.
+    /// Report the exit code once, if the child has died (or `-1` once if the
+    /// session was closed by the idle reaper).
     ///
     /// Output no longer needs polling — the flush thread pushes it — but the UI
     /// still has to learn that the shell is gone, or it sits on a dead prompt.
-    /// Returns `Some` exactly once per session.
-    pub fn poll_exit(&mut self, session_id: &str) -> Option<u32> {
-        let session = self.sessions.get_mut(session_id)?;
-        if session.closed {
-            return None;
-        }
-        match session.child.try_wait() {
-            Ok(Some(status)) => {
-                session.closed = true;
-                Some(status.exit_code())
+    /// Returns `Some` exactly once per session, and `None` for unknown IDs.
+    pub fn poll_exit(&mut self, session_id: &str) -> Option<i32> {
+        if let Some(session) = self.sessions.get_mut(session_id) {
+            if session.closed {
+                return None;
             }
-            _ => None,
+            return match session.child.try_wait() {
+                Ok(Some(status)) => {
+                    session.closed = true;
+                    session.running.store(false, Ordering::Relaxed);
+                    Some(status.exit_code() as i32)
+                }
+                _ => None,
+            };
+        }
+
+        if let Some(pos) = self.reaped_ids.iter().position(|id| id == session_id) {
+            self.reaped_ids.remove(pos);
+            return Some(-1);
+        }
+
+        None
+    }
+
+    /// Reap and remove sessions whose child has already exited (`closed == true`).
+    pub fn prune_closed(&mut self) {
+        let closed_ids: Vec<String> = self
+            .sessions
+            .iter()
+            .filter_map(|(id, s)| if s.closed { Some(id.clone()) } else { None })
+            .collect();
+        for id in closed_ids {
+            let _ = self.close(&id);
         }
     }
 
@@ -533,18 +648,20 @@ impl SessionManager {
         }
     }
 
-    /// Number of live sessions. Used by the session cap.
+    /// Number of live (non-closed) sessions. Used by the session cap.
     pub fn len(&self) -> usize {
-        self.sessions.len()
+        self.sessions.values().filter(|s| !s.closed).count()
     }
 
-    /// Whether this id already has a session — a reconnect rather than a new tab.
+    /// Whether this id currently has a live (non-closed) session.
     pub fn contains(&self, session_id: &str) -> bool {
-        self.sessions.contains_key(session_id)
+        self.sessions
+            .get(session_id)
+            .is_some_and(|s| !s.closed)
     }
 
     pub fn is_empty(&self) -> bool {
-        self.sessions.is_empty()
+        self.len() == 0
     }
 }
 
@@ -901,5 +1018,141 @@ mod tests {
             "expected XDG ssh.config for named profile, got: {:?}",
             named_spawn.args
         );
+    }
+
+    #[test]
+    fn lima_spawn_honors_custom_lima_home_env() {
+        let spawn = build_spawn_with_env(
+            &SessionKind::Lima {
+                instance: "ubuntu".into(),
+            },
+            HOME,
+            "/home/tester/.colima/_lima",
+            Some("/custom/lima_store/"),
+            ("docker", "default"),
+        )
+        .unwrap();
+
+        assert!(
+            spawn
+                .args
+                .contains(&"/custom/lima_store/ubuntu/ssh.config".to_string()),
+            "expected LIMA_HOME ssh.config, got: {:?}",
+            spawn.args
+        );
+
+        // Blank LIMA_HOME falls back to {home}/.lima/{name}/ssh.config.
+        let fallback = build_spawn_with_env(
+            &SessionKind::Lima {
+                instance: "ubuntu".into(),
+            },
+            HOME,
+            "/home/tester/.colima/_lima",
+            Some("   "),
+            ("docker", "default"),
+        )
+        .unwrap();
+        assert!(fallback
+            .args
+            .contains(&"/home/tester/.lima/ubuntu/ssh.config".to_string()));
+    }
+
+    #[test]
+    fn docker_exec_is_runtime_aware_for_containerd_and_podman() {
+        let kind = SessionKind::DockerExec {
+            container: "my-nginx".into(),
+            label: String::new(),
+        };
+
+        let containerd = build_spawn_with_env(
+            &kind,
+            HOME,
+            "/home/tester/.colima/_lima",
+            None,
+            ("containerd", "dev"),
+        )
+        .unwrap();
+        assert_eq!(containerd.program, "colima");
+        assert_eq!(
+            &containerd.args[..6],
+            &["-p", "dev", "nerdctl", "exec", "-it", "my-nginx"]
+        );
+
+        let podman = build_spawn_with_env(
+            &kind,
+            HOME,
+            "/home/tester/.colima/_lima",
+            None,
+            ("podman", "default"),
+        )
+        .unwrap();
+        assert_eq!(podman.program, "podman");
+        assert_eq!(&podman.args[..3], &["exec", "-it", "my-nginx"]);
+    }
+
+    #[test]
+    fn idle_reaped_ids_return_minus_one_once_and_bound_at_max() {
+        let mut mgr = SessionManager::new();
+        assert_eq!(mgr.poll_exit("unknown-session"), None);
+
+        for i in 0..(MAX_REAPED_IDS + 10) {
+            mgr.record_reaped_id(format!("reaped-{i}"));
+        }
+        assert_eq!(mgr.reaped_ids.len(), MAX_REAPED_IDS);
+        // Oldest 10 evicted
+        assert_eq!(mgr.poll_exit("reaped-0"), None);
+        // Remaining return Some(-1) once, then None
+        let newest = format!("reaped-{}", MAX_REAPED_IDS + 9);
+        assert_eq!(mgr.poll_exit(&newest), Some(-1));
+        assert_eq!(mgr.poll_exit(&newest), None);
+    }
+
+    #[test]
+    fn poll_exit_stops_flush_thread_and_excludes_closed_from_len() {
+        let pty = NativePtySystem::default();
+        let pair = pty
+            .openpty(PtySize {
+                rows: DEFAULT_ROWS,
+                cols: DEFAULT_COLS,
+                pixel_width: 0,
+                pixel_height: 0,
+            })
+            .expect("openpty");
+        let cmd = CommandBuilder::new("/bin/sh");
+        let mut cmd = cmd;
+        cmd.args(["-c", "exit 7"]);
+        let child = pair.slave.spawn_command(cmd).expect("spawn sh");
+        let writer = pair.master.take_writer().expect("writer");
+        drop(pair.slave);
+
+        let running = Arc::new(AtomicBool::new(true));
+        let mut mgr = SessionManager::new();
+        mgr.sessions.insert(
+            "s1".to_string(),
+            TerminalSession {
+                master: pair.master,
+                writer,
+                child,
+                running: Arc::clone(&running),
+                last_activity: Arc::new(Mutex::new(Instant::now())),
+                closed: false,
+            },
+        );
+        assert_eq!(mgr.len(), 1);
+
+        let mut exit_code = None;
+        for _ in 0..50 {
+            if let Some(code) = mgr.poll_exit("s1") {
+                exit_code = Some(code);
+                break;
+            }
+            thread::sleep(Duration::from_millis(20));
+        }
+        assert_eq!(exit_code, Some(7));
+        assert!(!running.load(Ordering::Relaxed), "running flag must be cleared on exit");
+        assert_eq!(mgr.len(), 0, "closed session must not count against MAX_SESSIONS");
+        assert_eq!(mgr.poll_exit("s1"), None, "poll_exit must report exit once");
+        mgr.prune_closed();
+        assert!(mgr.sessions.is_empty());
     }
 }

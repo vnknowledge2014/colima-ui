@@ -19,14 +19,17 @@ TOKEN="$(cat ~/.colima-ui/api_token)"
 
 ---
 
-## 1. Health, Capabilities & Realtime SSE
+## 1. Health, Capabilities, Entitlement, Telemetry & Realtime SSE
 - `GET /api/health`: Kiểm tra trạng thái sống của API server (public, không cần token).
-- `GET /api/capabilities`: Lấy schema năng lực dành cho AI Agent / Orchestrator.
+- `GET /api/capabilities`: Lấy schema năng lực và Event Bus (100 sự kiện) dành cho AI Agent / Orchestrator.
 - `GET /api/announcements`: Lấy thông báo hệ thống mới nhất.
-- `GET /api/events?token=<TOKEN>&topics=docker-state,instances,metrics.sample`: Đăng ký luồng sự kiện thời gian thực (SSE). Tham số `topics` tùy chọn (tối đa 16 topics).
+- `GET /api/telemetry/consent`, `POST /api/telemetry/consent`, `GET /api/telemetry/should-prompt`, `GET /api/telemetry/preview`: Quản lý trạng thái đồng ý (opt-in) và xem trước dữ liệu telemetry ẩn danh.
+- `GET /api/pro/status`: Kiểm tra trạng thái Pro sidecar cục bộ (mặc định `{"state": "free"}` trên bản MIT).
+- `GET /api/subscription`, `POST /api/subscription/store`: Đọc / lưu bộ nhớ đệm quyền sử dụng offline cục bộ.
+- `GET /api/events?token=<TOKEN>&topics=instances-update,docker-state-updated,metrics.sample`: Đăng ký luồng sự kiện thời gian thực (SSE). Tham số `topics` tùy chọn (tối đa 16 topics; các topic chuẩn gồm `docker-state-updated`, `instances-update`, `metrics.sample`, `transfer.progress`, `transfer.done`, `transfer.failed`, `security-scan-progress`, `detonation.event`, `detonation.status`).
 
 ## 2. AI Chat, Đa hội thoại (Multi-Conversation History) & Settings
-- `POST /api/cli/chat`: Ủy quyền tác vụ cho Headless AI Agent. Body: `{"prompt": "...", "provider": "...", "model": "..."}` → trả về `{"result": "..."}`.
+- `POST /api/cli/chat`: Ủy quyền tác vụ cho vòng lặp Headless AI Agent đa bước. Body: `{"prompt": "...", "provider": "...", "model": "...", "allow_mutations": false}` → trả về `{"result": "..."}`.
 - `POST /api/ai/chat`: Gửi hội thoại trực tiếp tới LLM đang cấu hình (`provider`, `model`, `api_key`, `endpoint`, `messages`).
 - `POST /api/ai/models`: Liệt kê danh sách model khả dụng từ provider.
 - `POST /api/ai/search`, `POST /api/ai/fetch-page`: Tìm kiếm tài liệu web (SearXNG) và trích xuất trang thành Markdown.
@@ -121,10 +124,14 @@ TOKEN="$(cat ~/.colima-ui/api_token)"
 - `POST /api/k8s/exec`, `POST /api/k8s/benchmark`: Mở phiên lệnh vào pod và chạy benchmark HTTP.
 - `GET /api/kind`, `POST /api/kind/create`, `POST /api/kind/delete`: Quản lý cụm Kind (Kubernetes in Docker).
 
-## 8. Colima Instances, Colima Config (`colima.yaml`) & Lima VMs
-- **Colima Instances**:
+## 8. Colima Instances, Presets, Colima Config (`colima.yaml`) & Lima VMs
+- **Colima Instances & Worker Nodes**:
   - `GET /api/instances`, `GET /api/instances/status` (`?profile=default`), `GET /api/instances/ssh`: Tra cứu máy ảo Colima.
   - `POST /api/instances/start`, `stop`, `delete`, `k8s`: Khởi động, dừng, xóa instance hoặc thao tác K3s trên instance.
+  - `POST /api/instances/create-worker`: Tạo và ghép nối node K3s worker Colima vào cụm master (`{"master_profile": "...", "worker_profile": "...", "cpu": 2, "memory": 4}`).
+- **Custom Presets & Container Snapshots**:
+  - `GET /api/presets`, `POST /api/presets`, `POST /api/presets/delete`: Đọc, lưu và xóa cấu hình phần cứng máy ảo tùy chỉnh (SQLite `user_presets`).
+  - `GET /api/presets/snapshot` (`?preset_id=...&instance_profile=...`), `POST /api/presets/snapshot`, `GET /api/presets/snapshots` (`?profile=...`): Quản lý snapshot trạng thái containers gắn với từng preset/profile.
 - **Colima Config (`colima.yaml`)**:
   - `GET /api/instances/config`: Đọc cấu hình `colima.yaml` hiện hành của profile.
   - `POST /api/instances/config/preview`: Xem trước bản so sánh thay đổi (`diff`) cấu hình `colima.yaml`.
@@ -135,9 +142,11 @@ TOKEN="$(cat ~/.colima-ui/api_token)"
 
 ## 9. System, Reference, Diagnostics, Knowledge Bank & Sandbox
 - **System & Reference**:
-  - `GET /api/system/check`, `version`, `homebrew`, `check-tool` (`?name=...`), `capabilities`, `platform`, `host-specs`, `engine-resources`, `df`: Thông tin phần cứng, công cụ và dung lượng hệ thống.
+  - `GET /api/system/check`, `version`, `homebrew`, `check-tool` (`?name=...`), `platform`, `host-specs`, `runtime`, `engine-resources`, `df`: Thông tin phần cứng, runtime đang hoạt động (`docker`/`nerdctl`), công cụ và dung lượng hệ thống.
+  - `GET /api/system/capabilities`: Thăm dò trạng thái các công cụ dòng lệnh trên máy chủ (`colima`, `docker`, `kubectl`, `trivy`...) kèm gợi ý cài đặt (`install_hint`) — phân biệt với `GET /api/capabilities` dành cho AI Agent schema.
   - `GET /api/system/reference`: Đọc tài liệu tham chiếu nội bộ trong `resources/` (`?path=skills/docker/SKILL.md`, có bảo vệ chống path traversal).
   - `POST /api/system/install`, `POST /api/system/prune`: Cài đặt công cụ phụ thuộc và dọn dẹp toàn hệ thống.
+  - `POST /api/system/resource-saver`: Bật/tắt chế độ tiết kiệm tài nguyên tự động dừng VM nhàn rỗi (`{"enabled": true, "idle_minutes": 15}`).
   - `GET /api/system/autostart`, `POST /api/system/autostart`: Trạng thái và cấu hình tự khởi động cùng macOS.
 - **Diagnostics & Environment**:
   - `GET /api/diagnostics/logs`: Thu thập nhanh nhật ký chẩn đoán hệ thống.

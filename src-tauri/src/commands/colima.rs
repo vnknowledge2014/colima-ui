@@ -102,10 +102,9 @@ fn colima_cmd() -> Command {
 /// Uses the fast filesystem reader (shared with API server) for consistency.
 #[tauri::command]
 pub async fn list_instances() -> Result<Vec<ColimaInstance>, crate::error::ColimaError> {
-    async move {
-    Ok(crate::instance_reader::list_instances_fast())
-    }
-    .await.map_err(|e: String| crate::error::ColimaError::from(e))
+    crate::helpers::run_blocking(|| Ok(crate::instance_reader::list_instances_fast()))
+        .await
+        .map_err(crate::error::ColimaError::from)
 }
 
 /// Does this profile already have a colima.yaml?
@@ -596,19 +595,18 @@ pub async fn collect_diagnostic_logs(profile: String) -> Result<String, crate::e
     crate::validation::ensure_valid_profile(&profile).map_err(crate::error::ColimaError::validation)?;
     async move {
     tokio::task::spawn_blocking(move || {
-        let home = std::env::var("HOME").unwrap_or_else(|_| "/Users/unknown".to_string());
         let profile_dir = if profile.is_empty() || profile == "default" {
             "colima".to_string()
         } else {
             format!("colima-{}", profile)
         };
-        let lima_dir = format!("{}/.colima/_lima/{}", home, profile_dir);
+        let lima_dir = crate::path_util::lima_home().join(&profile_dir);
         let mut report = String::new();
 
         // Section 1: Lima VM log files
         report.push_str("## Lima VM Logs\n\n");
         for log_file in &["ha.stderr.log", "ha.stdout.log", "serial.log", "serialv.log"] {
-            let path = format!("{}/{}", lima_dir, log_file);
+            let path = lima_dir.join(log_file);
             if let Ok(content) = std::fs::read_to_string(&path) {
                 // Take last 30 lines (most recent errors)
                 let lines: Vec<&str> = content.lines().collect();
@@ -677,7 +675,7 @@ pub async fn collect_diagnostic_logs(profile: String) -> Result<String, crate::e
 
         // Section 4: Colima version info
         report.push_str("## System Info\n\n");
-        if let Ok(output) = std::process::Command::new("colima").args(["version"]).output() {
+        if let Ok(output) = colima_cmd().args(["version"]).output() {
             let ver = String::from_utf8_lossy(&output.stdout);
             report.push_str(&format!("```\n{}\n```\n", ver.trim()));
         }

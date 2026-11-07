@@ -27,11 +27,17 @@
   $effect(() => {
     if (newConfig.vm_type === "qemu") {
       qemuChecking = true;
-      sysMethods.checkTool("qemu-img").then(res => {
-        qemuMissing = !res.installed;
-      }).finally(() => {
-        qemuChecking = false;
-      });
+      sysMethods
+        .checkTool("qemu-img")
+        .then((res) => {
+          qemuMissing = !res.installed;
+        })
+        .catch(() => {
+          qemuMissing = false;
+        })
+        .finally(() => {
+          qemuChecking = false;
+        });
     } else {
       qemuMissing = false;
       qemuChecking = false;

@@ -11,9 +11,9 @@ src/
 ├── index.css                   # Global styles import
 ├── vite-env.d.ts               # Vite type declarations
 ├── setupTests.ts               # Test setup (jsdom)
-├── store.svelte.ts             # Global reactive state
-├── pages/                      # 20 page components
-├── components/                 # 66 components (incl. ai/, activity/, compose/, security/, topology/, notifications/, settings/, transfer/, diagnostics/)
+├── store.svelte.ts             # Global reactive state (uiState, dockerState, resourceState, dashboardState)
+├── pages/                      # 17 navigable sidebar pages + 3 sub-views (20 .svelte files)
+├── components/                 # Shared & domain components (ai/, activity/, compose/, security/, topology/, notifications/, settings/, transfer/, diagnostics/)
 ├── store/                      # Domain-specific state modules
 ├── lib/                        # Utilities, API layer, AI bus
 ├── styles/                     # CSS design system
@@ -22,28 +22,30 @@ src/
 
 ## Pages
 
+`src/pages/` contains **17 top-level navigable pages** (`uiState.currentPage`: `dashboard`, `instances`, `environment`, `containers`, `images`, `volumes`, `networks`, `compose`, `topology`, `activity`, `security`, `kubernetes`, `linux-vms`, `models`, `terminal`, `settings`, `help`) plus **3 embedded sub-views** (`TerminalInstance.svelte`, `XRay.svelte`, `ClusterTopology.svelte`):
+
 | Page | File | Description |
 |------|------|-------------|
 | Dashboard | `Dashboard.svelte` | System overview, resource counts, quick navigation |
 | Instances | `Instances.svelte` | Colima instance & Kind cluster management |
-| Containers | `Containers.svelte` | Docker container list, actions, stats, logs, interactive PTY terminal launch |
-| Images | `Images.svelte` | Docker image management |
+| Environment | `Environment.svelte` | Read-only provenance record of resolved Colima/Lima/Docker/Kubeconfig paths and `launchd`-vs-shell environment duality |
+| Containers | `Containers.svelte` | Docker container list, actions, stats, logs, interactive PTY terminal launch (`dockerExec`) |
+| Images | `Images.svelte` | Docker image management, build, and background TAR save/load |
 | Volumes | `Volumes.svelte` | Docker volume management |
 | Networks | `Networks.svelte` | Docker network management |
-| Activity | `Activity.svelte` | Live container metrics; holds the SSE subscription that gates backend sampling |
-| Topology | `Topology.svelte` | Docker graph: containers ↔ networks/volumes/projects/images. Distinct from the Kubernetes graph in `XRay.svelte` |
-| Compose | `Compose.svelte` | Docker Compose project management |
-| Kubernetes | `Kubernetes.svelte` | Multi-resource K8s browser |
+| Compose | `Compose.svelte` | Docker Compose project lifecycle, build/pull, Compose Diagnose & AI Autofix |
+| Topology | `Topology.svelte` | Docker graph: containers ↔ networks/volumes/projects/images (distinct from the K3s node graph in `ClusterTopology.svelte` and K8s resource diagnostics in `XRay.svelte`) |
+| Activity | `Activity.svelte` | Live container metrics, alert rules, self-healing & unified activity timeline; holds the SSE subscription that gates backend sampling |
+| Security | `Security.svelte` | Local Trivy vulnerability scanning, `/100` provenance score breakdown, config rules, base-image alternatives, Falco runtime stream, and container Detonation |
+| Kubernetes | `Kubernetes.svelte` | Multi-resource K8s browser, pod log streaming, port-forwarding, and PTY pod exec |
 | Linux VMs | `LinuxVMs.svelte` | Lima VM management |
 | Models | `Models.svelte` | Ollama AI model management |
 | Terminal | `Terminal.svelte` | Integrated xterm.js PTY terminal (`colima`, `lima`, `dockerExec`, `k8sExec`) |
-| Terminal Instance | `TerminalInstance.svelte` | Individual terminal tab |
-| Settings | `Settings.svelte` | System info, AI provider config, privacy/telemetry, notifications, disk usage, prune |
-| Security | `Security.svelte` | Local Trivy vulnerability scanning, `/100` provenance score breakdown, config rules, base-image alternatives, Falco runtime stream, and container Detonation |
+| Settings | `Settings.svelte` | System info, Colima `colima.yaml` editor, AI provider config, auto-updates, privacy/telemetry, notifications, disk usage, prune |
 | Help | `Help.svelte` | Offline FTS5-searchable troubleshooting & setup guides across 4 locales (`en`, `ja`, `vi`, `zh`) |
-| Environment | `Environment.svelte` | Read-only provenance record of resolved Colima/Lima/Docker/Kubeconfig paths and `launchd`-vs-shell environment duality |
-| X-Ray | `XRay.svelte` | Kubernetes diagnostics |
-| Cluster Topology | `ClusterTopology.svelte` | Cluster visualization |
+| *(Sub-view)* Terminal Instance | `TerminalInstance.svelte` | Individual PTY terminal tab mounted inside `Terminal.svelte` |
+| *(Sub-view)* X-Ray | `XRay.svelte` | Kubernetes resource relationship diagnostics (`Ingress ↔ Service ↔ Deployment/StatefulSet/DaemonSet ↔ Pod`) |
+| *(Sub-view)* Cluster Topology | `ClusterTopology.svelte` | Kubernetes / K3s Master & Worker node cluster topology graph |
 
 ## Components
 
@@ -65,32 +67,37 @@ src/
 | `Icon.svelte` | Dynamic icon component |
 | `Icons.svelte` | SVG icon definitions |
 | `KubernetesHealth.svelte` | Cluster health dashboard |
+| `settings/UpdateSettings.svelte` | Signed in-app auto-update check, release notes preview, and install via `tauri-plugin-updater` |
 
 ## State Management
 
 Uses **Svelte 5 Runes** (`$state`, `$derived`, `$effect`) for fine-grained reactivity.
 
-### Global Store (`store.svelte.ts`)
+### Global Store (`src/store.svelte.ts`)
+
+Exports structured `$state` objects shared across views:
 
 ```typescript
-// Reactive state using Svelte 5 runes
-let instances = $state<ColimaInstance[]>([]);
-let containers = $state<DockerContainer[]>([]);
-let images = $state<DockerImage[]>([]);
-// ... volumes, networks, compose, system info
+// Structured reactive state objects using Svelte 5 runes
+export const dockerState = $state({ containers: [], images: [], containerStats: {}, /* ... */ });
+export const resourceState = $state({ volumes: [], networks: [], /* ... */ });
+export const dashboardState = $state({ colimaInstances: [], k8sStatus: null, linuxVMs: [], systemInfo: null, engineResources: null, /* ... */ });
+export const uiState = $state({ currentPage: 'dashboard' as Page, theme: 'dark', aiPanelOpen: false, terminalTabs: [], /* ... */ });
 ```
 
-### Domain Stores (`store/`)
+### Domain Stores (`src/store/`)
 
 | Store | Contents |
 |-------|----------|
-| `ai.svelte.ts` | Chat messages, provider config, model selection, agent state |
-| `k8s.svelte.ts` | Namespaces, pods, deployments, services, selected context |
+| `ai.svelte.ts` | Multi-conversation threads, chat messages, provider config (`6` modes), model selection, agent state |
+| `k8s.svelte.ts` | Namespaces, pods, deployments, services, CRDs, selected context |
 | `confirm.svelte.ts` | Confirmation dialog visibility and callbacks |
+| `capabilities.svelte.ts` | Host external tool capability probes (`colima`, `docker`, `kubectl`, `trivy`, etc.) and `install_hint` cache |
+| `notifications.svelte.ts` | Session-scoped unified store for running/completed background transfers, announcements, and reported errors |
 
-## API Layer (`lib/api.ts`)
+## API Layer (`src/lib/api.ts` & `src/lib/api/`)
 
-The dual-mode API layer automatically routes calls based on runtime:
+The dual-mode API layer (`src/lib/api/`, barrel-exported through `src/lib/api.ts`) automatically routes calls based on runtime:
 
 ```typescript
 import { isRunningInTauri } from './env';   // never inline the check
@@ -107,20 +114,22 @@ async function listContainers(all: boolean) {
 }
 ```
 
-### API Sections
+### API Namespaces (`src/lib/api/`)
 
-| Namespace | Methods |
-|-----------|---------|
-| `instanceApi` | list, start, stop, delete, status, ssh |
-| `dockerApi` | containers, images, volumes, networks, compose |
-| `k8sApi` | pods, deployments, services, configmaps, etc. |
-| `limaApi` | list, start, stop, delete, shell, templates |
-| `modelApi` | list, pull, serve, delete |
-| `aiApi` | chat, listModels, history, feedback |
-| `sysMethods` | checkSystem, hostSpecs, platform, tools |
-| `settingsApi` | get/set settings, presets |
-| `knowledgeBankApi` | query, learn, feedback, memory |
-| `sandboxApi` | classify, execute, executeApproved |
+| Namespace | Responsibility |
+|-----------|----------------|
+| `colimaApi` / `colimaConfigApi` | Colima instance lifecycle, status, SSH, K3s worker creation, and `colima.yaml` read/preview/apply |
+| `dockerApi` / `volumesApi` / `networksApi` | Container, image, volume, network CRUD, stats, logs, exec, run, build, and prune |
+| `composeApi` | Docker Compose lifecycle (`up`, `down`, `restart`, `build`, `pull`), Compose Diagnose, and AI Autofix |
+| `topologyApi` / `transferApi` | Docker topology graph and background image `.tar` / container `cp` transfer jobs |
+| `k8sApi` / `kindApi` | Kubernetes multi-resource queries, YAML apply, scale, port-forward, benchmark, and Kind clusters |
+| `limaApi` / `modelsApi` | Lima VM management and local Ollama model lifecycle (`list`, `pull`, `serve`, `delete`) |
+| `aiApi` / `knowledgeBankApi` / `helpApi` / `sandboxApi` | Multi-provider AI chat, conversations/history, Knowledge Bank & LTM, offline Help articles, and shell sandbox |
+| `securityApi` / `falcoApi` / `detonationApi` | Trivy CVE/audit scanning, SBOM export, policies, Falco runtime stream, and container Detonation |
+| `metricsApi` / `alertsApi` / `selfHealApi` / `activityApi` | Bollard metric history, alert rules & backtest, self-healing rules, and activity timeline/export |
+| `diagnosticsApi` / `environmentApi` | Redacted diagnostic bundles, VM logs, and `launchd`-vs-shell environment path provenance |
+| `systemApi` / `sysMethods` / `settingsApi` | Host specs, tool probes, autostart, Resource Saver, SQLite settings, and custom VM presets |
+| `announcementsApi` / `telemetryApi` / `subscriptionApi` | Static advisories feed, opt-in telemetry consent/preview, and local offline entitlement state |
 
 ## Event System
 
@@ -129,12 +138,12 @@ async function listContainers(all: boolean) {
 import { listen } from '@tauri-apps/api/event';
 
 listen('docker-state-updated', (event) => {
-  containers = event.payload.containers;
-  images = event.payload.images;
+  dockerState.containers = event.payload.containers;
+  dockerState.images = event.payload.images;
 });
 
 listen('instances-update', (event) => {
-  instances = event.payload;
+  dashboardState.colimaInstances = event.payload;
 });
 ```
 
@@ -145,13 +154,14 @@ listen('instances-update', (event) => {
 // was opened with (browser) — there is no endpoint to fetch it from.
 const es = new EventSource(`/api/events?token=${await getApiToken()}`);
 
-es.addEventListener('docker-state', (e) => {
+es.addEventListener('docker-state-updated', (e) => {
   const data = JSON.parse(e.data);
-  containers = data.containers;
+  dockerState.containers = data.containers;
 });
 
-es.addEventListener('instances', (e) => {
-  instances = JSON.parse(e.data);
+es.addEventListener('instances-update', (e) => {
+  const data = JSON.parse(e.data);
+  dashboardState.colimaInstances = data.instances ?? data;
 });
 ```
 
@@ -160,13 +170,13 @@ es.addEventListener('instances', (e) => {
 | Module | Purpose |
 |--------|---------|
 | `agentCore.ts` | 5-round Command Center AI orchestrator, conversation window hygiene, 80%/20% tool output pruner, repeat-tool guard |
-| `aiEventBus.ts` | AI agent event bus with 92+ domain-specific tool registrations (`SAFE` / `NORMAL` / `DANGEROUS`) |
+| `aiEventBus.ts` | AI agent event bus with 100 domain-specific tool registrations (`SAFE` / `NORMAL` / `DANGEROUS`) |
 | `aiToolParser.ts` | Bracket-balanced colon tags (`[TAG: ...]`) & streaming partial-tag parser (`stripStreamingPartialTags`, `cleanToolSyntaxRemnants`) |
 | `chatMarkdown.ts` (`aiMessageParser`) | XSS-sanitized Markdown & streaming `<think>` reasoning block / GFM table / shell code AST parser |
 | `aiToolStep.ts` | Structured state machine & serializer for inline `ToolStepCard` entries |
 | `aiSuggestions.ts` | Warning-prioritized empty-state starters, fallback follow-up chips, and `[LIVE_UI_CONTEXT]` snapshot builder |
-| `aiProviderConfig.ts` | Per-provider credential/model storage and OpenAI/Ollama base URL normalization |
-| `llmProviders.ts` | Multi-provider SSE streaming client (9 provider ecosystems + multi-packet `<think>` normalization) |
+| `aiProviderConfig.ts` | Per-provider credential/model storage across the 6 canonical provider modes (`anthropic`, `openai`, `gemini`, `openai-compatible`, `ollama-local`, `ollama-cloud`) |
+| `llmProviders.ts` | Multi-provider SSE streaming client (6 built-in provider modes + multi-packet `<think>` normalization) |
 | `formatters.ts` | Display formatting (bytes, dates, durations) |
 | `normalizers.ts` | Data normalization utilities |
 | `markdown.ts` | General Markdown rendering utilities (Help articles, notes) |
@@ -262,8 +272,9 @@ Domain-specific AI tool handlers:
 | `lima.ts` | Lima VM operations |
 | `compose.ts` | Docker Compose operations |
 | `volumes.ts` | Volume-specific operations |
-| `system.ts` | System checks, tool installation |
-| `config.ts` | App configuration |
+| `system.ts` | System checks, environment resolutions, tool installation, local Ollama model actions |
+| `config.ts` | App configuration & custom VM hardware presets |
+| `shell.ts` | Sandboxed `cli-exec` execution & UI `navigate` across all 17 pages |
 
 ## CSS Design System (`styles/`)
 

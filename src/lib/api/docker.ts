@@ -83,9 +83,9 @@ export const dockerApi = {
     call<string>("pause_container", { containerId }, "POST", "/api/containers/pause", { containerId }),
 
   unpauseContainer: (containerId: string) =>
-    call<string>("unpause_container", { containerId }, "POST", "/api/containers/unpause", undefined, { id: containerId }),
+    call<string>("unpause_container", { containerId }, "POST", "/api/containers/unpause", { containerId }),
   systemDf: () =>
     call<string>("system_df", undefined, "GET", "/api/docker/df"),
   systemPrune: (all = true) =>
-    call<string>("system_prune", { all }, "POST", "/api/docker/prune"),
+    call<string>("system_prune", { all }, "POST", "/api/system/prune", { all: String(all) }),
 };

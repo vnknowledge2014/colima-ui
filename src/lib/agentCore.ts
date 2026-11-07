@@ -4,6 +4,7 @@ import type { AiMessage } from "../store/ai.svelte";
 import { chatStream } from "./llmProviders";
 import { newId } from "./ids";
 import { getCategory, executeEvent } from "./aiEventBus";
+import { isValidPage } from "../store.svelte";
 import { BUILT_IN_PRESETS } from "./presetStateManager";
 import { parseAiTools, stripStreamingPartialTags, rebuildAssistantTurnContent } from "./aiToolParser";
 import { findProvider } from "./aiProviderConfig";
@@ -696,6 +697,10 @@ Built-in Presets: ${JSON.stringify(BUILT_IN_PRESETS)}
 
       for (const [, tab] of navigates) {
         const page = tab.toLowerCase().trim();
+        if (!isValidPage(page) && page !== "ai-chat") {
+          toolContext += `\n(Invalid navigation target: ${page})\n`;
+          continue;
+        }
         toolContext += `\n(Navigated to ${page})\n`;
         const stepId = newId();
         const step = createToolStep({

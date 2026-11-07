@@ -30,6 +30,8 @@ Grab the latest release from [**GitHub Releases**](https://github.com/vnknowledg
 | **macOS** (Intel) | `ColimaUI_*_x64.dmg` | x86_64 |
 | **Linux** (Debian/Ubuntu) | `ColimaUI_*_amd64.deb` | x86_64 |
 | **Linux** (Universal) | `ColimaUI_*_amd64.AppImage` | x86_64 |
+| **Standalone Headless AI & MCP CLI (`cui`)** | `cui-{aarch64-apple-darwin,x86_64-apple-darwin,x86_64-unknown-linux-gnu}.tar.gz` | macOS ARM64 / Intel, Linux x86_64 |
+| **Standalone Direct CLI (`colimaui`)** | `colimaui-{aarch64-apple-darwin,x86_64-apple-darwin,x86_64-unknown-linux-gnu}.tar.gz` | macOS ARM64 / Intel, Linux x86_64 |
 
 > **macOS Gatekeeper:** Pre-built DMGs are currently unsigned. If macOS shows
 > *"ColimaUI.app is damaged and can't be opened"*, open **System Settings →
@@ -51,7 +53,8 @@ Grab the latest release from [**GitHub Releases**](https://github.com/vnknowledg
 
 | Pillar | Capabilities |
 |--------|--------------|
-| **Command Center AI** | Multi-provider agent (**9 providers**: Ollama, OpenAI, Anthropic, Google Gemini, OpenRouter, Groq, Together, Mistral, DeepSeek) with bracket-tag Event Bus tools, `<think>` reasoning blocks, **3-tier guided UX** (context-aware empty state, interactive choice cards, follow-up chips), safe Terminal command handoff, and multi-conversation SQLite history |
+| **Command Center AI** | Multi-provider agent (**6 built-in provider modes**: `anthropic`, `openai`, `gemini`, `ollama-local`, `ollama-cloud`, and `openai-compatible` covering any OpenAI-compatible gateway such as OpenRouter, Groq, DeepSeek, Mistral, Together AI, LiteLLM, 9router, vLLM, or LM Studio) with **100** bracket-tag Event Bus tools across **17** navigable UI pages, `<think>` reasoning blocks, **3-tier guided UX** (context-aware empty state, interactive choice cards, follow-up chips), safe Terminal command handoff, and multi-conversation SQLite history |
+| **CLI & Native MCP Server** | Headless multi-turn AI CLI (`cui`), direct subcommand CLI (`colimaui`), and built-in **JSON-RPC 2.0 MCP stdio server** (`cui mcp` / `colimaui mcp`) exposing **15 typed tools** that work seamlessly whether ColimaUI Desktop is running or closed |
 | **Security & Runtime Auditing** | Local Trivy vulnerability scanning with provenance-backed scores, CycloneDX/SPDX SBOM export, configuration rule pack (`L1`–`L3`), local base-image alternatives catalog, Falco runtime event stream, and isolated container Detonation sandbox |
 | **Topology, Live Activity & Self-Healing** | Interactive Docker & Kubernetes topology graphs, low-overhead Bollard live metrics, alert rules with historical backtesting, self-healing rules with kill switch, Compose Diagnose & AI Autofix (preview/apply/undo), and background TAR/file transfers |
 | **100% Free & Open Source (MIT)** | All features unlocked out of the box with zero account or sign-in required and strict BYOK local-first privacy |
@@ -70,6 +73,33 @@ Grab the latest release from [**GitHub Releases**](https://github.com/vnknowledg
 - Real pseudo-terminal (`portable-pty` + `xterm.js`) over Tauri IPC for Colima SSH, Lima VMs, running Docker containers (`docker exec -it`), and Kubernetes pods (`kubectl exec`)
 - **Environment Provenance & Duality** — Read-only diagnostic view comparing `launchd` vs user shell environment variables alongside resolved Colima, Lima, Docker socket, and Kubeconfig paths
 - Offline full-text searchable Help Center (`articles_fts`) and full UI localization across **4 languages** (`en`, `ja`, `vi`, `zh`)
+
+### 🤖 Headless CLI (`cui` / `colimaui`) & Native MCP Server
+
+GitHub Releases (`v0.2.2+`) include standalone `cui` and `colimaui` tarballs alongside desktop installers:
+
+```bash
+# Headless multi-turn AI agent (reads ~/.colima-ui/knowledge.db settings; read-only by default)
+cui "Check Colima status and summarize exited containers"
+cui --yes "Restart the exited redis container"
+cui --json --provider openai-compatible --model deepseek-chat "Inspect K8s pod health"
+# Provider IDs: anthropic | openai | gemini | openai-compatible | ollama-local | ollama-cloud
+```
+
+**Native MCP Stdio Server (`cui mcp` or `colimaui mcp`)** — Exposes **15 typed JSON-RPC 2.0 MCP tools** (`colima_list_instances`, `colima_instance_action`, `docker_list_containers`, `docker_container_action`, `docker_container_logs`, `docker_list_images`, `docker_pull_image`, `docker_list_volumes`, `docker_list_networks`, `compose_list_projects`, `k8s_list_pods`, `k8s_cluster_status`, `environment_resolutions`, `system_diagnostics`, `colima_ai_ask`). Automatically proxies via `127.0.0.1:<api_port>` when ColimaUI Desktop is open, or executes directly via native fallback when Desktop is closed:
+
+- **Claude Desktop** (`claude_desktop_config.json`), **Cursor** (`~/.cursor/mcp.json`), **Antigravity** (`~/.gemini/antigravity/mcp_config.json`), **Windsurf** (`~/.codeium/windsurf/mcp_config.json`):
+  ```json
+  {"mcpServers": {"colima-ui": {"command": "cui", "args": ["mcp"]}}}
+  ```
+- **Zed** (`~/.config/zed/settings.json`):
+  ```json
+  {"context_servers": {"colima-ui": {"command": {"path": "cui", "args": ["mcp"]}}}}
+  ```
+- **Claude Code**:
+  ```bash
+  claude mcp add colima-ui -- cui mcp
+  ```
 
 ---
 
@@ -164,18 +194,23 @@ colima-ui/
 │   │   ├── lib.rs                # App setup, state & Tauri IPC command registration
 │   │   ├── api_server.rs         # Axum router & localhost HTTP/SSE server (11420–11429)
 │   │   ├── auth.rs               # CSPRNG Bearer token, IPC & 0600 ~/.colima-ui/api_token handoff
-│   │   ├── commands/             # 54 command modules (Docker, K8s, Colima, Security, Metrics, AI, KB, Env, ...)
-│   │   ├── routes/               # 27 HTTP route modules (thin delegation to commands/)
+│   │   ├── mcp.rs                # Native JSON-RPC 2.0 MCP stdio server (15 typed tools)
+│   │   ├── crash.rs              # Redacted panic hook & ~/.colima-ui/crashes report store
+│   │   ├── commands/             # Command modules (Docker, K8s, Colima, Security, Metrics, AI, KB, Env, ...)
+│   │   ├── routes/               # HTTP route modules (thin delegation to commands/)
 │   │   ├── adapters/             # Unified DevOps CLI adapter traits
 │   │   ├── services/             # High-level orchestration layer
 │   │   ├── telemetry/            # Opt-in closed-vocabulary telemetry & redaction
-│   │   ├── bin/                  # Standalone CLI binaries (cui, colimaui)
+│   │   ├── pro/                  # MIT-side Pro sidecar boundary (free by default)
+│   │   ├── subscription/         # Local offline entitlement state cache
+│   │   ├── bin/                  # Standalone CLI & MCP binaries (cui, colimaui)
 │   │   ├── sse.rs                # SSE broadcast & topic subscriber tracking
 │   │   ├── error.rs              # Structured ColimaError classification & remediation hints
 │   │   ├── redact.rs             # Credential & secret redaction
 │   │   ├── validation.rs         # Input & path-containment security checks
 │   │   ├── shell_env.rs          # Pre-adoption launchd env capture & non-login user shell adoption
-│   │   ├── docker_state.rs       # Bollard real-time container event stream
+│   │   ├── docker_state.rs       # Bollard debounced UI container state watcher
+│   │   ├── docker_events.rs      # Unaggregated Bollard container event stream (Self-Heal)
 │   │   ├── instance_reader.rs    # Fast Colima 0.10.x XDG YAML config reader ($COLIMA_HOME / ~/.colima / ~/.config/colima)
 │   │   └── terminal_session.rs   # Real PTY session manager (Colima, Lima, docker exec, kubectl exec)
 │   └── tauri.conf.json           # Tauri bundle & capability configuration
@@ -191,7 +226,7 @@ colima-ui/
 ## 🔄 CI/CD & Releases
 
 - **CI** (`.github/workflows/ci.yml`) — ESLint, TypeScript, `svelte-check`, CSS token & i18n gates, Vitest unit suite, `cargo check` + `cargo clippy` (macOS ARM64/x86, Linux), `cargo test --lib`, and frontend build verification
-- **Release** (`.github/workflows/release.yml`) — Automatically tags `main` with the next SemVer patch, builds macOS (`.dmg`) & Linux (`.deb` / `.AppImage`) bundles, and publishes a GitHub Release whenever a push to `main` passes `CI` (gracefully building unsigned installers when `TAURI_SIGNING_PRIVATE_KEY` is not configured, and automatically enabling signed updater artifacts once configured)
+- **Release** (`.github/workflows/release.yml`) — Automatically tags `main` with the next SemVer patch, builds macOS (`.dmg`), Linux (`.deb` / `.AppImage`), and standalone CLI archives (`cui-*.tar.gz`, `colimaui-*.tar.gz`), and publishes a GitHub Release whenever a push to `main` passes `CI` (gracefully building unsigned installers when `TAURI_SIGNING_PRIVATE_KEY` is not configured, and automatically enabling signed updater artifacts once configured)
 
 ```bash
 # Optional: prepare a minor/major bump on a feature branch before opening a PR

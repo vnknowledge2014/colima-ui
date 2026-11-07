@@ -128,19 +128,24 @@ fn is_authorized(
     auth_header: Option<&str>,
     expected: &str,
 ) -> bool {
+    if auth_header
+        .and_then(token_from_header)
+        .is_some_and(|t| constant_time_eq(t, expected))
+    {
+        return true;
+    }
+
     if QUERY_TOKEN_PATHS.contains(&path) {
         return query
             .and_then(token_from_query)
             .is_some_and(|t| constant_time_eq(t, expected));
     }
 
-    auth_header
-        .and_then(token_from_header)
-        .is_some_and(|t| constant_time_eq(t, expected))
+    false
 }
 
 /// Auth middleware — rejects requests without a valid Bearer token.
-/// SSE endpoints listed in [`QUERY_TOKEN_PATHS`] use `?token=` instead.
+/// SSE endpoints listed in [`QUERY_TOKEN_PATHS`] accept either Bearer header or `?token=`.
 pub async fn auth_middleware(
     req: axum::extract::Request,
     next: Next,
@@ -421,10 +426,23 @@ mod tests {
     }
 
     #[test]
-    fn header_does_not_work_on_query_token_paths() {
-        // Keeps the two mechanisms from silently overlapping.
+    fn header_and_query_token_both_work_on_query_token_paths() {
         let header = format!("Bearer {}", TOKEN);
-        assert!(!is_authorized("/api/events", None, Some(&header), TOKEN));
+        let q = format!("token={}", TOKEN);
+        assert!(is_authorized("/api/events", None, Some(&header), TOKEN));
+        assert!(is_authorized(
+            "/api/k8s/pods/logs/stream",
+            Some("namespace=default&pod=nginx"),
+            Some(&header),
+            TOKEN
+        ));
+        assert!(is_authorized("/api/events", Some(&q), None, TOKEN));
+        assert!(!is_authorized(
+            "/api/events",
+            Some("token=wrong"),
+            Some("Bearer wrong"),
+            TOKEN
+        ));
     }
 
     #[test]

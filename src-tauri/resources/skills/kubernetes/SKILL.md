@@ -32,7 +32,6 @@ Manage K8s clusters (K3s inside Colima, Kind, or remote) via the App Event Bus.
 - **CRDs**: `[QUERY: k8s-crds]`
 - **CRD resources**: `[QUERY: k8s-crd-resources | {"resource": "certificates.cert-manager.io", "namespace": "all"}]`
 - **Port forwards**: `[QUERY: k8s-port-forward-list]`
-- **Benchmark**: `[QUERY: k8s-benchmark | {"url": "http://localhost:8080", "concurrency": 5, "requests": 50}]`
 
 ## 3. Mutations (State Changes)
 
@@ -43,6 +42,7 @@ Manage K8s clusters (K3s inside Colima, Kind, or remote) via the App Event Bus.
 - **Apply manifest**: `[EVENT_APPROVE: k8s-apply | {"filePath": "/path/to/manifest.yaml"}]`
 - **Port forward start**: `[EVENT_APPROVE: k8s-port-forward-start | {"namespace": "default", "name": "api-pod", "localPort": 8080, "remotePort": 80}]`
 - **Port forward stop**: `[EVENT_APPROVE: k8s-port-forward-stop | {"localPort": 8080}]`
+- **Benchmark endpoint**: `[EVENT_APPROVE: k8s-benchmark | {"url": "http://localhost:8080", "concurrency": 5, "requests": 50}]`
 - **Exec into pod**: `[EVENT_APPROVE: k8s-exec | {"namespace": "default", "pod": "nginx-xyz"}]`
 - **Delete resource**: `[EVENT_APPROVE: k8s-delete | {"kind": "pod", "namespace": "default", "name": "old-pod"}]` ⚠️ DANGEROUS
 - **Node action**: `[EVENT_APPROVE: k8s-node-action | {"name": "node-1", "action": "cordon"}]` ⚠️ DANGEROUS (cordon/uncordon/drain)

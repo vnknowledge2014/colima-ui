@@ -31,6 +31,9 @@ If the start fails, the VM's own log says why:
 ```bash
 colima status
 colima start --verbose
+# Colima 0.10.x (XDG default)
+tail -n 100 "${COLIMA_HOME:-$HOME/.config/colima}/default/daemon/daemon.log"
+# Legacy Colima (< 0.10 / existing ~/.colima)
 tail -n 100 ~/.colima/default/daemon/daemon.log
 ```
 

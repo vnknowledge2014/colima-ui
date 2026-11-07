@@ -33,6 +33,8 @@
     "colima_missing": "Colima が見つかりません",
     "colima_missing_hint": "ヘルプからインストール",
     "colima_running": "{count} 台稼働中",
+    "colima_starting": "{count} 台起動中",
+    "colima_unhealthy": "{count} 台異常",
     "colima_stopped": "停止中",
     "colima_instances": "インスタンス",
     "security": "セキュリティ",
@@ -180,8 +182,10 @@
     "unpause": "Unpause",
     "restart": "Restart",
     "no_containers": "No containers",
+    "empty_text": "「Run」をクリックしてイメージからコンテナを起動します。",
     "open_terminal": "ターミナルを開く",
-    "open_interactive_terminal": "対話型ターミナルを開く (PTY)"
+    "open_interactive_terminal": "対話型ターミナルを開く (PTY)",
+    "terminal_desktop_only": "対話型 PTY ターミナルには ColimaUI デスクトップアプリが必要です。"
   },
   "diff": {
     "no_changes": "変更なし",
@@ -412,7 +416,11 @@
       "dashboard_resources_title": "リソース使用状況を確認",
       "dashboard_resources_prompt": "実行中のすべてのコンテナとVMのリソース使用状況を確認",
       "dashboard_health_title": "ランタイムヘルスチェック",
-      "dashboard_health_prompt": "クラスタとランタイムの健全性を検査"
+      "dashboard_health_prompt": "クラスタとランタイムの健全性を検査",
+      "environment_resolutions_title": "パス解決を確認",
+      "environment_resolutions_prompt": "ColimaUI の環境解決 (COLIMA_HOME、DOCKER_HOST、LIMA_HOME、PATH) を確認",
+      "environment_duality_title": "シェル環境とアプリ環境を比較",
+      "environment_duality_prompt": "シェル環境変数とこの GUI アプリの実行環境の差異を説明"
     },
     "fallback": {
       "check_cpu_mem": "CPUとメモリを確認",
@@ -500,7 +508,11 @@
       "inspect_active_vm": "アクティブなVMを確認",
       "inspect_active_vm_prompt": "アクティブなVMのリソース割り当てとディスク使用量を検査",
       "system_overview": "システム概要",
-      "system_overview_prompt": "システム状態、アクティブなインスタンス、コンテナの概要を表示"
+      "system_overview_prompt": "システム状態、アクティブなインスタンス、コンテナの概要を表示",
+      "inspect_env_resolutions": "解決レコードを確認",
+      "inspect_env_resolutions_prompt": "COLIMA_HOME、DOCKER_HOST、LIMA_HOME の ColimaUI 環境解決を確認",
+      "compare_shell_env": "シェル環境を比較",
+      "compare_shell_env_prompt": "シェル環境変数と ColimaUI 実行環境を比較"
     }
   },
   "terminal": {
@@ -512,7 +524,9 @@
     "new_session": "New Session",
     "no_sessions": "No terminal sessions",
     "instructions": "Open a new SSH session to a running instance.",
-    "docker_containers": "Docker コンテナ"
+    "docker_containers": "Docker コンテナ",
+    "desktop_only_title": "デスクトップアプリが必要です",
+    "desktop_only_desc": "対話型 PTY ターミナルセッションはネイティブ Tauri IPC 経由で動作するため、ColimaUI デスクトップアプリが必要です。"
   },
   "compose": {
     "diagnose": {
@@ -557,6 +571,7 @@
     },
     "title": "Docker Compose",
     "projects_count": "projects",
+    "start": "起動",
     "stop": "Stop",
     "restart": "Restart",
     "down": "Down",
@@ -861,6 +876,7 @@
     "remove_action": "削除",
     "remove_confirm": "ボリューム「{name}」を削除しますか？",
     "remove_selected_title": "選択したボリュームを削除",
+    "remove_selected": "選択した {count} 件を削除",
     "remove_count": "{count} 件を削除",
     "remove_batch_confirm": "{count} 件のボリュームを削除しますか？\n\n{names}\n\n元に戻せません。",
     "title": "Volumes",
@@ -1204,12 +1220,19 @@
     "no_models": "No models installed",
     "start_colima": "Start a Colima instance first to manage AI models.",
     "pull_to_start": "Pull a model to get started with AI inference.",
-    "popular": "Popular Models"
+    "popular": "Popular Models",
+    "count": "モデル",
+    "deleted": "モデル '{name}' を削除しました",
+    "pull_failed": "プルに失敗しました: {error}",
+    "pulled": "モデル '{name}' をプルしました",
+    "pulling": "モデル '{name}' をプルしています... しばらくかかる場合があります。",
+    "serving": "モデル '{name}' をポート 11434 で提供中"
   },
   "networks": {
     "title": "Networks",
     "count": "networks",
     "removing": "Removing...",
+    "remove_selected": "選択した {count} 件を削除",
     "pruning": "Pruning...",
     "prune": "Prune",
     "create_button": "Create Network",
@@ -1244,7 +1267,7 @@
   "environment": {
     "shellEnv": "シェル環境",
     "dualityExplain": "GUI プロセスは launchd の環境変数を継承し、あなたのシェルのものではありません（スナップショット: $SHELL で非ログインシェルを1回起動——zsh なら .zshenv、bash なら $BASH_ENV/.bashrc など）。2 列の差は正常です——重要なのは下の解決レコードです。",
-    "diverges": "Shell (.zshenv) とこのアプリの 2 列で値が異なります",
+    "diverges": "シェル環境とこのアプリの 2 列で値が異なります",
     "resolutionExplain": "本アプリが実際に使用している値と、それぞれを選んだ根拠。赤は設定されたパスが存在しないことを示します。",
     "title": "環境",
     "subtitle": "本アプリが把握しているセットアップの状態と、その根拠。",

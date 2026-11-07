@@ -348,6 +348,9 @@ async fn list_ollama_models(base_url: &str, api_key: &str) -> Result<String, Str
     }
 
     let resp = req.send().await.map_err(|e| crate::redact::redact_err("Request failed", e))?;
+    if !resp.status().is_success() {
+        return Err(format!("Provider returned HTTP {}", resp.status()));
+    }
     let body = resp.text().await.map_err(|e| crate::redact::redact_err("Read error", e))?;
 
     if body.trim().is_empty() {
@@ -386,6 +389,9 @@ async fn list_gemini_models(api_key: &str, endpoint: &str) -> Result<String, Str
         .send()
         .await
         .map_err(|e| crate::redact::redact_err("Request failed", e))?;
+    if !resp.status().is_success() {
+        return Err(format!("Provider returned HTTP {}", resp.status()));
+    }
     let body = resp
         .text()
         .await
@@ -441,6 +447,9 @@ async fn list_anthropic_models(api_key: &str, endpoint: &str) -> Result<String, 
         .send()
         .await
         .map_err(|e| crate::redact::redact_err("Request failed", e))?;
+    if !resp.status().is_success() {
+        return Err(format!("Provider returned HTTP {}", resp.status()));
+    }
     let body = resp.text().await.map_err(|e| crate::redact::redact_err("Read error", e))?;
 
     if body.trim().is_empty() {
@@ -493,6 +502,9 @@ async fn list_openai_models(
         .send()
         .await
         .map_err(|e| crate::redact::redact_err("Request failed", e))?;
+    if !resp.status().is_success() {
+        return Err(format!("Provider returned HTTP {}", resp.status()));
+    }
     let body = resp.text().await.map_err(|e| crate::redact::redact_err("Read error", e))?;
 
     if body.trim().is_empty() {
@@ -532,6 +544,30 @@ async fn list_openai_models(
 
 // ===== Chat implementations =====
 
+fn collect_system_messages(messages: &[ChatMessage]) -> String {
+    messages
+        .iter()
+        .filter(|m| m.role == "system" && !m.content.is_empty())
+        .map(|m| m.content.as_str())
+        .collect::<Vec<_>>()
+        .join("\n\n")
+}
+
+fn extract_anthropic_text(resp_body: &serde_json::Value) -> Option<String> {
+    let blocks = resp_body["content"].as_array()?;
+    let mut has_text_block = false;
+    let mut combined = String::new();
+    for block in blocks {
+        if block["type"] == "text" {
+            if let Some(text) = block["text"].as_str() {
+                has_text_block = true;
+                combined.push_str(text);
+            }
+        }
+    }
+    has_text_block.then_some(combined)
+}
+
 async fn call_anthropic(req: &AiChatRequest) -> Result<String, String> {
     let messages: Vec<serde_json::Value> = req
         .messages
@@ -545,12 +581,7 @@ async fn call_anthropic(req: &AiChatRequest) -> Result<String, String> {
         })
         .collect();
 
-    let system_msg = req
-        .messages
-        .iter()
-        .find(|m| m.role == "system")
-        .map(|m| m.content.clone())
-        .unwrap_or_default();
+    let system_msg = collect_system_messages(&req.messages);
 
     let body = serde_json::json!({
         "model": req.model,
@@ -588,17 +619,7 @@ async fn call_anthropic(req: &AiChatRequest) -> Result<String, String> {
         ));
     }
 
-    resp_body["content"]
-        .as_array()
-        .and_then(|blocks| {
-            blocks
-                .iter()
-                .filter(|b| b["type"] == "text")
-                .map(|b| b["text"].as_str().unwrap_or(""))
-                .collect::<Vec<_>>()
-                .first()
-                .map(|s| s.to_string())
-        })
+    extract_anthropic_text(&resp_body)
         .ok_or_else(|| "No response content from Anthropic".to_string())
 }
 
@@ -656,13 +677,11 @@ async fn call_openai(req: &AiChatRequest) -> Result<String, String> {
 
 async fn call_gemini(req: &AiChatRequest) -> Result<String, String> {
     let mut contents: Vec<serde_json::Value> = Vec::new();
-    let mut system_instruction = String::new();
+    let system_instruction = collect_system_messages(&req.messages);
 
     for msg in &req.messages {
         match msg.role.as_str() {
-            "system" => {
-                system_instruction = msg.content.clone();
-            }
+            "system" => {}
             "user" => {
                 contents.push(serde_json::json!({
                     "role": "user",
@@ -858,5 +877,74 @@ mod tests {
     fn an_empty_endpoint_stays_empty_so_the_caller_picks_its_default() {
         assert_eq!(normalize_openai_base(""), "");
         assert_eq!(normalize_openai_base("   "), "");
+    }
+
+    #[test]
+    fn multiple_system_messages_are_joined_with_blank_line() {
+        let msgs = vec![
+            super::ChatMessage {
+                role: "system".into(),
+                content: "Rule 1".into(),
+            },
+            super::ChatMessage {
+                role: "user".into(),
+                content: "Hi".into(),
+            },
+            super::ChatMessage {
+                role: "system".into(),
+                content: "Rule 2".into(),
+            },
+        ];
+        assert_eq!(super::collect_system_messages(&msgs), "Rule 1\n\nRule 2");
+    }
+
+    #[test]
+    fn anthropic_text_joins_all_text_blocks_in_order() {
+        let body = serde_json::json!({
+            "content": [
+                { "type": "thinking", "thinking": "hmm" },
+                { "type": "text", "text": "Hello " },
+                { "type": "text", "text": "world!" }
+            ]
+        });
+        assert_eq!(
+            super::extract_anthropic_text(&body),
+            Some("Hello world!".to_string())
+        );
+    }
+
+    #[tokio::test]
+    async fn list_models_surfaces_http_401_errors_instead_of_empty_array() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            for _ in 0..4 {
+                if let Ok((mut sock, _)) = listener.accept().await {
+                    let mut buf = [0u8; 1024];
+                    let _ = sock.read(&mut buf).await;
+                    let _ = sock
+                        .write_all(
+                            b"HTTP/1.1 401 Unauthorized\r\nContent-Type: application/json\r\nContent-Length: 23\r\nConnection: close\r\n\r\n{\"error\":\"invalid_key\"}",
+                        )
+                        .await;
+                }
+            }
+        });
+
+        let base = format!("http://{addr}");
+        for res in [
+            super::list_ollama_models(&base, "bad").await,
+            super::list_gemini_models("bad", &base).await,
+            super::list_anthropic_models("bad", &base).await,
+            super::list_openai_models("bad", &base, false).await,
+        ] {
+            let err = res.expect_err("HTTP 401 must return Err rather than Ok(\"[]\")");
+            assert!(
+                err.contains("Provider returned HTTP 401"),
+                "unexpected error: {err}"
+            );
+        }
+        let _ = server.await;
     }
 }

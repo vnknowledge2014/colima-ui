@@ -1,4 +1,5 @@
 import { uiState } from "../store.svelte";
+import { confirmState } from "../store/confirm.svelte";
 import { notificationState, closeNotificationPanel } from "../store/notifications.svelte";
 import { refreshManual, refetchAllResources } from "./dataPoller";
 
@@ -7,8 +8,8 @@ import { refreshManual, refetchAllResources } from "./dataPoller";
  * beside the page rather than changing page, and has ⌘K of its own.
  */
 export const QUICK_PAGES = [
-  "dashboard", "instances", "containers", "images", "volumes",
-  "networks", "compose", "topology", "activity",
+  "dashboard", "instances", "environment", "containers", "images",
+  "volumes", "networks", "compose", "topology",
 ];
 
 /** True when the key belongs to an input, not to the application. */
@@ -26,6 +27,8 @@ export function handleGlobalKeydown(e: KeyboardEvent): void {
 
   // Escape leaves the input first, and only closes a panel on the next press.
   if (e.key === "Escape") {
+    // Modal confirm dialog owns Escape while open.
+    if (confirmState.open) return;
     if (isTypingTarget(e.target)) {
       (e.target as HTMLElement).blur();
       return;

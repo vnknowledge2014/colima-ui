@@ -869,6 +869,92 @@ pub struct SandboxRequest {
     pub command: String,
 }
 
+// ===== Parity Route Payloads (v0.2.2) =====
+
+#[derive(Deserialize)]
+pub struct CreateWorkerBody {
+    #[serde(alias = "masterProfile", default = "default_profile")]
+    pub master_profile: String,
+    #[serde(alias = "workerProfile")]
+    pub worker_profile: String,
+    #[serde(alias = "cpus", default = "default_cpus")]
+    pub cpu: u32,
+    #[serde(default = "default_memory")]
+    pub memory: u32,
+}
+
+#[derive(Deserialize)]
+pub struct ResourceSaverBody {
+    pub enabled: bool,
+    #[serde(
+        alias = "idle_minutes",
+        alias = "idleMinutes",
+        default = "default_resource_saver_threshold"
+    )]
+    pub threshold: u64,
+}
+
+#[derive(Deserialize, Default)]
+pub struct OptionalContainerIdQuery {
+    #[serde(default, alias = "containerId", alias = "id")]
+    pub container_id: Option<String>,
+}
+
+#[derive(Deserialize, Default)]
+pub struct OptionalContainerIdBody {
+    #[serde(default, alias = "containerId", alias = "id")]
+    pub container_id: Option<String>,
+}
+
+#[derive(Deserialize)]
+pub struct PresetSnapshotQuery {
+    #[serde(alias = "presetId")]
+    pub preset_id: String,
+    #[serde(alias = "instanceProfile", alias = "profile", default = "default_profile")]
+    pub instance_profile: String,
+}
+
+#[derive(Deserialize)]
+pub struct SavePresetSnapshotBody {
+    #[serde(alias = "presetId")]
+    pub preset_id: String,
+    #[serde(alias = "instanceProfile", alias = "profile", default = "default_profile")]
+    pub instance_profile: String,
+    #[serde(alias = "containersJson")]
+    pub containers_json: String,
+    #[serde(alias = "isManualOverride", default)]
+    pub is_manual_override: bool,
+}
+
+#[derive(Deserialize)]
+pub struct PresetSnapshotsListQuery {
+    #[serde(alias = "instanceProfile", alias = "profile", default = "default_profile")]
+    pub instance_profile: String,
+}
+
+#[derive(Deserialize)]
+pub struct SavePresetBody {
+    pub id: String,
+    #[serde(alias = "configJson")]
+    pub config_json: String,
+}
+
+#[derive(Deserialize, Default)]
+pub struct OptionalPresetIdQuery {
+    #[serde(default)]
+    pub id: Option<String>,
+}
+
+#[derive(Deserialize, Default)]
+pub struct DeletePresetBody {
+    #[serde(default)]
+    pub id: Option<String>,
+}
+
+pub fn default_resource_saver_threshold() -> u64 {
+    15
+}
+
 
 
 

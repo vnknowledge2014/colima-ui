@@ -55,12 +55,20 @@ pub async fn api_get_autostart_status() -> (StatusCode, Json<ApiResponse<autosta
 pub async fn api_check_tool(Query(q): Query<ToolQuery>) -> (StatusCode, Json<ApiResponse<ToolStatus>>) {
     let name = q.name;
     // Whitelist of allowed tools to prevent arbitrary command execution
-    let allowed = ["kubectl", "kind", "helm", "krunkit", "nerdctl"];
+    let allowed = ["kubectl", "kind", "helm", "krunkit", "nerdctl", "qemu-img"];
     if !allowed.contains(&name.as_str()) {
         return err(format!("Unknown tool: {}", name));
     }
     match run_blocking(move || {
-        let output = Command::new(&name).arg("version").output();
+        let resolved = crate::path_util::resolve_binary(&name);
+        let mut cmd = Command::new(&resolved);
+        if name == "kubectl" {
+            cmd.args(["version", "--client"]);
+        } else {
+            cmd.arg("version");
+        }
+        crate::path_util::apply_path_to_cmd(&mut cmd);
+        let output = cmd.output();
         match output {
             Ok(o) if o.status.success() => {
                 let version = String::from_utf8_lossy(&o.stdout)
@@ -76,7 +84,10 @@ pub async fn api_check_tool(Query(q): Query<ToolQuery>) -> (StatusCode, Json<Api
             }
             Ok(o) => {
                 // Some tools use --version instead of version
-                let output2 = Command::new(&name).arg("--version").output();
+                let mut cmd2 = Command::new(&resolved);
+                cmd2.arg("--version");
+                crate::path_util::apply_path_to_cmd(&mut cmd2);
+                let output2 = cmd2.output();
                 match output2 {
                     Ok(o2) if o2.status.success() => {
                         let version = String::from_utf8_lossy(&o2.stdout)
@@ -261,6 +272,22 @@ pub async fn api_system_reference(
                 }),
             )
         }
+    }
+}
+
+pub async fn api_set_resource_saver(
+    Json(body): Json<ResourceSaverBody>,
+) -> (StatusCode, Json<ApiResponse<String>>) {
+    match system::set_resource_saver_shared(body.enabled, body.threshold).await {
+        Ok(msg) => ok(msg),
+        Err(e) => err(e),
+    }
+}
+
+pub async fn api_get_runtime_info() -> (StatusCode, Json<ApiResponse<String>>) {
+    match crate::commands::runtime::get_runtime_info().await {
+        Ok(rt) => ok(rt),
+        Err(e) => err(e),
     }
 }
 

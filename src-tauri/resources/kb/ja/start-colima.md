@@ -31,6 +31,9 @@ colima start --profile dev
 ```bash
 colima status
 colima start --verbose
+# Colima 0.10.x（XDG デフォルト）
+tail -n 100 "${COLIMA_HOME:-$HOME/.config/colima}/default/daemon/daemon.log"
+# 従来の ~/.colima レイアウト
 tail -n 100 ~/.colima/default/daemon/daemon.log
 ```
 

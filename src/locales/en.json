@@ -33,6 +33,8 @@
     "colima_missing": "Colima not detected",
     "colima_missing_hint": "Open Help to install it",
     "colima_running": "{count} running",
+    "colima_starting": "{count} starting",
+    "colima_unhealthy": "{count} unhealthy",
     "colima_stopped": "Stopped",
     "colima_instances": "Instances",
     "security": "Security",
@@ -180,8 +182,10 @@
     "unpause": "Unpause",
     "restart": "Restart",
     "no_containers": "No containers",
+    "empty_text": "Click \"Run\" to start a container from an image.",
     "open_terminal": "Open terminal",
-    "open_interactive_terminal": "Open Interactive Terminal (PTY)"
+    "open_interactive_terminal": "Open Interactive Terminal (PTY)",
+    "terminal_desktop_only": "Interactive PTY terminal requires the ColimaUI Desktop app."
   },
   "diff": {
     "no_changes": "No changes",
@@ -412,7 +416,11 @@
       "dashboard_resources_title": "Check resource usage",
       "dashboard_resources_prompt": "Check resource usage across all running containers and VMs",
       "dashboard_health_title": "Runtime health check",
-      "dashboard_health_prompt": "Inspect cluster and runtime health"
+      "dashboard_health_prompt": "Inspect cluster and runtime health",
+      "environment_resolutions_title": "Inspect path resolutions",
+      "environment_resolutions_prompt": "Inspect ColimaUI environment resolution (COLIMA_HOME, DOCKER_HOST, LIMA_HOME, and PATH)",
+      "environment_duality_title": "Compare shell vs app env",
+      "environment_duality_prompt": "Explain differences between shell environment variables and this GUI app's runtime environment"
     },
     "fallback": {
       "check_cpu_mem": "Check CPU & memory",
@@ -500,7 +508,11 @@
       "inspect_active_vm": "Inspect active VM",
       "inspect_active_vm_prompt": "Inspect resource allocation and disk usage of active VM",
       "system_overview": "System overview",
-      "system_overview_prompt": "Summarize system status, active instances, and containers"
+      "system_overview_prompt": "Summarize system status, active instances, and containers",
+      "inspect_env_resolutions": "Inspect resolutions",
+      "inspect_env_resolutions_prompt": "Inspect ColimaUI environment resolution for COLIMA_HOME, DOCKER_HOST, and LIMA_HOME",
+      "compare_shell_env": "Compare shell env",
+      "compare_shell_env_prompt": "Compare shell environment variables against ColimaUI runtime environment"
     }
   },
   "terminal": {
@@ -512,7 +524,9 @@
     "new_session": "New Session",
     "no_sessions": "No terminal sessions",
     "instructions": "Open a new SSH session to a running instance.",
-    "docker_containers": "Docker Containers"
+    "docker_containers": "Docker Containers",
+    "desktop_only_title": "Desktop App Required",
+    "desktop_only_desc": "Interactive PTY terminal sessions run over native Tauri IPC and require the ColimaUI Desktop app."
   },
   "compose": {
     "diagnose": {
@@ -557,6 +571,7 @@
     },
     "title": "Docker Compose",
     "projects_count": "projects",
+    "start": "Start",
     "stop": "Stop",
     "restart": "Restart",
     "down": "Down",
@@ -861,6 +876,7 @@
     "remove_action": "Remove",
     "remove_confirm": "Remove volume \"{name}\"?",
     "remove_selected_title": "Remove Selected Volumes",
+    "remove_selected": "Remove {count} Selected",
     "remove_count": "Remove {count}",
     "remove_batch_confirm": "Remove {count} volume(s)?\n\n{names}\n\nThis cannot be undone.",
     "title": "Volumes",
@@ -1204,12 +1220,19 @@
     "no_models": "No models installed",
     "start_colima": "Start a Colima instance first to manage AI models.",
     "pull_to_start": "Pull a model to get started with AI inference.",
-    "popular": "Popular Models"
+    "popular": "Popular Models",
+    "count": "models",
+    "deleted": "Model '{name}' deleted",
+    "pull_failed": "Pull failed: {error}",
+    "pulled": "Model '{name}' pulled successfully",
+    "pulling": "Pulling model '{name}'... This may take a while.",
+    "serving": "Model '{name}' serving on port 11434"
   },
   "networks": {
     "title": "Networks",
     "count": "networks",
     "removing": "Removing...",
+    "remove_selected": "Remove {count} Selected",
     "pruning": "Pruning...",
     "prune": "Prune",
     "create_button": "Create Network",
@@ -1244,7 +1267,7 @@
   "environment": {
     "shellEnv": "Shell env",
     "dualityExplain": "A GUI process inherits launchd's env, not your shell's (snapshot: one non-login shell startup via $SHELL — for zsh that's .zshenv; bash: $BASH_ENV/.bashrc; etc.). The two columns will legitimately differ — what matters is the resolution record below.",
-    "diverges": "differs between Shell env (.zshenv) and This app",
+    "diverges": "differs between Shell env and This app",
     "resolutionExplain": "The values this app is actually using, and the rule that picked each one. Red means a configured path no longer exists.",
     "title": "Environment",
     "subtitle": "What this app believes about your setup, and the rule that made it believe that.",

@@ -80,11 +80,13 @@ pub const K8S_DELETABLE_RESOURCES: &[&str] = &[
     "hpa",
 ];
 
-/// Validate a Kubernetes resource name (namespace, pod, container)
-/// Must be alphanumeric, hyphens, dots, underscores only.
+/// Validate a Kubernetes resource name (namespace, pod, container, cluster, node).
+/// Must be alphanumeric, hyphens, dots, underscores only, and must not start with
+/// `-` (which kubectl/kind would interpret as an argv flag).
 pub fn is_valid_k8s_name(name: &str) -> bool {
     !name.is_empty()
         && name.len() <= 253
+        && !name.starts_with('-')
         && name
             .chars()
             .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '.' || c == '_')
@@ -301,5 +303,21 @@ mod tests {
         assert!(assert_path_within(&base, &missing_parent).is_err());
 
         std::fs::remove_dir_all(&base).ok();
+    }
+
+    #[test]
+    fn k8s_name_rejects_empty_and_flag_injection() {
+        assert!(!is_valid_k8s_name(""));
+        assert!(!is_valid_k8s_name("-"));
+        assert!(!is_valid_k8s_name("-n"));
+        assert!(!is_valid_k8s_name("--all"));
+        assert!(!is_valid_k8s_name("--force"));
+        assert!(!is_valid_k8s_name("pod/name"));
+        assert!(!is_valid_k8s_name("pod name"));
+
+        assert!(is_valid_k8s_name("default"));
+        assert!(is_valid_k8s_name("kube-system"));
+        assert!(is_valid_k8s_name("my-pod-123"));
+        assert!(is_valid_k8s_name("custom.crd.example.io"));
     }
 }

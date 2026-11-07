@@ -51,6 +51,15 @@ describe("AiModelQuickBar.svelte", () => {
     expect(screen.getByText("Containers")).toBeInTheDocument();
   });
 
+  it("localizes hyphenated page IDs such as linux-vms to 'Linux VMs'", () => {
+    render(AiModelQuickBar, {
+      currentPage: "linux-vms",
+      liveContextEnabled: true,
+    });
+
+    expect(screen.getByText("Linux VMs")).toBeInTheDocument();
+  });
+
   it("handles live context chip toggle click", async () => {
     const onToggleLiveContext = vi.fn();
     render(AiModelQuickBar, {

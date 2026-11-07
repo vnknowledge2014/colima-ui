@@ -1,4 +1,4 @@
-import { call, resolveApiBase } from "./client";
+import { call, getApiToken, resolveApiBase } from "./client";
 
 // ===== Kubernetes API =====
 
@@ -74,9 +74,11 @@ export const k8sApi = {
   // Log streaming — returns URL for EventSource (SSE)
   // Async because the server may bind a fallback port — see resolveApiBase().
   logStreamUrl: async (namespace: string, pod: string, container = "", tail = 50) => {
+    const [base, token] = await Promise.all([resolveApiBase(), getApiToken()]);
     const params = new URLSearchParams({ namespace, pod, tail: String(tail) });
     if (container) params.set("container", container);
-    return `${await resolveApiBase()}/api/k8s/pods/logs/stream?${params}`;
+    if (token) params.set("token", token);
+    return `${base}/api/k8s/pods/logs/stream?${params}`;
   },
   // Benchmark
   benchmark: (url: string, concurrency = 5, requests = 50, method = "GET") =>

@@ -74,7 +74,7 @@
     const targetProfile = runningColima
       ? (runningColima.name === "colima" || runningColima.name === "default"
           ? "default"
-          : runningColima.name)
+          : runningColima.name.replace(/^colima-/, ""))
       : "default";
 
     const target = { kind: "colima" as const, profile: targetProfile };

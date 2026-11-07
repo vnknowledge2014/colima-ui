@@ -32,6 +32,7 @@
   import { t, getLanguage } from "../lib/i18n.svelte";
   import {
     uiState,
+    isValidPage,
     openSettingsSection,
     dockerState,
     dashboardState,
@@ -570,7 +571,14 @@
         });
       },
       onNavigate: (page) => {
-        uiState.currentPage = page;
+        const target = page.trim().toLowerCase();
+        if (target === "ai-chat") {
+          showPanel();
+          return;
+        }
+        if (isValidPage(target)) {
+          uiState.currentPage = target;
+        }
       },
       onTimerSchedule: (id, ms, prompt) => {
         if (activeSchedules.size >= MAX_ACTIVE_SCHEDULES) return;
@@ -658,6 +666,7 @@
   }
 
   async function handleClear() {
+    handleStop();
     if (aiState.messages.length === 0) return;
     let isConfirmed: boolean;
     try {
@@ -685,6 +694,14 @@
     await createConversation();
     showHistory = false;
     inputEl?.focus();
+  }
+
+  async function handleDeleteConversation(id: string) {
+    if (id === aiState.activeConversationId) {
+      clearActiveSchedules();
+      handleStop();
+    }
+    await deleteConversation(id);
   }
 
   async function handleSwitch(id: string) {
@@ -816,7 +833,7 @@
                 </button>
                 <button
                   title={t("ai.delete", { default: "Delete" })}
-                  onclick={() => deleteConversation(conv.id)}
+                  onclick={() => handleDeleteConversation(conv.id)}
                   aria-label={t("ai.delete", { default: "Delete" })}
                 >
                   <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>

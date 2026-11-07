@@ -9,11 +9,34 @@ const asString = (v: unknown, fallback = ""): string => (typeof v === "string" ?
 export function parseItems(raw: unknown): K8sResource[] {
   if (!raw) return [];
   try {
-    const parsed: JsonRecord = typeof raw === "string" ? (JSON.parse(raw) as JsonRecord) : asRecord(raw);
-    const items: JsonRecord[] = asArray(parsed.items).length
-      ? (asArray(parsed.items) as JsonRecord[])
-      : Array.isArray(raw) ? (raw as JsonRecord[]) : [];
+    const decoded: unknown = typeof raw === "string" ? JSON.parse(raw) : raw;
+    const items: JsonRecord[] = Array.isArray(decoded)
+      ? decoded.map(asRecord)
+      : asArray(asRecord(decoded).items).map(asRecord);
     return items.map((item) => {
+      if (!item.metadata && typeof item.name === "string") {
+        const flat: K8sResource = {
+          name: item.name,
+          namespace: typeof item.namespace === "string" ? item.namespace : "",
+          age: asString(item.age),
+          _raw: item,
+        };
+        if (typeof item.status === "string") flat.status = item.status;
+        if (item.ready !== undefined) flat.ready = asString(item.ready);
+        if (item.restarts !== undefined) flat.restarts = asString(item.restarts);
+        if (item.node !== undefined) flat.node = asString(item.node);
+        if (item.replicas !== undefined) flat.replicas = asString(item.replicas);
+        if (item.available !== undefined) flat.available = asString(item.available);
+        if (item.svcType !== undefined || item.service_type !== undefined || item.type !== undefined) {
+          flat.svcType = asString(item.svcType ?? item.service_type ?? item.type);
+        }
+        if (item.clusterIP !== undefined || item.cluster_ip !== undefined) {
+          flat.clusterIP = asString(item.clusterIP ?? item.cluster_ip);
+        }
+        if (item.ports !== undefined) flat.ports = asString(item.ports);
+        return flat;
+      }
+
       const meta = asRecord(item.metadata);
       const spec = asRecord(item.spec);
       const status = asRecord(item.status);

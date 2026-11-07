@@ -28,6 +28,72 @@ impl Default for ColimaAdapter {
     }
 }
 
+/// Build `colima start` CLI arguments, omitting `--runtime`/`--cpu`/`--memory`/`--disk`
+/// unless explicitly specified so existing `~/.colima/<profile>/colima.yaml` is preserved.
+pub fn build_colima_start_args(config: &VMConfig) -> Vec<String> {
+    let mut args = vec!["start".to_string()];
+
+    if config.profile != "default" && !config.profile.is_empty() {
+        args.push("--profile".into());
+        args.push(config.profile.clone());
+    }
+
+    if let Some(runtime) = config
+        .runtime
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        args.push("--runtime".into());
+        args.push(runtime.to_string());
+    }
+    if let Some(cpus) = config.cpus.filter(|&c| c > 0) {
+        args.push("--cpu".into());
+        args.push(cpus.to_string());
+    }
+    if let Some(memory) = config.memory.filter(|&m| m > 0) {
+        args.push("--memory".into());
+        args.push(memory.to_string());
+    }
+    if let Some(disk) = config.disk.filter(|&d| d > 0) {
+        args.push("--disk".into());
+        args.push(disk.to_string());
+    }
+
+    if !config.vm_type.is_empty() {
+        args.push("--vm-type".into());
+        args.push(config.vm_type.clone());
+    }
+    if !config.arch.is_empty() {
+        args.push("--arch".into());
+        args.push(config.arch.clone());
+    }
+    if !config.mount_type.is_empty() {
+        args.push("--mount-type".into());
+        args.push(config.mount_type.clone());
+    }
+    for mount in &config.mounts {
+        args.push("--mount".into());
+        args.push(mount.clone());
+    }
+    for dns in &config.dns {
+        args.push("--dns".into());
+        args.push(dns.clone());
+    }
+    if config.network_address {
+        args.push("--network-address".into());
+    }
+    if config.kubernetes {
+        args.push("--kubernetes".into());
+        if !config.kubernetes_version.is_empty() {
+            args.push("--kubernetes-version".into());
+            args.push(config.kubernetes_version.clone());
+        }
+    }
+
+    args
+}
+
 #[async_trait]
 impl VMManager for ColimaAdapter {
     fn name(&self) -> &str {
@@ -54,55 +120,13 @@ impl VMManager for ColimaAdapter {
     }
 
     async fn start(&self, config: VMConfig) -> Result<String, AdapterError> {
-        let profile = config.profile.clone();
+        let profile = if config.profile.is_empty() {
+            "default".to_string()
+        } else {
+            config.profile.clone()
+        };
         tokio::task::spawn_blocking(move || {
-            let mut args = vec!["start".to_string()];
-
-            if config.profile != "default" && !config.profile.is_empty() {
-                args.push("--profile".into());
-                args.push(config.profile);
-            }
-
-            args.push("--runtime".into());
-            args.push(config.runtime);
-            args.push("--cpu".into());
-            args.push(config.cpus.to_string());
-            args.push("--memory".into());
-            args.push(config.memory.to_string());
-            args.push("--disk".into());
-            args.push(config.disk.to_string());
-
-            if !config.vm_type.is_empty() {
-                args.push("--vm-type".into());
-                args.push(config.vm_type);
-            }
-            if !config.arch.is_empty() {
-                args.push("--arch".into());
-                args.push(config.arch);
-            }
-            if !config.mount_type.is_empty() {
-                args.push("--mount-type".into());
-                args.push(config.mount_type);
-            }
-            for mount in &config.mounts {
-                args.push("--mount".into());
-                args.push(mount.clone());
-            }
-            for dns in &config.dns {
-                args.push("--dns".into());
-                args.push(dns.clone());
-            }
-            if config.network_address {
-                args.push("--network-address".into());
-            }
-            if config.kubernetes {
-                args.push("--kubernetes".into());
-                if !config.kubernetes_version.is_empty() {
-                    args.push("--kubernetes-version".into());
-                    args.push(config.kubernetes_version);
-                }
-            }
-
+            let args = build_colima_start_args(&config);
             let args_ref: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
             let output = Self::colima_cmd()
                 .args(&args_ref)
@@ -110,7 +134,10 @@ impl VMManager for ColimaAdapter {
                 .map_err(|e| AdapterError::new("colima", format!("Failed to start: {}", e)))?;
 
             if !output.status.success() {
-                return Err(AdapterError::new("colima", format!("start failed: {}", String::from_utf8_lossy(&output.stderr))));
+                return Err(AdapterError::new(
+                    "colima",
+                    format!("start failed: {}", String::from_utf8_lossy(&output.stderr)),
+                ));
             }
 
             Ok(format!("Instance '{}' started successfully", profile))
@@ -248,5 +275,56 @@ impl VMManager for ColimaAdapter {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn build_colima_start_args_omits_unspecified_resource_flags() {
+        let default_cfg = VMConfig {
+            profile: "default".to_string(),
+            ..Default::default()
+        };
+        assert_eq!(build_colima_start_args(&default_cfg), vec!["start"]);
+
+        let named_cfg = VMConfig {
+            profile: "dev".to_string(),
+            ..Default::default()
+        };
+        assert_eq!(
+            build_colima_start_args(&named_cfg),
+            vec!["start", "--profile", "dev"]
+        );
+    }
+
+    #[test]
+    fn build_colima_start_args_appends_explicit_overrides() {
+        let cfg = VMConfig {
+            profile: "dev".to_string(),
+            runtime: Some("containerd".to_string()),
+            cpus: Some(4),
+            memory: Some(8),
+            disk: Some(100),
+            ..Default::default()
+        };
+        assert_eq!(
+            build_colima_start_args(&cfg),
+            vec![
+                "start",
+                "--profile",
+                "dev",
+                "--runtime",
+                "containerd",
+                "--cpu",
+                "4",
+                "--memory",
+                "8",
+                "--disk",
+                "100",
+            ]
+        );
     }
 }

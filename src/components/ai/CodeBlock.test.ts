@@ -148,6 +148,22 @@ describe("CodeBlock.svelte", () => {
     });
   });
 
+  it("strips leading 'colima-' prefix from named profile when opening terminal", async () => {
+    dashboardState.colimaInstances = [
+      { name: "colima-dev", status: "Running" } as never,
+    ];
+
+    render(CodeBlock, { code: "docker info", isShell: true });
+
+    const termBtn = screen.getByRole("button", { name: /terminal/i });
+    await fireEvent.click(termBtn);
+
+    expect(openTerminalSession).toHaveBeenCalledWith({
+      kind: "colima",
+      profile: "dev",
+    });
+  });
+
   it("falls back to 'default' profile when no instances are running", async () => {
     dashboardState.colimaInstances = [
       { name: "staging", status: "stopped" } as never,

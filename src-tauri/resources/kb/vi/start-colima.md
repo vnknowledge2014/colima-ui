@@ -30,6 +30,9 @@ Nếu khởi động thất bại, log của chính VM sẽ nói lý do:
 ```bash
 colima status
 colima start --verbose
+# Colima 0.10.x (mặc định XDG)
+tail -n 100 "${COLIMA_HOME:-$HOME/.config/colima}/default/daemon/daemon.log"
+# Colima cũ (hoặc khi dùng ~/.colima hiện có)
 tail -n 100 ~/.colima/default/daemon/daemon.log
 ```
 

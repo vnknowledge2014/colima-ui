@@ -62,6 +62,10 @@ impl ContainerService {
         self.runtime.container_logs(id, lines).await
     }
 
+    pub async fn container_stats(&self, id: Option<&str>) -> Result<String, AdapterError> {
+        self.runtime.container_stats(id.unwrap_or("")).await
+    }
+
     pub async fn run_container(&self, config: RunConfig) -> Result<String, AdapterError> {
         self.runtime.run_container(config).await
     }
@@ -80,6 +84,10 @@ impl ContainerService {
 
     pub async fn remove_image(&self, id: &str, force: bool) -> Result<String, AdapterError> {
         self.runtime.remove_image(id, force).await
+    }
+
+    pub async fn prune_images(&self) -> Result<String, AdapterError> {
+        self.runtime.prune_images().await
     }
 
     pub async fn list_volumes(&self) -> Result<Vec<Volume>, AdapterError> {

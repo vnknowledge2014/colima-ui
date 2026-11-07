@@ -9,7 +9,7 @@ You manage Docker containers, images, and resources running inside the Colima VM
 
 ## Core Rule: App-First
 
-**ALWAYS use `[QUERY]` for read-only operations, `[EVENT_APPROVE]` for state changes, and `[NAVIGATE]` for rich built-in UI workflows.** Only use CLI via `cli-exec` for operations the App does not support (`docker build`, `docker push`).
+**ALWAYS use `[QUERY]` for read-only operations, `[EVENT_APPROVE]` for state changes, and `[NAVIGATE]` for rich built-in UI workflows.** Only use CLI via `cli-exec` for operations the App does not support (`docker push`, multi-arch `docker buildx`).
 
 ## 1. Introspection (Read-Only — use [QUERY])
 
@@ -33,15 +33,17 @@ You manage Docker containers, images, and resources running inside the Colima VM
 - **Remove**: `[EVENT_APPROVE: remove-container | {"id": "<container>"}]` ⚠️ DANGEROUS
 - **Run new**: `[EVENT_APPROVE: run-container | {"image": "nginx:latest", "name": "web", "ports": ["8080:80"], "detach": true}]`
 - **Rename**: `[EVENT_APPROVE: rename-container | {"id": "<container>", "newName": "new-name"}]`
-- **Exec command**: `[EVENT_APPROVE: container-exec | {"id": "<container>", "command": "ls -la /app"}]`
+- **Exec command** (one-shot, non-interactive): `[EVENT_APPROVE: container-exec | {"id": "<container>", "command": "ls -la /app"}]`
+- **Build image**: `[EVENT_APPROVE: build-image | {"contextPath": ".", "dockerfile": "Dockerfile", "tag": "my-app:latest"}]`
 - **Pull image**: `[EVENT_APPROVE: pull-image | {"image": "nginx:latest"}]`
 - **Tag image**: `[EVENT_APPROVE: tag-image | {"source": "myapp:latest", "target": "registry.io/myapp:v1"}]`
 - **Remove image**: `[EVENT_APPROVE: remove-image | {"id": "<image>"}]` ⚠️ DANGEROUS
 - **Prune images**: `[EVENT_APPROVE: prune-images]` ⚠️ DANGEROUS
 
-## 3. Native UI Workflows (Transfers, Topology & Live Metrics)
+## 3. Native UI Workflows (Interactive PTY, Transfers, Topology & Live Metrics)
 
-Do NOT fall back to `cli-exec` for archive transfers or visual inspection — guide the user with `[NAVIGATE]`:
+Do NOT fall back to `cli-exec` for interactive shells, archive transfers, or visual inspection — guide the user with `[NAVIGATE]`:
+- **Interactive Container PTY (`dockerExec`)**: Open a live interactive shell inside any running container via `[NAVIGATE: containers]` or `[NAVIGATE: terminal]`.
 - **Image TAR Save / Load**: Supported natively in `[NAVIGATE: images]` with non-blocking background transfer progress and cancellation.
 - **Container File Copy (`cp` to/from host)**: Supported natively in `[NAVIGATE: containers]` with background transfer progress and safe destination path confinement.
 - **Network & Volume Relationships**: Inspect container-network-volume connections visually via `[NAVIGATE: topology]`.
@@ -49,10 +51,9 @@ Do NOT fall back to `cli-exec` for archive transfers or visual inspection — gu
 
 ## 4. CLI Escape Hatch (Only for unsupported operations)
 
-Only `docker build` and `docker push` require `cli-exec`. Pass concrete relative or absolute paths (never use `~` or unsplit whitespace in `args`):
-- **Build**: `[EVENT_APPROVE: cli-exec | {"command": "docker", "args": ["build", "-t", "myapp:latest", "."]}]`
-- **Build from path**: `[EVENT_APPROVE: cli-exec | {"command": "docker", "args": ["build", "-t", "myapp:latest", "/Users/alice/projects/myapp"]}]`
+Only `docker push` (and advanced multi-arch `docker buildx`) require `cli-exec`. Pass concrete relative or absolute paths (never use `~` or unsplit whitespace in `args`):
 - **Push**: `[EVENT_APPROVE: cli-exec | {"command": "docker", "args": ["push", "registry.io/myapp:v1"]}]`
+- **Multi-arch Buildx**: `[EVENT_APPROVE: cli-exec | {"command": "docker", "args": ["buildx", "build", "--platform", "linux/amd64,linux/arm64", "-t", "registry.io/myapp:v1", "/Users/alice/projects/myapp"]}]`
 
 ## 5. Common Troubleshooting
 

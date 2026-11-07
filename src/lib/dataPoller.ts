@@ -2,14 +2,13 @@ import { colimaApi, dockerApi, volumesApi, networksApi, sysMethods, getApiToken,
 import { resolveApiBase } from "./api/client";
 import { loadCapabilities } from "../store/capabilities.svelte";
 import { normalizeContainer, normalizeImage } from "./normalizers";
-import { dockerState, resourceState, dashboardState, isEventCooldownActive, uiState } from "../store.svelte";
+import { dockerState, resourceState, dashboardState, isEventCooldownActive, uiState, isValidPage } from "../store.svelte";
 import { getAppSetting } from "./settingsStore.svelte";
 import { setVisibleInterval } from "./visibleInterval";
 import { globalToast } from "./globalToast";
 import { t } from "./i18n.svelte";
 
 import { isRunningInTauri } from "./env";
-const isTauri = isRunningInTauri();
 let _refetchRetryCount = 0;
 const MAX_REFETCH_RETRIES = 10;
 let stopPolling: (() => void) | null = null;
@@ -22,6 +21,19 @@ let currentEventSource: EventSource | null = null;
 let disposed = false;
 let stopSysPoll: (() => void) | null = null;
 let sseRetryTimeout: ReturnType<typeof setTimeout> | null = null;
+let activeUnlisteners: (() => void)[] = [];
+
+function trackUnlisten(promise: Promise<() => void>) {
+  promise
+    .then((unlisten) => {
+      if (disposed) {
+        unlisten();
+        return;
+      }
+      activeUnlisteners.push(unlisten);
+    })
+    .catch(() => {});
+}
 
 export async function refreshManual() {
   try {
@@ -152,29 +164,46 @@ export function startDataPoller() {
 
   stopSysPoll = setVisibleInterval(() => { sysMethods.checkSystem().then(s => dashboardState.systemInfo = s).catch(()=>{}); }, 30000);
 
-  if (isTauri) {
+  const staleUnlisteners = activeUnlisteners;
+  activeUnlisteners = [];
+  for (const fn of staleUnlisteners) {
+    fn();
+  }
+
+  if (isRunningInTauri()) {
     import("@tauri-apps/api/event").then((mod) => {
-      mod.listen("instances-update", (event: { payload: { instances?: ColimaInstance[] } }) => {
-        if (event.payload.instances) dashboardState.colimaInstances = event.payload.instances;
-        dashboardState.instancesLoaded = true;
-        // Starting or stopping an instance flips Colima and Docker between
-        // "installed but not running" and "usable".
-        loadCapabilities();
-      });
-      mod.listen("docker-state-updated", (event: { payload: { containers?: unknown[]; images?: unknown[] } }) =>
-        handleDockerStateUpdated(event.payload)
+      if (disposed) return;
+      trackUnlisten(
+        mod.listen("instances-update", (event: { payload: { instances?: ColimaInstance[] } }) => {
+          if (event.payload.instances) dashboardState.colimaInstances = event.payload.instances;
+          dashboardState.instancesLoaded = true;
+          // Starting or stopping an instance flips Colima and Docker between
+          // "installed but not running" and "usable".
+          loadCapabilities();
+        })
       );
-      mod.listen("docker-connection-lost", handleConnectionLost);
-      mod.listen("docker-reconnected", refetchAllResources);
-      mod.listen("docker-unsupported-runtime", (event: { payload: { runtime?: string; profiles?: string[] } }) =>
-        showUnsupportedRuntimeToast(event.payload)
+      trackUnlisten(
+        mod.listen("docker-state-updated", (event: { payload: { containers?: unknown[]; images?: unknown[] } }) =>
+          handleDockerStateUpdated(event.payload)
+        )
+      );
+      trackUnlisten(mod.listen("docker-connection-lost", handleConnectionLost));
+      trackUnlisten(mod.listen("docker-reconnected", refetchAllResources));
+      trackUnlisten(
+        mod.listen("docker-unsupported-runtime", (event: { payload: { runtime?: string; profiles?: string[] } }) =>
+          showUnsupportedRuntimeToast(event.payload)
+        )
       );
       // Tray menu navigation (container click / Help) drives the active page.
-      mod.listen("navigate", (event: { payload?: { page?: unknown } }) => {
-        const page = event.payload?.page;
-        if (typeof page === "string") uiState.currentPage = page;
-      });
-    });
+      trackUnlisten(
+        mod.listen("navigate", (event: { payload?: { page?: unknown } }) => {
+          const page = event.payload?.page;
+          if (typeof page === "string" && isValidPage(page)) {
+            uiState.currentPage = page;
+          }
+        })
+      );
+    }).catch(() => {});
   } else {
     let sseRetryDelay = 2000;
 
@@ -255,16 +284,23 @@ export function startDataPoller() {
     connectSSE();
   }
 
-  return () => {
-    disposed = true;
-    if (stopSysPoll) { stopSysPoll(); stopSysPoll = null; }
-    if (stopPolling) { stopPolling(); stopPolling = null; }
-    if (refetchRetryTimeout) clearTimeout(refetchRetryTimeout);
-    if (sseRetryTimeout) clearTimeout(sseRetryTimeout);
-    // close() does not fire onerror, so no reconnect is woken by the teardown.
-    if (currentEventSource) {
-      currentEventSource.close();
-      currentEventSource = null;
-    }
-  };
+  return stopDataPoller;
+}
+
+export function stopDataPoller() {
+  disposed = true;
+  if (stopSysPoll) { stopSysPoll(); stopSysPoll = null; }
+  if (stopPolling) { stopPolling(); stopPolling = null; }
+  if (refetchRetryTimeout) { clearTimeout(refetchRetryTimeout); refetchRetryTimeout = null; }
+  if (sseRetryTimeout) { clearTimeout(sseRetryTimeout); sseRetryTimeout = null; }
+  const registered = activeUnlisteners;
+  activeUnlisteners = [];
+  for (const fn of registered) {
+    fn();
+  }
+  // close() does not fire onerror, so no reconnect is woken by the teardown.
+  if (currentEventSource) {
+    currentEventSource.close();
+    currentEventSource = null;
+  }
 }

@@ -157,6 +157,27 @@ export async function chatStream(
     onChunk(text);
   };
 
+  const throwIfStreamError = (data: Record<string, unknown> | null | undefined) => {
+    if (!data || typeof data !== "object") return;
+    if (data.error || data.type === "error") {
+      const errField = data.error;
+      let detail: string;
+      if (typeof errField === "string") {
+        detail = errField;
+      } else if (errField && typeof errField === "object") {
+        const errObj = errField as Record<string, unknown>;
+        detail =
+          (typeof errObj.message === "string" && errObj.message) ||
+          JSON.stringify(errField);
+      } else if (typeof data.message === "string" && data.message) {
+        detail = data.message;
+      } else {
+        detail = JSON.stringify(data);
+      }
+      throw new Error(redact(`LLM stream error: ${detail}`));
+    }
+  };
+
   const processLine = (trimmed: string) => {
     if (!trimmed) return;
 
@@ -166,63 +187,79 @@ export async function chatStream(
         dataStr = dataStr.slice(6).trim();
       }
       if (dataStr === "[DONE]") return;
+      let data: Record<string, unknown>;
       try {
-        const data = JSON.parse(dataStr);
-        if (typeof data.message?.thinking === "string" && data.message.thinking) {
-          handleThinking(data.message.thinking);
-        }
-        if (typeof data.message?.content === "string" && data.message.content) {
-          handleContent(data.message.content);
-        }
+        data = JSON.parse(dataStr);
       } catch {
         // A non-JSON line is not part of the Ollama stream; ignore it.
+        return;
+      }
+      throwIfStreamError(data);
+      const msg = data.message as { thinking?: unknown; content?: unknown } | undefined;
+      if (typeof msg?.thinking === "string" && msg.thinking) {
+        handleThinking(msg.thinking);
+      }
+      if (typeof msg?.content === "string" && msg.content) {
+        handleContent(msg.content);
       }
     } else if (trimmed.startsWith("data: ")) {
       const dataStr = trimmed.slice(6).trim();
       if (dataStr === "[DONE]") return;
+      let data: Record<string, unknown>;
       try {
-        const data = JSON.parse(dataStr);
-        if (isGemini) {
-          const parts = data.candidates?.[0]?.content?.parts;
-          if (Array.isArray(parts)) {
-            for (const part of parts) {
-              if (part.thought) {
-                if (typeof part.text === "string" && part.text) {
-                  handleThinking(part.text);
-                }
-              } else if (typeof part.text === "string" && part.text) {
-                handleContent(part.text);
+        data = JSON.parse(dataStr);
+      } catch {
+        // SSE keep-alive lines and malformed frames are skipped.
+        return;
+      }
+      throwIfStreamError(data);
+      if (isGemini) {
+        const candidates = data.candidates as
+          | { content?: { parts?: { thought?: boolean; text?: unknown }[] } }[]
+          | undefined;
+        const parts = candidates?.[0]?.content?.parts;
+        if (Array.isArray(parts)) {
+          for (const part of parts) {
+            if (part.thought) {
+              if (typeof part.text === "string" && part.text) {
+                handleThinking(part.text);
               }
-            }
-          }
-        } else if (isOpenAI) {
-          const delta = data.choices?.[0]?.delta;
-          if (delta) {
-            const reasoning = delta.reasoning_content ?? delta.reasoning;
-            if (typeof reasoning === "string" && reasoning) {
-              handleThinking(reasoning);
-            }
-            if (typeof delta.content === "string" && delta.content) {
-              handleContent(delta.content);
-            }
-          }
-        } else if (isAnthropic) {
-          if (data.type === "content_block_delta") {
-            const thinking =
-              data.delta?.type === "thinking_delta"
-                ? data.delta?.thinking
-                : (data.delta?.thinking ?? data.delta?.thinking_delta);
-            if (typeof thinking === "string" && thinking) {
-              handleThinking(thinking);
-            }
-            const text = data.delta?.text;
-            if (typeof text === "string" && text) {
-              handleContent(text);
+            } else if (typeof part.text === "string" && part.text) {
+              handleContent(part.text);
             }
           }
         }
-      } catch {
-        // SSE keep-alive lines and malformed frames are skipped.
+      } else if (isOpenAI) {
+        const choices = data.choices as
+          | { delta?: { reasoning_content?: unknown; reasoning?: unknown; content?: unknown } }[]
+          | undefined;
+        const delta = choices?.[0]?.delta;
+        if (delta) {
+          const reasoning = delta.reasoning_content ?? delta.reasoning;
+          if (typeof reasoning === "string" && reasoning) {
+            handleThinking(reasoning);
+          }
+          if (typeof delta.content === "string" && delta.content) {
+            handleContent(delta.content);
+          }
+        }
+      } else if (isAnthropic) {
+        if (data.type === "content_block_delta") {
+          const delta = data.delta as
+            | { type?: unknown; thinking?: unknown; thinking_delta?: unknown; text?: unknown }
+            | undefined;
+          const thinking =
+            delta?.type === "thinking_delta"
+              ? delta?.thinking
+              : (delta?.thinking ?? delta?.thinking_delta);
+          if (typeof thinking === "string" && thinking) {
+            handleThinking(thinking);
+          }
+          const text = delta?.text;
+          if (typeof text === "string" && text) {
+            handleContent(text);
+          }
+        }
       }
     } else if (isGemini) {
       // Fallback in case a proxy strips alt=sse and returns raw JSON objects
@@ -231,22 +268,28 @@ export async function chatStream(
         jsonStr = jsonStr.slice(jsonStr.indexOf("{"));
       }
       if (jsonStr.startsWith("{")) {
+        let data: Record<string, unknown>;
         try {
-          const data = JSON.parse(jsonStr);
-          const parts = data.candidates?.[0]?.content?.parts;
-          if (Array.isArray(parts)) {
-            for (const part of parts) {
-              if (part.thought) {
-                if (typeof part.text === "string" && part.text) {
-                  handleThinking(part.text);
-                }
-              } else if (typeof part.text === "string" && part.text) {
-                handleContent(part.text);
-              }
-            }
-          }
+          data = JSON.parse(jsonStr);
         } catch {
           // Incomplete or non-JSON chunk
+          return;
+        }
+        throwIfStreamError(data);
+        const candidates = data.candidates as
+          | { content?: { parts?: { thought?: boolean; text?: unknown }[] } }[]
+          | undefined;
+        const parts = candidates?.[0]?.content?.parts;
+        if (Array.isArray(parts)) {
+          for (const part of parts) {
+            if (part.thought) {
+              if (typeof part.text === "string" && part.text) {
+                handleThinking(part.text);
+              }
+            } else if (typeof part.text === "string" && part.text) {
+              handleContent(part.text);
+            }
+          }
         }
       }
     }

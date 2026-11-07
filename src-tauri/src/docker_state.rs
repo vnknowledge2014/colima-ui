@@ -455,13 +455,15 @@ pub fn map_containers(containers: &[bollard::models::ContainerSummary]) -> Vec<s
 pub fn map_images(images: &[bollard::models::ImageSummary]) -> Vec<serde_json::Value> {
     let mut mapped = Vec::new();
     for i in images {
-        let tags = i.repo_tags.clone();
+        let tags = &i.repo_tags;
         let (repo, tag) = if !tags.is_empty() && tags[0] != "<none>:<none>" {
-            let parts: Vec<&str> = tags[0].split(':').collect();
-            if parts.len() == 2 {
-                (parts[0].to_string(), parts[1].to_string())
-            } else {
-                (tags[0].clone(), "latest".to_string())
+            let repo_tag = &tags[0];
+            match repo_tag.rfind(':') {
+                Some(colon_idx) if colon_idx > repo_tag.rfind('/').unwrap_or(0) => (
+                    repo_tag[..colon_idx].to_string(),
+                    repo_tag[colon_idx + 1..].to_string(),
+                ),
+                _ => (repo_tag.clone(), "latest".to_string()),
             }
         } else {
             ("<none>".to_string(), "<none>".to_string())
@@ -596,6 +598,51 @@ mod tests {
         assert_eq!(mapped[0]["Id"], "abcdef1234567890");
         assert_eq!(mapped[0]["Repository"], "alpine");
         assert_eq!(mapped[0]["Tag"], "3.18");
+    }
+
+    #[test]
+    fn map_images_preserves_registry_port_with_and_without_tag() {
+        let tagged = bollard::models::ImageSummary {
+            id: "sha256:111".to_string(),
+            repo_tags: vec!["localhost:5000/org/app:v1.2".to_string()],
+            size: 100,
+            created: 1700000000,
+            ..Default::default()
+        };
+        let untagged_registry = bollard::models::ImageSummary {
+            id: "sha256:222".to_string(),
+            repo_tags: vec!["localhost:5000/org/app".to_string()],
+            size: 200,
+            created: 1700000000,
+            ..Default::default()
+        };
+        let untagged_plain = bollard::models::ImageSummary {
+            id: "sha256:333".to_string(),
+            repo_tags: vec!["org/app".to_string()],
+            size: 300,
+            created: 1700000000,
+            ..Default::default()
+        };
+        let dangling = bollard::models::ImageSummary {
+            id: "sha256:444".to_string(),
+            repo_tags: vec!["<none>:<none>".to_string()],
+            size: 400,
+            created: 1700000000,
+            ..Default::default()
+        };
+
+        let mapped = map_images(&[tagged, untagged_registry, untagged_plain, dangling]);
+        assert_eq!(mapped[0]["Repository"], "localhost:5000/org/app");
+        assert_eq!(mapped[0]["Tag"], "v1.2");
+
+        assert_eq!(mapped[1]["Repository"], "localhost:5000/org/app");
+        assert_eq!(mapped[1]["Tag"], "latest");
+
+        assert_eq!(mapped[2]["Repository"], "org/app");
+        assert_eq!(mapped[2]["Tag"], "latest");
+
+        assert_eq!(mapped[3]["Repository"], "<none>");
+        assert_eq!(mapped[3]["Tag"], "<none>");
     }
 
     #[tokio::test]

@@ -3,18 +3,18 @@
 ## 1. "Cannot connect to the Docker daemon"
 **Problem**: The Docker client (or a tool like docker-compose) returns `Cannot connect to the Docker daemon at unix:///var/run/docker.sock. Is the docker daemon running?`
 **Procedure**:
-1. Check if the instance is running: `colima status --profile <name>`.
-2. Find the correct socket location. By default, Colima places it in `~/.colima/<profile>/docker.sock`.
-3. Inform the user they can configure their tools to use this socket by exporting the `DOCKER_HOST` environment variable:
-   `export DOCKER_HOST="unix://${HOME}/.colima/default/docker.sock"`
-4. Alternatively, use the Colima UI which handles the socket linking transparently.
+1. Check if the instance is running: `[QUERY: colima-status | {"profile": "default"}]`.
+2. Inspect the active resolved socket path via `[QUERY: environment-resolutions]` (or `[NAVIGATE: environment]`). Depending on Colima version and `$COLIMA_HOME`, Colima places the socket at `~/.config/colima/<profile>/docker.sock` (Colima `0.10.x` XDG default) or legacy `~/.colima/<profile>/docker.sock`.
+3. Inform the user they can configure external CLI tools to use the resolved socket by exporting `DOCKER_HOST` (or switching Docker context with `docker context use colima`):
+   `export DOCKER_HOST="unix://${HOME}/.config/colima/default/docker.sock"` *(or `unix://${HOME}/.colima/default/docker.sock` on legacy layouts)*
+4. Alternatively, use ColimaUI directly, which resolves and connects to the active Colima socket automatically.
 
 ## 2. Symlink Conflicts
-**Problem**: Colima fails to start with an error about symlinking `/var/run/docker.sock`.
-**Solution**: Another application (like Docker Desktop or OrbStack) might be locking or owning the `/var/run/docker.sock` file.
+**Problem**: External tools expecting `/var/run/docker.sock` connect to the wrong runtime or fail due to a stale symlink.
+**Solution**: Another application (like Docker Desktop or OrbStack) might be owning `/var/run/docker.sock`.
 **Procedure**:
-1. Run `[RUN_APPROVE: ls -l /var/run/docker.sock]` to see what it links to.
-2. If the user wants Colima to take ownership, they must quit Docker Desktop, then run:
-   `[RUN_APPROVE: sudo rm -f /var/run/docker.sock]`
-   `[EVENT_APPROVE: restart-instance | default]`
-3. If they don't want to use sudo, they can rely on the `DOCKER_HOST` env var method instead (see section 1).
+1. Run `[RUN: ls -l /var/run/docker.sock]` to inspect what `/var/run/docker.sock` links to and who owns it.
+2. If the user wants to remove a stale user-writable `/var/run/docker.sock` after quitting Docker Desktop/OrbStack, run:
+   `[RUN_APPROVE: rm -f /var/run/docker.sock]`
+   `[EVENT_APPROVE: colima-restart | {"profile": "default"}]`
+   *(Note: `sudo` is blocked by the shell sandbox — if `/var/run/docker.sock` is owned by `root`, ask the user to remove it in their own terminal or rely on `docker context use colima` / `DOCKER_HOST` from section 1.)*

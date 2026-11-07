@@ -1,6 +1,6 @@
 ---
 name: colima-ui
-description: Trợ lý AI điều khiển toàn diện hệ thống Container, Kubernetes và máy ảo thông qua ColimaUI. Giao tiếp qua Headless CLI Chat hoặc gọi trực tiếp qua REST API.
+description: Trợ lý AI điều khiển toàn diện hệ thống Container, Kubernetes và máy ảo thông qua ColimaUI. Giao tiếp qua Native MCP Server (cui mcp), Headless AI CLI (cui), hoặc gọi trực tiếp qua REST API.
 ---
 
 # ColimaUI Orchestration Skill
@@ -24,24 +24,36 @@ read -r TOKEN < ~/.colima-ui/api_token
 
 ## Cách thức tương tác
 
-ColimaUI cung cấp 2 chế độ điều khiển:
+ColimaUI cung cấp 3 chế độ điều khiển:
 
-1. **Giao tiếp qua AI Chat (Delegation Mode)**
-   Thay vì tự bạn (Orchestrator) phải phân tích từng bước, bạn có thể gửi yêu cầu bằng ngôn ngữ tự nhiên (Prompt) cho AI của ColimaUI qua `POST /api/cli/chat`. AI nội bộ sẽ tự thực thi chuỗi công cụ và trả về `{"result": "..."}`.
+1. **Native MCP Server (`cui mcp` / `colimaui mcp` — Khuyên dùng cho IDE & Agent Hosts)**
+   Máy chủ JSON-RPC 2.0 MCP tích hợp sẵn qua `stdin`/`stdout`, cung cấp **15 công cụ định kiểu mạnh**: `colima_list_instances`, `colima_instance_action`, `docker_list_containers`, `docker_container_action`, `docker_container_logs`, `docker_list_images`, `docker_pull_image`, `docker_list_volumes`, `docker_list_networks`, `compose_list_projects`, `k8s_list_pods`, `k8s_cluster_status`, `environment_resolutions`, `system_diagnostics`, `colima_ai_ask`. Hoạt động liền mạch ngay cả khi **ColimaUI Desktop đang chạy** (proxy qua `127.0.0.1:<api_port>` + `~/.colima-ui/api_token`) **hoặc đang đóng** (tự động fallback chạy trực tiếp native).
+   - **Claude Desktop**, **Cursor**, **Antigravity**, **Windsurf**:
+     ```json
+     {"mcpServers": {"colima-ui": {"command": "cui", "args": ["mcp"]}}}
+     ```
+   - **Zed** (`~/.config/zed/settings.json`):
+     ```json
+     {"context_servers": {"colima-ui": {"command": {"path": "cui", "args": ["mcp"]}}}}
+     ```
+   - **Claude Code**: `claude mcp add colima-ui -- cui mcp`
+
+2. **Giao tiếp qua Headless AI CLI (`cui`) & AI Chat (`POST /api/cli/chat`)**
+   Gửi yêu cầu bằng ngôn ngữ tự nhiên cho vòng lặp AI đa bước của ColimaUI (tự động đọc `app_settings` từ `~/.colima-ui/knowledge.db`):
    ```bash
-   PORT=11420
-   [ -f ~/.colima-ui/api_port ] && read -r PORT < ~/.colima-ui/api_port
-   read -r TOKEN < ~/.colima-ui/api_token
+   # Chạy từ CLI (mặc định chỉ đọc; thêm --yes cho hành động thay đổi trạng thái, --json để lấy JSON)
+   cui "Hãy kiểm tra trạng thái Colima và liệt kê các container đang bị exited"
+   cui --yes --provider anthropic --model claude-sonnet-4-6 "Khởi động lại container redis"
 
+   # Hoặc gọi trực tiếp qua HTTP POST /api/cli/chat
    curl -s -X POST "http://127.0.0.1:${PORT}/api/cli/chat" \
      -H "Authorization: Bearer ${TOKEN}" \
      -H "Content-Type: application/json" \
      -d '{"prompt": "Hãy kiểm tra trạng thái Colima và liệt kê các container đang bị exited."}'
    ```
-   - **Use Case**: Tác vụ đa bước, cần chẩn đoán ngữ cảnh hệ thống hoặc muốn ủy quyền trọn gói cho ColimaUI AI.
 
-2. **Gọi API Trực tiếp (Direct Control Mode)**
-   Khi bạn đã biết chính xác hành động cần thực hiện, hãy gọi thẳng REST API của ColimaUI để đạt tốc độ phản hồi tức thì (không tốn vòng lặp suy luận LLM).
+3. **Gọi API Trực tiếp (Direct Control Mode)**
+   Khi bạn đã biết chính xác hành động cần thực hiện, hãy gọi thẳng REST API của ColimaUI (hoặc CLI trực tiếp `colimaui`) để đạt tốc độ phản hồi tức thì:
    ```bash
    curl -s -H "Authorization: Bearer ${TOKEN}" "http://127.0.0.1:${PORT}/api/containers"
    ```
@@ -49,7 +61,7 @@ ColimaUI cung cấp 2 chế độ điều khiển:
 
 ## Tính năng tự nhận thức (Meta-Capabilities)
 
-ColimaUI có khả năng tự đọc và thay đổi cấu hình bộ não AI của chính nó (ví dụ chuyển đổi giữa Anthropic, OpenAI, Google Gemini, Ollama, OpenRouter, DeepSeek...):
+ColimaUI có khả năng tự đọc và thay đổi cấu hình bộ não AI của chính nó qua **6 chế độ `ai_provider` chuẩn** (`anthropic`, `openai`, `gemini`, `openai-compatible` cho OpenRouter/Groq/DeepSeek/Mistral/Together/LiteLLM/vLLM, `ollama-local`, `ollama-cloud`):
 - Cập nhật trực tiếp qua REST API:
   ```bash
   curl -s -X POST "http://127.0.0.1:${PORT}/api/settings" \
@@ -62,10 +74,10 @@ ColimaUI có khả năng tự đọc và thay đổi cấu hình bộ não AI c�
   curl -s -X POST "http://127.0.0.1:${PORT}/api/cli/chat" \
     -H "Authorization: Bearer ${TOKEN}" \
     -H "Content-Type: application/json" \
-    -d '{"prompt": "Hãy chuyển sang dùng model gpt-4o của openai."}'
+    -d '{"prompt": "Hãy chuyển sang dùng model gpt-4o của openai.", "allow_mutations": true}'
   ```
 
-Hãy đọc thêm danh sách đầy đủ năng lực và các `ai_provider` hỗ trợ tại `references/capabilities.md`.
+Hãy đọc thêm danh sách đầy đủ **100 sự kiện Event Bus** và **6 `ai_provider` hợp lệ** tại `references/capabilities.md`.
 
 ## Anti-Patterns
 

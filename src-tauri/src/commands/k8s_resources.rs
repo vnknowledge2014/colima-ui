@@ -47,7 +47,9 @@ pub async fn k8s_apply(yaml: String, namespace: String) -> Result<String, Colima
                 args.push(&namespace);
             }
 
-            let mut child = Command::new("kubectl")
+            let mut cmd = Command::new(crate::path_util::resolve_binary("kubectl"));
+            crate::path_util::apply_path_to_cmd(&mut cmd);
+            let mut child = cmd
                 .args(&args)
                 .stdin(Stdio::piped())
                 .stdout(Stdio::piped())
