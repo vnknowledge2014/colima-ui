@@ -21,7 +21,7 @@
 //!    - High-throughput asynchronous Tokio tasks under maximum simultaneous contention
 
 use colima_ui_lib::commands::colima::{normalize_bytes_to_gib, StartConfig, ONE_GIB_BYTES};
-use colima_ui_lib::commands::runtime::{run, DEFAULT_TIMEOUT, LONG_OP_TIMEOUT};
+use colima_ui_lib::commands::runtime::{run, run_with_cmd, DEFAULT_TIMEOUT, LONG_OP_TIMEOUT};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Barrier};
 use std::time::{Duration, Instant};
@@ -361,7 +361,14 @@ async fn test_adv_subprocess_timeout_returns_promptly() {
 #[tokio::test]
 async fn test_adv_subprocess_tiny_timeout_cancels_instantly() {
     let start = Instant::now();
-    let result = run(vec!["version".to_string()], Duration::from_nanos(1)).await;
+    // Use `/bin/sleep` via `run_with_cmd` so clean macOS CI runners without `docker`
+    // installed exercise the exact 1ns timeout path instead of ENOENT spawn failure.
+    let result = run_with_cmd(
+        std::process::Command::new("/bin/sleep"),
+        vec!["5".to_string()],
+        Duration::from_nanos(1),
+    )
+    .await;
     let elapsed = start.elapsed();
 
     assert!(result.is_err(), "1-nanosecond deadline must fail with timeout");

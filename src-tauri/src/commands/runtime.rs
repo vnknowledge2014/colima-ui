@@ -81,7 +81,16 @@ pub async fn run(
     args: Vec<String>,
     timeout: std::time::Duration,
 ) -> Result<std::process::Output, String> {
-    let mut cmd = tokio::process::Command::from(get_runtime_cmd());
+    run_with_cmd(get_runtime_cmd(), args, timeout).await
+}
+
+/// Execute `base_cmd` with `args`, killing the child process on drop if `timeout` elapses.
+pub async fn run_with_cmd(
+    base_cmd: Command,
+    args: Vec<String>,
+    timeout: std::time::Duration,
+) -> Result<std::process::Output, String> {
+    let mut cmd = tokio::process::Command::from(base_cmd);
     cmd.args(args);
     cmd.kill_on_drop(true);
 
@@ -120,14 +129,15 @@ mod tests {
     /// than by asserting on the constant.
     #[tokio::test]
     async fn a_command_that_outlives_its_timeout_reports_the_timeout() {
-        // `version` is harmless and exists on every runtime; the point is the
-        // deadline, which is set below anything a process can complete in.
-        let err = run(
-            vec!["version".to_string()],
-            std::time::Duration::from_nanos(1),
+        // Use `/bin/sleep` so this test exercises `run_with_cmd` deterministically
+        // even on clean macOS CI runners where `docker` is not installed.
+        let err = run_with_cmd(
+            Command::new("/bin/sleep"),
+            vec!["5".to_string()],
+            std::time::Duration::from_millis(20),
         )
         .await
-        .expect_err("a one-nanosecond deadline cannot be met");
+        .expect_err("a 5-second sleep cannot complete within 20ms");
         assert!(
             err.contains("timed out"),
             "the message must say what happened, got: {err}"
