@@ -1,20 +1,20 @@
 ---
 name: colima-ui
-version: 0.3.0
-description: "Trợ lý AI điều khiển toàn diện hệ thống Container, Kubernetes, Lima VMs và bảo mật runtime thông qua ColimaUI v0.3.0. Ưu tiên CLI-First (`cui ... --json` phản hồi < 5ms với 22 lệnh con), Native MCP Server (`cui mcp` — 22 công cụ), giao thức A2A chuẩn (`/a2a`), hoặc REST API."
+version: 0.3.3
+description: "Trợ lý AI điều khiển toàn diện hệ thống Container, Kubernetes, Lima VMs và bảo mật runtime thông qua ColimaUI v0.3.3. Use when orchestrating Colima VMs, Docker, Compose, Kubernetes, Lima, or runtime security via CLI-First (`cui ... --json` < 5ms với 22 lệnh con), Native MCP Server (`cui mcp` — 22 công cụ), giao thức A2A chuẩn (`/a2a`), 130 sự kiện Event Bus đối xứng, hoặc REST API."
 ---
 
-# ColimaUI v0.3.0 Orchestration Skill (Dual-Surface & CLI-First)
+# ColimaUI v0.3.3 Orchestration Skill (Dual-Surface & CLI-First)
 
-Bạn là một Orchestrator đang điều khiển **ColimaUI `v0.3.0`** — nền tảng điều phối thống nhất Docker, Docker Compose, Kubernetes (K3s/Kind), Lima VMs và bảo mật runtime (Trivy/SBOM/Falco/Detonation).
+Bạn là một Orchestrator đang điều khiển **ColimaUI `v0.3.3`** — nền tảng điều phối thống nhất Docker, Docker Compose, Kubernetes (K3s/Kind), Lima VMs và bảo mật runtime (Trivy/SBOM/Falco/Detonation).
 
 ## Kiến trúc Hai Bề Mặt (Dual-Surface Architecture)
 
-- **Bên trong ứng dụng (Inside App — Desktop / Webview)**: `AiChatPanel` + `agentCore.ts` + **100** sự kiện App Event Bus + Internal Skills (`system_prompt.md`, `router.md`, `src-tauri/resources/skills/*`) + Knowledge Bank RAG + FTS5 Memories + Live UI Bridge (`ui-navigate` & `agent-external-chat-turn`).
-- **Bên ngoài ứng dụng (Outside App — `cui` `v0.3.0`, giữ nguyên bí danh tương thích ngược `colimaui`)**:
+- **Bên trong ứng dụng (Inside App — Desktop / Webview)**: `AiChatPanel` + `agentCore.ts` + **130** sự kiện App Event Bus đối xứng (`62 SAFE` + `68 NORMAL/DANGEROUS`, đồng bộ 1-1 với `cui` Headless/A2A) + Internal Skills (`system_prompt.md`, `router.md`, `src-tauri/resources/skills/*`) + Knowledge Bank RAG + FTS5 Memories + Live UI Bridge (`ui-navigate` trên 17 trang + ngăn `ai-chat`, và `agent-external-chat-turn`).
+- **Bên ngoài ứng dụng (Outside App — `cui` `v0.3.3`, giữ nguyên bí danh tương thích ngược `colimaui`)**:
   1. **CLI-First Deterministic (`< 5ms` + `--json`)**: 20 lệnh con điều khiển trực tiếp qua localhost HTTP `:11420..11429` khi Desktop đang mở, hoặc **tự động fallback chạy độc lập bằng Rust** (giống `InfiTransCLI`) khi Desktop đang đóng. Cờ toàn cục `--json` ở mọi vị trí luôn trả về `{"ok": true, "data": ...}` hoặc `{"ok": false, "error": "..."}`.
   2. **Native MCP Server (`cui mcp` / `colimaui mcp`)**: Máy chủ JSON-RPC 2.0 qua `stdio` cung cấp **22 công cụ định kiểu mạnh**.
-  3. **Headless Agent Chat & Native A2A (`cui chat` / `POST /a2a`)**: Cô lập mặc định vào phiên `colima-a2a-default-session` để không làm bẩn lịch sử chat cá nhân trên UI; hỗ trợ `--mirror-ui` khi muốn phản chiếu trực tiếp lên `AiChatPanel`.
+  3. **Headless Agent Chat & Native A2A (`cui chat` / `POST /a2a`)**: Thực thi đầy đủ **130 sự kiện App Event Bus** (`62 SAFE` + `68 NORMAL/DANGEROUS`) đối xứng 1-1 với In-App AI Chat; cô lập mặc định vào phiên `colima-a2a-default-session` để không làm bẩn lịch sử chat cá nhân trên UI và hỗ trợ `--mirror-ui` khi muốn phản chiếu trực tiếp lên `AiChatPanel`.
 
 ## Xác thực & Kết nối (Authentication)
 
@@ -129,7 +129,7 @@ Xem chi tiết toàn bộ danh mục endpoint tại `references/api_reference.md
 
 ## Tính năng tự nhận thức (Meta-Capabilities)
 
-ColimaUI hỗ trợ **6 chế độ `ai_provider` chuẩn** (`anthropic`, `openai`, `gemini`, `openai-compatible` cho OpenRouter/Groq/DeepSeek/Mistral/Together/LiteLLM/vLLM, `ollama-local`, `ollama-cloud`). Xem danh sách đầy đủ **100 sự kiện Event Bus** và cấu hình tại `references/capabilities.md`.
+ColimaUI hỗ trợ **6 chế độ `ai_provider` chuẩn** (`anthropic`, `openai`, `gemini`, `openai-compatible` cho OpenRouter/Groq/DeepSeek/Mistral/Together/LiteLLM/vLLM, `ollama-local`, `ollama-cloud`). Xem danh sách đầy đủ **130 sự kiện Event Bus đối xứng (`62 SAFE` + `68 NORMAL/DANGEROUS`)** và cấu hình tại `references/capabilities.md`.
 
 ## Anti-Patterns
 

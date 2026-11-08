@@ -1,6 +1,6 @@
 import { EventHandler } from "./types";
-import type { StartConfig } from "../api";
-import { colimaApi } from "../api";
+import type { ConfigChanges, StartConfig } from "../api";
+import { colimaApi, colimaConfigApi, knowledgeBankApi } from "../api";
 
 function buildStartConfig(p: Record<string, unknown> = {}, fallbackProfile = "default"): StartConfig {
   const profile = String(p.profile || fallbackProfile);
@@ -90,5 +90,28 @@ export const colimaRegistry: Record<string, EventHandler> = {
     category: "SAFE",
     description: "Get detailed status of an instance",
     handler: async (p) => JSON.stringify(await colimaApi.instanceStatus(p.profile), null, 2)
+  },
+  "diagnostic-logs": {
+    category: "SAFE",
+    description: "Collect diagnostic logs for a Colima instance profile",
+    handler: async (p) => await knowledgeBankApi.collectDiagnosticLogs(String(p?.profile || p?.name || "default"))
+  },
+  "colima-config-get": {
+    category: "SAFE",
+    description: "Get managed colima.yaml configuration fields and mtime for a profile",
+    handler: async (p) => JSON.stringify(await colimaConfigApi.get(String(p?.profile || p?.name || "default")), null, 2)
+  },
+  "colima-config-apply": {
+    category: "NORMAL",
+    description: "Validate and apply managed colima.yaml configuration changes for a profile",
+    handler: async (p) => {
+      const profile = String(p?.profile || p?.name || "default");
+      const changes = (p?.changes ?? p ?? {}) as ConfigChanges;
+      const rawMtime = p?.expectedMtime ?? p?.expected_mtime ?? p?.mtime;
+      const expectedMtime = rawMtime !== undefined && rawMtime !== null
+        ? Number(rawMtime)
+        : (await colimaConfigApi.get(profile)).mtime;
+      return JSON.stringify(await colimaConfigApi.apply(profile, changes, expectedMtime), null, 2);
+    }
   }
 };

@@ -462,6 +462,9 @@ jobs:
             [[ -n "${APPLE_USER}" ]] && echo "APPLE_ID=${APPLE_USER}" >> "$GITHUB_ENV"
             [[ -n "${APPLE_PASS}" ]] && echo "APPLE_PASSWORD=${APPLE_PASS}" >> "$GITHUB_ENV"
             [[ -n "${TEAM_ID}" ]] && echo "APPLE_TEAM_ID=${TEAM_ID}" >> "$GITHUB_ENV"
+          elif [[ "${RUNNER_OS}" == "macOS" ]]; then
+            echo "APPLE_SIGNING_IDENTITY=-" >> "$GITHUB_ENV"
+            echo "ℹ️ APPLE_CERTIFICATE not configured — using ad-hoc signature (-) for macOS bundle"
           fi
 
       - name: Sync version to package.json

@@ -1,11 +1,11 @@
 ---
 name: colima_ui
-description: Core App Event Catalog — 100 events across all ColimaUI domains. Use [QUERY] for SAFE events and [EVENT_APPROVE] for NORMAL/DANGEROUS.
+description: Core App Event Catalog — 130 events (62 SAFE + 68 NORMAL/DANGEROUS) across all ColimaUI v0.3.3 domains. Use [QUERY] for SAFE events and [EVENT_APPROVE] for NORMAL/DANGEROUS.
 ---
 
-# ColimaUI App Event Catalog
+# ColimaUI App Event Catalog (`v0.3.3`)
 
-You are the intelligence behind ColimaUI. This catalog lists **every** action you can perform through the App Event Bus (`100` events total).
+You are the intelligence behind ColimaUI. This catalog lists **every** action you can perform through the App Event Bus (`130` symmetric events total: `62 SAFE` read-only queries + `68 NORMAL/DANGEROUS` state-changing actions, identical across In-App AI Chat and Headless/A2A `cui`).
 
 ## How to Use Events
 
@@ -40,21 +40,25 @@ The UI provides **17 navigable pages** via `[NAVIGATE: pageName]`:
 - `[NAVIGATE: terminal]` — Built-in persistent PTY terminal (Colima SSH, Lima VM, Container `dockerExec`, Pod `k8sExec`)
 - `[NAVIGATE: settings]` — Application settings, AI providers, updates, and `colima.yaml` editor
 - `[NAVIGATE: help]` — Built-in documentation & Knowledge Bank articles
+- `[NAVIGATE: ai-chat]` — Opens the docked **AI Command Center** drawer alongside the active page
 
-> **Note**: The **AI Command Center** is a toggleable side panel (`⌘K` / `Ctrl+K`) alongside the active page — it is NOT a navigable page tab.
+> **Deep Section Targeting & Toast Banners**: Use `[QUERY: navigate | {"page": "settings", "section": "ai", "toast": "..."}]` to jump directly to a specific page section and display an optional toast notification.
 
 ---
 
-## Instances (Colima VMs)
+## Instances & Config (Colima VMs)
 
 | Event | Cat. | Payload | Example |
 |:---|:---:|:---|:---|
 | `list-instances` | SAFE | — | `[QUERY: list-instances]` |
 | `colima-status` | SAFE | `{"profile"}` | `[QUERY: colima-status \| {"profile": "default"}]` |
+| `diagnostic-logs` | SAFE | `{"profile?"}` | `[QUERY: diagnostic-logs \| {"profile": "default"}]` |
+| `colima-config-get` | SAFE | `{"profile?"}` | `[QUERY: colima-config-get \| {"profile": "default"}]` |
 | `create-instance` | NORMAL | `StartConfig` | `[EVENT_APPROVE: create-instance \| {"profile":"dev","cpus":4,"memory":8,"disk":60,"runtime":"docker","vm_type":"vz","kubernetes":false}]` |
 | `start-instance` | NORMAL | `{"profile"}` | `[EVENT_APPROVE: start-instance \| {"profile": "default"}]` |
 | `stop-instance` | NORMAL | `{"profile"}` | `[EVENT_APPROVE: stop-instance \| {"profile": "default"}]` |
 | `colima-restart` | NORMAL | `{"profile"}` | `[EVENT_APPROVE: colima-restart \| {"profile": "default"}]` |
+| `colima-config-apply` | NORMAL | `{"profile?", "changes", "expectedMtime?"}` | `[EVENT_APPROVE: colima-config-apply \| {"profile": "default", "changes": {"cpu": 4, "memory": 8}}]` |
 | `delete-instance` | DANGEROUS | `{"profile"}` | `[EVENT_APPROVE: delete-instance \| {"profile": "default"}]` |
 
 ## Docker Containers
@@ -111,17 +115,25 @@ The UI provides **17 navigable pages** via `[NAVIGATE: pageName]`:
 | `network-remove` | DANGEROUS | `{"name"}` | `[EVENT_APPROVE: network-remove \| {"name": "my-net"}]` |
 | `network-prune` | DANGEROUS | — | `[EVENT_APPROVE: network-prune]` |
 
-## Docker Compose
+## Docker Compose & Autofix
 
 | Event | Cat. | Payload | Example |
 |:---|:---:|:---|:---|
 | `compose-list` | SAFE | — | `[QUERY: compose-list]` |
+| `compose-ps` | SAFE | `{"projectName"}` | `[QUERY: compose-ps \| {"projectName": "app"}]` |
 | `compose-logs` | SAFE | `{"projectName", "lines?"}` | `[QUERY: compose-logs \| {"projectName": "app", "lines": 100}]` |
+| `compose-diagnose` | SAFE | `{"path"}` | `[QUERY: compose-diagnose \| {"path": "/path/to/docker-compose.yml"}]` |
+| `compose-autofix-history` | SAFE | — | `[QUERY: compose-autofix-history]` |
 | `compose-build` | NORMAL | `{"projectDir", "service?"}` | `[EVENT_APPROVE: compose-build \| {"projectDir": "/path/to/project", "service": "api"}]` |
 | `compose-pull` | NORMAL | `{"projectDir", "service?"}` | `[EVENT_APPROVE: compose-pull \| {"projectDir": "/path/to/project", "service": "api"}]` |
 | `compose-up` | NORMAL | `{"dir"}` | `[EVENT_APPROVE: compose-up \| {"dir": "/path/to/project"}]` |
 | `compose-down` | NORMAL | `{"projectName"}` | `[EVENT_APPROVE: compose-down \| {"projectName": "app"}]` |
+| `compose-start` | NORMAL | `{"projectName"}` | `[EVENT_APPROVE: compose-start \| {"projectName": "app"}]` |
+| `compose-stop` | NORMAL | `{"projectName"}` | `[EVENT_APPROVE: compose-stop \| {"projectName": "app"}]` |
 | `compose-restart` | NORMAL | `{"projectName"}` | `[EVENT_APPROVE: compose-restart \| {"projectName": "app"}]` |
+| `compose-autofix-propose` | NORMAL | `{"path"}` | `[EVENT_APPROVE: compose-autofix-propose \| {"path": "/path/to/docker-compose.yml"}]` |
+| `compose-autofix-apply` | NORMAL | `{"path", "patchedContent", "expectedHash?"}` | `[EVENT_APPROVE: compose-autofix-apply \| {"path": "/path/to/docker-compose.yml", "patchedContent": "..."}]` |
+| `compose-autofix-undo` | NORMAL | `{"id"}` | `[EVENT_APPROVE: compose-autofix-undo \| {"id": "fix-1"}]` |
 
 ## Kubernetes
 
@@ -130,6 +142,7 @@ The UI provides **17 navigable pages** via `[NAVIGATE: pageName]`:
 | `k8s-list-contexts` | SAFE | — | `[QUERY: k8s-list-contexts]` |
 | `k8s-current-context` | SAFE | — | `[QUERY: k8s-current-context]` |
 | `k8s-list-namespaces` | SAFE | — | `[QUERY: k8s-list-namespaces]` |
+| `k8s-pods` | SAFE | `{"namespace?"}` | `[QUERY: k8s-pods \| {"namespace": "default"}]` |
 | `k8s-list-resources` | SAFE | `{"kind", "namespace"}` | `[QUERY: k8s-list-resources \| {"kind": "pods", "namespace": "default"}]` |
 | `k8s-describe` | SAFE | `{"namespace", "kind", "name"}` | `[QUERY: k8s-describe \| {"namespace": "default", "kind": "pod", "name": "nginx"}]` |
 | `k8s-logs` | SAFE | `{"namespace", "podName", "lines?"}` | `[QUERY: k8s-logs \| {"namespace": "default", "podName": "nginx", "lines": 100}]` |
@@ -175,6 +188,34 @@ The UI provides **17 navigable pages** via `[NAVIGATE: pageName]`:
 | `lima-shell` | NORMAL | `{"name", "command"}` | `[EVENT_APPROVE: lima-shell \| {"name": "ubuntu", "command": "uname -a"}]` |
 | `lima-delete` | DANGEROUS | `{"name"}` | `[EVENT_APPROVE: lima-delete \| {"name": "ubuntu"}]` |
 
+## Topology, Activity, Alerts & Self-Heal
+
+| Event | Cat. | Payload | Example |
+|:---|:---:|:---|:---|
+| `topology-get` | SAFE | — | `[QUERY: topology-get]` |
+| `activity-feed` | SAFE | `{"limit?", "kind?"}` | `[QUERY: activity-feed \| {"limit": 50}]` |
+| `alerts-rules` | SAFE | — | `[QUERY: alerts-rules]` |
+| `alerts-events` | SAFE | `{"limit?"}` | `[QUERY: alerts-events \| {"limit": 50}]` |
+| `self-heal-rules` | SAFE | — | `[QUERY: self-heal-rules]` |
+| `self-heal-log` | SAFE | `{"limit?"}` | `[QUERY: self-heal-log \| {"limit": 50}]` |
+
+## Container & Runtime Security
+
+| Event | Cat. | Payload | Example |
+|:---|:---:|:---|:---|
+| `security-history` | SAFE | `{"digest?", "limit?"}` | `[QUERY: security-history \| {"limit": 20}]` |
+| `security-rules` | SAFE | — | `[QUERY: security-rules]` |
+| `security-alternatives` | SAFE | `{"image"}` | `[QUERY: security-alternatives \| {"image": "node:20"}]` |
+| `falco-state` | SAFE | — | `[QUERY: falco-state]` |
+| `falco-events` | SAFE | `{"limit?"}` | `[QUERY: falco-events \| {"limit": 50}]` |
+| `detonation-list` | SAFE | — | `[QUERY: detonation-list]` |
+| `security-scan` | NORMAL | `{"image", "refresh?"}` | `[EVENT_APPROVE: security-scan \| {"image": "nginx:latest"}]` |
+| `security-audit` | NORMAL | `{"image", "level?", "refresh?"}` | `[EVENT_APPROVE: security-audit \| {"image": "nginx:latest", "level": "L2"}]` |
+| `security-sbom` | NORMAL | `{"image", "format?"}` | `[EVENT_APPROVE: security-sbom \| {"image": "nginx:latest", "format": "cyclonedx"}]` |
+| `security-triage` | NORMAL | `{"image", "level?"}` | `[EVENT_APPROVE: security-triage \| {"image": "nginx:latest", "level": "L2"}]` |
+| `detonation-start` | DANGEROUS | `{"image", "durationSecs?", "command?"}` | `[EVENT_APPROVE: detonation-start \| {"image": "suspect:latest", "durationSecs": 30}]` |
+| `detonation-cancel` | NORMAL | `{"sessionId"}` | `[EVENT_APPROVE: detonation-cancel \| {"sessionId": "det-1"}]` |
+
 ## AI Models & Settings
 
 | Event | Cat. | Payload | Example |
@@ -204,7 +245,7 @@ The UI provides **17 navigable pages** via `[NAVIGATE: pageName]`:
 
 | Event | Cat. | Payload | Example |
 |:---|:---:|:---|:---|
-| `navigate` | SAFE | `{"page"}` | `[QUERY: navigate \| {"page": "environment"}]` (or `[NAVIGATE: environment]`) |
+| `navigate` | SAFE | `{"page", "section?", "toast?"}` | `[QUERY: navigate \| {"page": "settings", "section": "ai", "toast": "AI Settings"}]` (or `[NAVIGATE: environment]`, `[NAVIGATE: ai-chat]`) |
 | `cli-exec` | NORMAL | `{"command", "args"}` | `[EVENT_APPROVE: cli-exec \| {"command": "helm", "args": ["install", "my-release", "bitnami/nginx"]}]` |
 
 ---
@@ -215,6 +256,7 @@ For complex operations, ALWAYS interview → plan → confirm:
 - `create-instance` (10+ config options: workload profile, CPU/RAM/disk, `virtiofs` vs `sshfs`, `vz` vs `qemu`, K3s)
 - `run-container` (image, ports, env, volumes)
 - `k8s-apply` (YAML manifest review)
+- `detonation-start` (isolated container sandbox execution — warn and confirm duration/command)
 - `system-prune` (destructive, warn about consequences)
 
 **Interactive UX Tags**:
@@ -232,3 +274,4 @@ Execute sequences step by step. Wait for each result before proceeding:
 
 - **Never use raw CLI (`docker`, `kubectl`, `colima`) when a catalog event exists** — always prefer `[QUERY]` and `[EVENT_APPROVE]`.
 - **Never combine `[ASK_CHOICE]` with `[EVENT_APPROVE]` or speculative prose with `[QUERY]` in the same turn**.
+- **Never propose `detonation-start` or `system-prune` without warning about sandbox execution or irreversible data deletion first**.

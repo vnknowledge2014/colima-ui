@@ -9,12 +9,12 @@ graph TD
     subgraph Frontend["Inside App — Svelte 5 + TypeScript"]
         APP["App.svelte"]
         PAGES["Pages (20)"]
-        PANEL["AiChatPanel + agentCore.ts (100 Events)"]
+        PANEL["AiChatPanel + agentCore.ts (130 Symmetric Events)"]
         STORE["Rune Stores"]
         API["api.ts (dual-mode)"]
     end
 
-    subgraph Outside["Outside App — v0.3.0 Agent Ecosystem"]
+    subgraph Outside["Outside App — v0.3.3 Agent Ecosystem"]
         CUI["cui / colimaui (22 subcommands <5ms --json)"]
         MCP["cui mcp (22 stdio MCP tools)"]
         A2A["A2A Peers (GET /.well-known/agent.json, POST /a2a)"]
@@ -68,14 +68,14 @@ graph TD
     CMD --> CLI
 ```
 
-## Dual-Surface Agent Design (`v0.3.0`)
+## Dual-Surface Agent Design (`v0.3.3`)
 
-ColimaUI `v0.3.0` cleanly separates interactive human-in-the-loop workflows inside the app from deterministic programmatic automation outside the app:
+ColimaUI `v0.3.3` cleanly separates interactive human-in-the-loop workflows inside the app from deterministic programmatic automation outside the app while keeping **130 symmetric App Event Bus actions** (`62 SAFE` + `68` mutating) 1-for-1 between `src/lib/aiEventBus.ts` and `src-tauri/src/commands/agent_loop.rs`:
 
 | Surface | Entry Points | Session & UI Behavior |
 |---------|-------------|-----------------------|
-| **Inside App** | `AiChatPanel.svelte`, `agentCore.ts`, `aiEventBus.ts` (**100** events), Internal Skills (`system_prompt.md`, `router.md`, `src-tauri/resources/skills/*`), Knowledge Bank RAG + FTS5 Memories | Interactive `[EVENT_APPROVE]` cards, 3-tier guided UX, personal multi-thread SQLite conversations (`"default"` & custom threads), and Live UI Bridge receivers (`ui-navigate`, `agent-external-chat-turn`). |
-| **Outside App** | `cui` `v0.3.0` (`colimaui` alias) **22 subcommands** (`< 5ms` HTTP `:11420..11429` + automatic standalone Rust fallback when Desktop is closed + global `--json`), **22-tool MCP stdio server** (`cui mcp`), and **Native HTTP A2A** (`GET /.well-known/agent.json`, `POST /a2a`) | Deterministic subcommands return `{"ok": true, "data": ...}` with zero LLM overhead. Automated `cui chat`, MCP `colima_ai_ask`, and `/a2a` calls default to **`colima-a2a-default-session`** so they never pollute personal UI chat history unless `--mirror-ui` (`"mirror_ui": true`) is explicitly passed; `POST /api/ui/navigate` (`cui ui navigate`) remotely switches any of the 17 UI pages. |
+| **Inside App** | `AiChatPanel.svelte`, `agentCore.ts`, `aiEventBus.ts` (**130** symmetric events: `62 SAFE` + `68` mutating), Internal Skills (`system_prompt.md`, `router.md`, `src-tauri/resources/skills/*`), Knowledge Bank RAG + FTS5 Memories | Interactive `[EVENT_APPROVE]` cards, 3-tier guided UX, personal multi-thread SQLite conversations (`"default"` & custom threads), and Live UI Bridge receivers (`ui-navigate`, `agent-external-chat-turn`). |
+| **Outside App** | `cui` `v0.3.3` (`colimaui` alias) **22 subcommands** (`< 5ms` HTTP `:11420..11429` + automatic standalone Rust fallback when Desktop is closed + global `--json`), **22-tool MCP stdio server** (`cui mcp`), and **Native HTTP A2A** (`GET /.well-known/agent.json`, `POST /a2a`) | Deterministic subcommands return `{"ok": true, "data": ...}` with zero LLM overhead. Automated `cui chat`, MCP `colima_ai_ask`, and `/a2a` calls execute the same **130** App Event Bus actions via `agent_loop.rs` and default to **`colima-a2a-default-session`** so they never pollute personal UI chat history unless `--mirror-ui` (`"mirror_ui": true`) is explicitly passed; `POST /api/ui/navigate` (`cui ui navigate`) remotely switches any of the 17 UI pages or opens the `ai-chat` drawer. |
 
 ## Dual-Mode Design
 

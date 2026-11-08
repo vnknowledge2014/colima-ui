@@ -1,11 +1,11 @@
-import { isRunningInTauri } from "../env";
 import { runSandboxed } from "./shell";
 import { EventHandler } from "./types";
 import { modelsApi, settingsApi } from "../api";
 import { call } from "../api/client";
 import { getActiveProvider } from "../aiProviderConfig";
 import { setAppSetting } from "../settingsStore.svelte";
-import { uiState, VALID_PAGES, isValidPage } from "../../store.svelte";
+import { applyUiNavigatePayload } from "../uiBridge";
+import { VALID_PAGES } from "../../store.svelte";
 
 export const configRegistry: Record<string, EventHandler> = {
   "model-list": {
@@ -42,11 +42,16 @@ export const configRegistry: Record<string, EventHandler> = {
     category: "SAFE",
     description: "Navigate to a specific page in the application",
     handler: async (p) => {
-      const targetPage = typeof p?.page === "string" ? p.page.trim().toLowerCase() : "";
-      if (!isValidPage(targetPage)) {
-        return `Error: Invalid page '${p?.page ?? ""}'. Valid pages: ${VALID_PAGES.join(", ")}`;
+      const rawPage = p?.page ?? p?.target ?? p?.view;
+      const ok = applyUiNavigatePayload({
+        page: typeof rawPage === "string" ? rawPage : undefined,
+        section: typeof p?.section === "string" ? p.section : undefined,
+        toast: typeof (p?.toast ?? p?.message) === "string" ? (p?.toast ?? p?.message) : undefined,
+      });
+      if (!ok) {
+        return `Error: Invalid page '${rawPage ?? ""}'. Valid pages: ${VALID_PAGES.join(", ")}, ai-chat`;
       }
-      uiState.currentPage = targetPage;
+      const targetPage = String(rawPage).trim().toLowerCase();
       return `Navigated to ${targetPage} tab.`;
     }
   },
@@ -146,16 +151,15 @@ export const configRegistry: Record<string, EventHandler> = {
     category: "NORMAL",
     description: "Execute a command through the App CLI gateway",
     handler: async (p) => {
-      if (isRunningInTauri()) {
-        try {
-          return await runSandboxed(p.command, p.args || []);
-        } catch (e) {
-          // Includes the sandbox's own refusals — a `banned:` reason for
-          // command chaining, or an argument the executor cannot represent.
-          return `Error executing command: ${e instanceof Error ? e.message : String(e)}`;
-        }
+      try {
+        const command = String(p?.command ?? p?.cmd ?? "");
+        const args = Array.isArray(p?.args) ? p.args.map(String) : [];
+        return await runSandboxed(command, args);
+      } catch (e) {
+        // Includes the sandbox's own refusals — a `banned:` reason for
+        // command chaining, or an argument the executor cannot represent.
+        return `Error executing command: ${e instanceof Error ? e.message : String(e)}`;
       }
-      return `[SIMULATED] Executed ${p.command} ${p.args?.join(" ")}`;
     }
   }
 };

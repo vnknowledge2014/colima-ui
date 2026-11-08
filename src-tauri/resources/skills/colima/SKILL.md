@@ -15,15 +15,18 @@ Manage Colima VMs (instances) through the App Event Bus.
 
 - **List all instances**: `[QUERY: list-instances]`
 - **Instance status**: `[QUERY: colima-status | {"profile": "default"}]`
+- **Read `colima.yaml` config**: `[QUERY: colima-config-get | {"profile": "default"}]` (returns structured config + `mtime`)
+- **Instance diagnostic logs**: `[QUERY: diagnostic-logs | {"profile": "default"}]`
 - **Resolved paths & env (`$COLIMA_HOME`, XDG `~/.config/colima` vs legacy `~/.colima`, Lima `_lima/colima`, Docker socket, `launchd` vs shell env)**: `[QUERY: environment-resolutions]` (or open `[NAVIGATE: environment]`)
 - **Host specs** (for preset recommendation): `[QUERY: system-host-specs]`
 
-## 2. Lifecycle (State Changes)
+## 2. Lifecycle & Config (State Changes)
 
 - **Create instance**: `[EVENT_APPROVE: create-instance | {"profile": "dev", "cpus": 4, "memory": 8, "disk": 60, "runtime": "docker", "vm_type": "vz", "kubernetes": false}]`
 - **Start instance**: `[EVENT_APPROVE: start-instance | {"profile": "default"}]`
 - **Stop instance**: `[EVENT_APPROVE: stop-instance | {"profile": "default"}]`
 - **Restart instance**: `[EVENT_APPROVE: colima-restart | {"profile": "default"}]`
+- **Apply `colima.yaml` config changes**: `[EVENT_APPROVE: colima-config-apply | {"profile": "default", "changes": {"cpu": 4, "memory": 8}, "expectedMtime": 1730980000}]`
 - **Delete instance**: `[EVENT_APPROVE: delete-instance | {"profile": "default"}]` ⚠️ DANGEROUS — deletes ALL data
 
 ## 3. Consultant Mode
@@ -42,11 +45,11 @@ When creating a new instance, ALWAYS interview the user step by step:
 
 - **Non-interactive one-shot command inside VM**:
   `[EVENT_APPROVE: cli-exec | {"command": "colima", "args": ["ssh", "-p", "default", "--", "uname", "-a"]}]`
-- **Viewing or editing `colima.yaml`**: Do NOT read config paths with `~` via `cli-exec` (`runSandboxed` does not invoke a shell to expand `~`). Colima `0.10.x` defaults to XDG `~/.config/colima/<profile>/colima.yaml` while older installs use `~/.colima/<profile>/colima.yaml` (or `$COLIMA_HOME`). Navigate to `[NAVIGATE: settings]` to use the built-in Colima Config (`colima.yaml`) editor (which resolves the active path automatically), inspect active paths in `[NAVIGATE: environment]`, or open interactive SSH in `[NAVIGATE: terminal]`.
+- **Viewing or editing `colima.yaml`**: Do NOT read config paths with `~` via `cli-exec` (`runSandboxed` does not invoke a shell to expand `~`). Colima `0.10.x` defaults to XDG `~/.config/colima/<profile>/colima.yaml` while older installs use `~/.colima/<profile>/colima.yaml` (or `$COLIMA_HOME`). Always use `[QUERY: colima-config-get | {"profile": "default"}]` and `[EVENT_APPROVE: colima-config-apply | {"profile": "default", "changes": {...}, "expectedMtime": ...}]`, or open `[NAVIGATE: settings]` (`[QUERY: navigate | {"page": "settings", "section": "colima-config"}]`) for the interactive visual diff editor, inspect active paths in `[NAVIGATE: environment]`, or open interactive SSH in `[NAVIGATE: terminal]`.
 - **Interactive SSH session**: Navigate to `[NAVIGATE: terminal]` to open a full persistent PTY shell inside the Colima VM.
 
 ## Anti-Patterns
 
 - **Never run interactive `colima ssh` without `-- <command>` via `cli-exec`** — non-PTY subprocesses hang waiting for terminal input; use `[NAVIGATE: terminal]` for interactive SSH.
-- **Never pass `~` paths in `cli-exec` arguments** — `runSandboxed` executes binaries directly without shell tilde expansion; use `[NAVIGATE: settings]` to edit `colima.yaml`.
+- **Never pass `~` paths in `cli-exec` arguments** — `runSandboxed` executes binaries directly without shell tilde expansion; use `colima-config-get` / `colima-config-apply` or `[NAVIGATE: settings]` to inspect and edit `colima.yaml`.
 - **Never emit `create-instance` without checking host specs first** — query `system-host-specs` and confirm options via `[ASK_CHOICE]` before creating a VM.

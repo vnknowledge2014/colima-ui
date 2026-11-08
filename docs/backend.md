@@ -30,7 +30,7 @@ src-tauri/src/
 ├── telemetry/             # Opt-in closed-vocabulary telemetry & consent state
 ├── pro/                   # MIT-side Pro sidecar boundary (mod.rs, bridge.rs, protocol.rs; free by default)
 ├── subscription/          # Local offline entitlement state cache (mod.rs, cache.rs)
-├── bin/                   # Standalone CLIs & MCP servers: cui.rs (v0.3.0 22 subcommands <5ms --json + fallback + mcp) & cli.rs (colimaui alias)
+├── bin/                   # Standalone CLIs & MCP servers: cui.rs (v0.3.3 22 subcommands <5ms --json + fallback + mcp) & cli.rs (colimaui alias)
 ├── commands/              # Business logic (54+ command modules)
 ├── routes/                # HTTP, UI Bridge & Native A2A route handlers (thin delegation to commands/)
 ├── adapters/              # Unified DevOps adapter traits (7 modules)
@@ -56,7 +56,7 @@ The central business logic layer. Both Tauri IPC and HTTP routes call into these
 | `compose.rs` | 156 | Docker Compose project management |
 | `networks.rs` | 166 | Docker network CRUD + prune |
 | `volumes.rs` | 178 | Docker volume CRUD + prune |
-| `agent_loop.rs` | — | Multi-turn headless AI & A2A agent loop (`POST /api/cli/chat`, `POST /a2a`, `cui chat`, MCP `colima_ai_ask`); isolates sessions to `colima-a2a-default-session` by default and emits `agent-external-chat-turn` when `mirror_ui` is enabled |
+| `agent_loop.rs` | — | Multi-turn headless AI & A2A agent loop (`POST /api/cli/chat`, `POST /a2a`, `cui chat`, MCP `colima_ai_ask`) implementing 1-for-1 **130** symmetric App Event Bus actions (`62 SAFE` + `68` mutating) shared with `src/lib/aiEventBus.ts`; isolates sessions to `colima-a2a-default-session` by default and emits `agent-external-chat-turn` when `mirror_ui` is enabled |
 | `runtime.rs` | 159 | Runtime detection (docker vs nerdctl) |
 | `self_heal.rs` | 1122 | Self-healing rules & kill switch (no route performs a repair) |
 | `colima_config.rs` | 1101 | Read/write Colima instance configuration |
@@ -140,7 +140,7 @@ Thin HTTP handlers that extract request parameters and delegate to `commands/`:
 | `file_transfer.rs` | 90 | Container copy & image TAR transfer jobs |
 | `self_heal.rs` | 84 | Self-healing rules & kill switch (no route performs a repair) |
 | `activity.rs` | 68 | Activity record: what was done to the machine |
-| `capabilities.rs` | 35 | `GET /api/capabilities` — Static AI Agent capabilities & 100-event App Event Bus schema |
+| `capabilities.rs` | 35 | `GET /api/capabilities` — Static AI Agent capabilities & 130-event symmetric App Event Bus schema (`62 SAFE` + `68` mutating) |
 | `diagnostics.rs` | 31 | Diagnostic bundle collection |
 | `resolution.rs` | 28 | `GET /api/environment/resolutions` environment provenance & duality endpoint |
 | `announcements.rs` | 21 | Release notes & advisories feed (fetch + filter) |

@@ -120,7 +120,7 @@ When building distributable release artifacts with Tauri updater signatures (and
 npm run tauri build
 ```
 
-### Standalone CLI Binaries (`cui` `v0.3.0` & `colimaui` Alias), Native A2A & 22-Tool MCP Server
+### Standalone CLI Binaries (`cui` `v0.3.3` & `colimaui` Alias), Native A2A & 22-Tool MCP Server
 
 GitHub Releases publish prebuilt standalone CLI archives alongside desktop installers:
 - `cui-{aarch64-apple-darwin,x86_64-apple-darwin,x86_64-unknown-linux-gnu}.tar.gz` (primary unified CLI-First, A2A & MCP binary)
@@ -128,14 +128,14 @@ GitHub Releases publish prebuilt standalone CLI archives alongside desktop insta
 
 You can install or compile both Rust CLI targets locally from `src-tauri/src/bin/`:
 
-1. **`cui` (`v0.3.0`)** — Unified CLI-First control plane (**22 subcommands**: 20 deterministic `< 5ms` direct subcommands + `chat` + `mcp`), A2A session client, and 22-tool MCP stdio server. Proxies over `127.0.0.1:11420..11429` (`~/.colima-ui/api_port` + `0600` `~/.colima-ui/api_token`) when ColimaUI Desktop is open, and automatically falls back to standalone native Rust execution when Desktop is closed. Passing `--json` in any position emits `{"ok": true, "data": ...}` or `{"ok": false, "error": "..."}`:
+1. **`cui` (`v0.3.3`)** — Unified CLI-First control plane (**22 subcommands**: 20 deterministic `< 5ms` direct subcommands + `chat` + `mcp`), 130-event symmetric A2A session client (`62 SAFE` + `68` mutating actions shared 1-for-1 between `src/lib/aiEventBus.ts` and `src-tauri/src/commands/agent_loop.rs`), and 22-tool MCP stdio server. Proxies over `127.0.0.1:11420..11429` (`~/.colima-ui/api_port` + `0600` `~/.colima-ui/api_token`) when ColimaUI Desktop is open, and automatically falls back to standalone native Rust execution when Desktop is closed. Passing `--json` in any position emits `{"ok": true, "data": ...}` or `{"ok": false, "error": "..."}`:
    ```bash
    # Install into ~/.cargo/bin/cui (or build in src-tauri/target/release/cui)
    cargo install --path ~/Documents/colima-ui/src-tauri --bin cui
    cargo build --manifest-path src-tauri/Cargo.toml --bin cui --release
 
    # Verify installation & environment health
-   cui --version          # Expected: cui 0.3.0
+   cui --version          # Expected: cui 0.3.3
    cui doctor --json
 
    # Instant < 5ms deterministic subcommands (20 direct domains):

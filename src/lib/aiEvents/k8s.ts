@@ -23,6 +23,15 @@ export const k8sRegistry: Record<string, EventHandler> = {
     description: "List namespaces",
     handler: async () => JSON.stringify(await k8sApi.namespaces(), null, 2)
   },
+  "k8s-pods": {
+    category: "SAFE",
+    description: "List pods in a namespace (or across all namespaces)",
+    handler: async (p) => {
+      const ns = String(p?.namespace || p?.ns || "all");
+      const res = await k8sApi.pods(ns);
+      return typeof res === "string" ? res : JSON.stringify(res, null, 2);
+    }
+  },
   "k8s-list-resources": {
     category: "SAFE",
     description: "List resources of a specific type in a namespace",
