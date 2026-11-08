@@ -22,6 +22,10 @@ You manage Docker containers, images, and resources running inside the Colima VM
 - **List images**: `[QUERY: list-images]`
 - **Inspect image**: `[QUERY: inspect-image | {"id": "<image>"}]`
 - **Disk usage**: `[QUERY: system-df]`
+- **Container-network-volume topology graph**: `[QUERY: topology-get]`
+- **Activity timeline**: `[QUERY: activity-feed | {"limit": 50, "kind": "container"}]` (`limit` and `kind` optional)
+- **Alert rules & fired alert events**: `[QUERY: alerts-rules]` and `[QUERY: alerts-events | {"limit": 50}]`
+- **Self-healing rules & action log**: `[QUERY: self-heal-rules]` and `[QUERY: self-heal-log | {"limit": 50}]`
 
 ## 2. Lifecycle (State Changes — use [EVENT_APPROVE])
 
@@ -46,8 +50,8 @@ Do NOT fall back to `cli-exec` for interactive shells, archive transfers, or vis
 - **Interactive Container PTY (`dockerExec`)**: Open a live interactive shell inside any running container via `[NAVIGATE: containers]` or `[NAVIGATE: terminal]`.
 - **Image TAR Save / Load**: Supported natively in `[NAVIGATE: images]` with non-blocking background transfer progress and cancellation.
 - **Container File Copy (`cp` to/from host)**: Supported natively in `[NAVIGATE: containers]` with background transfer progress and safe destination path confinement.
-- **Network & Volume Relationships**: Inspect container-network-volume connections visually via `[NAVIGATE: topology]`.
-- **Live Metrics, Activity & Alerts**: Monitor real-time CPU/memory/network charts, alert rules, and self-heal history via `[NAVIGATE: activity]`.
+- **Network & Volume Relationships**: Query `[QUERY: topology-get]` directly or inspect visually via `[NAVIGATE: topology]`.
+- **Live Metrics, Activity & Alerts**: Query `[QUERY: activity-feed]`, `[QUERY: alerts-rules]`, `[QUERY: alerts-events]`, `[QUERY: self-heal-rules]`, and `[QUERY: self-heal-log]` directly, or monitor real-time charts via `[NAVIGATE: activity]`.
 
 ## 4. CLI Escape Hatch (Only for unsupported operations)
 

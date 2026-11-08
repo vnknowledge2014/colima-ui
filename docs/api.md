@@ -1,6 +1,6 @@
 # HTTP API Reference
 
-ColimaUI runs a localhost Axum HTTP, SSE, UI Bridge & Native A2A server on `127.0.0.1:11420` (automatically falling back across `11420–11429` if port `11420` is occupied) for the `cui` CLI (`v0.3.0`, `< 5ms` deterministic subcommands & isolated `cui chat`), `cui mcp` (22-tool MCP proxy), A2A peer agents, and development-mode browser debugging.
+ColimaUI runs a localhost Axum HTTP, SSE, UI Bridge & Native A2A server on `127.0.0.1:11420` (automatically falling back across `11420–11429` if port `11420` is occupied) for the `cui` CLI (`v0.3.3`, `< 5ms` deterministic subcommands & isolated `cui chat`), `cui mcp` (22-tool MCP proxy), A2A peer agents, and development-mode browser debugging.
 
 > **No static web frontend on `:11420`:** Release builds do not mount static assets on the API server. Opening `http://127.0.0.1:11420` directly in a browser returns `401 Unauthorized`.
 
@@ -41,15 +41,15 @@ Common event topics: `docker-state-updated`, `instances-update`, `metrics.sample
 
 ---
 
-## UI Remote Control Bridge & Native A2A Protocol (`v0.3.0`)
+## UI Remote Control Bridge & Native A2A Protocol (`v0.3.3`)
 
 All routes below require `Authorization: Bearer <token>` from `~/.colima-ui/api_token` (`0600`):
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | `GET` | `/api/ui/state` | Live UI state snapshot (`page`, `section`, theme, Desktop bridge connection status, and instance/container/K8s summary) |
-| `POST` | `/api/ui/navigate` | Navigate the active Desktop/Browser UI across all 17 pages (`{page, section?, toast?}`); emits `ui-navigate` over Tauri events & SSE |
-| `GET` | `/.well-known/agent.json` | ColimaUI `v0.3.0` A2A Agent Card (version, capabilities, skills, `/a2a` endpoint, Bearer auth metadata) |
+| `POST` | `/api/ui/navigate` | Navigate the active Desktop/Browser UI across all 17 pages plus `ai-chat` drawer (`{page, section?, toast?}`); emits `ui-navigate` over Tauri events & SSE |
+| `GET` | `/.well-known/agent.json` | ColimaUI `v0.3.3` A2A Agent Card (version, capabilities, skills, `/a2a` endpoint, Bearer auth metadata) |
 | `POST` | `/a2a` | Native A2A JSON-RPC 2.0 endpoint supporting `message/send`, `tasks/send`, `tasks/get`, and `tasks/cancel` |
 
 ### A2A Session Isolation (`colima-a2a-default-session`) & Live Mirroring
@@ -67,7 +67,7 @@ Automated external calls across `POST /api/cli/chat`, `POST /a2a`, `cui chat`, a
 | `GET` | `/api/system/homebrew` | Homebrew installation status |
 | `GET` | `/api/system/check-tool` | Check whitelisted tool (`?name=kubectl\|kind\|helm\|krunkit\|nerdctl`) |
 | `GET` | `/api/system/capabilities` | Host external tool capability probes (e.g. `colima`, `docker`, `kubectl`, `trivy`) with state & `install_hint` |
-| `GET` | `/api/capabilities` | Static AI Agent capabilities & 100-event App Event Bus schema |
+| `GET` | `/api/capabilities` | Static AI Agent capabilities & 130-event symmetric App Event Bus schema (`62 SAFE` + `68` mutating, shared 1-for-1 between `src/lib/aiEventBus.ts` and `src-tauri/src/commands/agent_loop.rs`) |
 | `GET` | `/api/system/platform` | OS, CPU architecture, and package manager detection |
 | `GET` | `/api/system/host-specs` | Host CPU core count and total memory |
 | `GET` | `/api/system/runtime` | Active container runtime detection (`docker` vs `nerdctl`) |

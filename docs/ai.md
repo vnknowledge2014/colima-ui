@@ -1,8 +1,8 @@
-# Command Center AI & Dual-Surface Agent Architecture (`v0.3.0`)
+# Command Center AI & Dual-Surface Agent Architecture (`v0.3.3`)
 
-ColimaUI `v0.3.0` implements a **Dual-Surface Agent Architecture**:
-- **Inside App (Desktop / Webview)**: An integrated **Command Center AI** (`AiChatPanel.svelte` + `agentCore.ts`) that inspects live system state, drives **100** typed App Event Bus operations across **17** UI pages, loads Internal Skills (`system_prompt.md`, `router.md`, `src-tauri/resources/skills/*`), recalls SQLite Knowledge Bank RAG remedies and FTS5 memories, and connects to external agents through the **Live UI Bridge** (`ui-navigate` & `agent-external-chat-turn`).
-- **Outside App (`cui` `v0.3.0`, with `colimaui` preserved as a backward-compatible alias)**: A deterministic **CLI-First control plane** (**22 subcommands**: 20 `< 5ms` direct subcommands + `chat` + `mcp` with global `--json` and automatic standalone Rust fallback when Desktop is closed), a **22-tool JSON-RPC 2.0 MCP stdio server** (`cui mcp`), and **Native HTTP A2A** (`GET /.well-known/agent.json`, `POST /a2a`) isolated by default to `colima-a2a-default-session`.
+ColimaUI `v0.3.3` implements a **Dual-Surface Agent Architecture** with **100% 1-for-1 App Event Bus parity** (`130` symmetric actions: `62 SAFE` + `68` mutating):
+- **Inside App (Desktop / Webview)**: An integrated **Command Center AI** (`AiChatPanel.svelte` + `agentCore.ts`) that inspects live system state, drives **130** typed App Event Bus operations (`src/lib/aiEventBus.ts`) across **17** UI pages + `ai-chat` drawer, loads Internal Skills (`system_prompt.md`, `router.md`, `src-tauri/resources/skills/*`), recalls SQLite Knowledge Bank RAG remedies and FTS5 memories, and connects to external agents through the **Live UI Bridge** (`ui-navigate` & `agent-external-chat-turn`).
+- **Outside App (`cui` `v0.3.3`, with `colimaui` preserved as a backward-compatible alias)**: A deterministic **CLI-First control plane** (**22 subcommands**: 20 `< 5ms` direct subcommands + `chat` + `mcp` with global `--json` and automatic standalone Rust fallback when Desktop is closed), a **22-tool JSON-RPC 2.0 MCP stdio server** (`cui mcp`), and **Native HTTP A2A** (`GET /.well-known/agent.json`, `POST /a2a`) sharing the exact same **130** App Event Bus actions in `src-tauri/src/commands/agent_loop.rs` and isolated by default to `colima-a2a-default-session`.
 
 ---
 
@@ -24,7 +24,7 @@ graph TD
     CORE --> STREAM["llmProviders.ts / ai_chat.rs (6 provider modes)"]
     STREAM --> PARSER["aiToolParser.ts (bracket-balanced parser)"]
 
-    PARSER --> BUS["aiEventBus.ts (100 SAFE / NORMAL / DANGEROUS events)"]
+    PARSER --> BUS["aiEventBus.ts (130 symmetric events: 62 SAFE + 68 mutating)"]
     PARSER --> SANDBOX["shell_sandbox.rs (Safe / NeedsApproval / Banned)"]
     PARSER --> REF["read_reference_from_dir (canonical path guard)"]
     PARSER --> CHOICE
@@ -32,7 +32,7 @@ graph TD
     CORE --> STEP
     PANEL --> BODY
 
-    subgraph Outside["Outside App — CLI-First, A2A & MCP (v0.3.0)"]
+    subgraph Outside["Outside App — CLI-First, A2A & MCP (v0.3.3)"]
         CUI["cui (22 subcommands <5ms --json + standalone fallback)"]
         MCP["mcp.rs (cui mcp / colimaui mcp — 22 MCP tools)"]
         A2A["Native HTTP A2A (/.well-known/agent.json + POST /a2a)"]
@@ -40,7 +40,7 @@ graph TD
 
     subgraph Backend["Rust Backend & Persistence"]
         KB["knowledge_bank.rs (~/.colima-ui/knowledge.db)"]
-        CLI["agent_loop.rs (colima-a2a-default-session & --mirror-ui)"]
+        CLI["agent_loop.rs (130 symmetric events, colima-a2a-default-session & --mirror-ui)"]
     end
 
     CORE --> KB
@@ -57,7 +57,7 @@ graph TD
 
 1. **Frontend Orchestrator (`src/lib/agentCore.ts`)** — Drives up to 5 reasoning rounds (`MAX_SEARCH_ROUNDS = 5`), injects Knowledge Bank matches and FTS5 memories, deduplicates repeated read-only tool calls across rounds (`normalizeToolCallKey`), and coordinates user approval promises without blocking panel minimize/restore.
 2. **Bracket-Balanced Tag Parser (`src/lib/aiToolParser.ts`)** — Extracts `[TAG: payload]` and `[TAG: arg1 | arg2]` directives with full JSON string, escape, brace `{...}`, and bracket `[...]` depth tracking rather than fragile regexes or XML tags.
-3. **App Event Bus (`src/lib/aiEventBus.ts` & `src/lib/aiEvents/`)** — Wraps **100 cataloged operations** (across `docker`, `colima`, `k8s`, `lima`, `compose`, `volumes`, `system`, `config`, and `shell` modules) plus navigation across all **17 UI pages** (`dashboard`, `instances`, `environment`, `containers`, `images`, `volumes`, `networks`, `compose`, `topology`, `activity`, `security`, `kubernetes`, `linux-vms`, `models`, `terminal`, `settings`, `help`), classified into three safety tiers:
+3. **App Event Bus (`src/lib/aiEventBus.ts` & `src/lib/aiEvents/`, mirrored 1-for-1 in `src-tauri/src/commands/agent_loop.rs`)** — Wraps **130 symmetric cataloged operations** (`62 SAFE` read-only + `68` mutating `NORMAL`/`DANGEROUS` across `docker`, `colima`, `k8s`, `lima`, `compose`, `volumes`, `system`, `config`, `security`, `observability`, and `shell` domains) plus navigation across all **17 UI pages** (`dashboard`, `instances`, `environment`, `containers`, `images`, `volumes`, `networks`, `compose`, `topology`, `activity`, `security`, `kubernetes`, `linux-vms`, `models`, `terminal`, `settings`, `help`) and `ai-chat` drawer, classified into three safety tiers:
    - `SAFE`: Read-only queries and UI navigation executed automatically via `[QUERY: ...]` / `[NAVIGATE: ...]`.
    - `NORMAL`: State mutations gated behind `[EVENT_APPROVE: ...]` user confirmation.
    - `DANGEROUS`: Destructive or irreversible actions rendered with an explicit warning banner before approval.
@@ -70,9 +70,9 @@ graph TD
    - `ollama-cloud` — Remote Ollama host or Ollama Cloud configured via `ai_endpoint` (+ optional `ai_api_key`)
 
    Streaming chunks normalize native `thinking` / `reasoning_content` fields and inline tags into unified multi-packet `<think>...</think>` blocks, while `redact()` scrubs credentials from any surfaced HTTP error.
-5. **External CLI-First Control Plane (`cui` `v0.3.0`), Native A2A & 22-Tool MCP Server (`src-tauri/src/commands/agent_loop.rs`, `src-tauri/src/mcp.rs`, `src-tauri/src/bin/cui.rs`)**:
+5. **External CLI-First Control Plane (`cui` `v0.3.3`), Native A2A & 22-Tool MCP Server (`src-tauri/src/commands/agent_loop.rs`, `src-tauri/src/mcp.rs`, `src-tauri/src/bin/cui.rs`)**:
    - **CLI-First Deterministic Subcommands (`< 5ms` + Standalone Fallback)**: `cui` (with `colimaui` preserved as a backward-compatible alias) exposes **22 subcommands** (`vm`, `config`, `presets`, `container`, `image`, `volume`, `network`, `compose`, `k8s`, `kind`, `lima`, `security`, `models`, `alerts`, `self-heal`, `memories` / `kb`, `sessions`, `ui`, `events`, `doctor`, `chat`, `mcp`). Direct subcommands run in `< 5ms` over `127.0.0.1:11420..11429` when Desktop is open, automatically fall back to standalone Rust execution when Desktop is closed, and accept `--json` in any position returning `{"ok": true, "data": ...}` or `{"ok": false, "error": "..."}`.
-   - **A2A Session Isolation (`colima-a2a-default-session`) & Live UI Mirroring (`--mirror-ui`)**: `cui chat "<prompt>" --session colima-a2a-default-session [--yes] [--mirror-ui] [--provider <id>] [--model <m>] --json` (plus shorthand `cui "<prompt>"`), `POST /api/cli/chat`, MCP `colima_ai_ask`, and Native A2A `POST /a2a` default to `colima-a2a-default-session` so automated runs never hijack or pollute the user's personal Desktop UI chat history. Passing `--mirror-ui` (`"mirror_ui": true`) broadcasts `agent-external-chat-turn` to mirror the turn live in `AiChatPanel`.
+   - **130-Event Symmetric Agent Loop, A2A Session Isolation (`colima-a2a-default-session`) & Live UI Mirroring (`--mirror-ui`)**: `cui chat "<prompt>" --session colima-a2a-default-session [--yes] [--mirror-ui] [--provider <id>] [--model <m>] --json` (plus shorthand `cui "<prompt>"`), `POST /api/cli/chat`, MCP `colima_ai_ask`, and Native A2A `POST /a2a` execute the exact same **130** App Event Bus actions (`62 SAFE` + `68` mutating) as `src/lib/aiEventBus.ts` and default to `colima-a2a-default-session` so automated runs never hijack or pollute the user's personal Desktop UI chat history. Passing `--mirror-ui` (`"mirror_ui": true`) broadcasts `agent-external-chat-turn` to mirror the turn live in `AiChatPanel`.
    - **Native HTTP A2A Protocol**: Exposes `GET /.well-known/agent.json` (A2A Agent Card) and `POST /a2a` (JSON-RPC 2.0: `message/send`, `tasks/send`, `tasks/get`, `tasks/cancel`) authenticated via `Authorization: Bearer <TOKEN>` (`~/.colima-ui/api_token`, `0600`), keeping `GET /api/health` as the only public unauthenticated route.
    - **Native MCP Stdio Server (`cui mcp` / `colimaui mcp`)**: Exposes **22 typed JSON-RPC 2.0 MCP tools** over `stdin`/`stdout` (`colima_list_instances`, `colima_instance_action`, `docker_list_containers`, `docker_container_action`, `docker_container_logs`, `docker_list_images`, `docker_pull_image`, `docker_list_volumes`, `docker_list_networks`, `compose_list_projects`, `k8s_list_pods`, `k8s_cluster_status`, `environment_resolutions`, `system_diagnostics`, `colima_ai_ask`, `security_scan_image`, `compose_diagnose_autofix`, `lima_manage`, `colima_config`, `kb_memories`, `chat_sessions`, `ui_navigate`), working seamlessly whether ColimaUI Desktop is running or closed:
      - **Claude Desktop**, **Cursor**, **Antigravity**, **Windsurf**: `{"mcpServers": {"colima-ui": {"command": "cui", "args": ["mcp"]}}}`
@@ -87,7 +87,7 @@ graph TD
 `build_app_context_from_dir` (`src-tauri/src/commands/system.rs`, exposed via `get_app_context` IPC and `GET /api/ai/context`) deterministically loads exactly **3 bundled markdown files** instead of dumping every skill into every prompt:
 1. `resources/system_prompt.md` — Core principles, terminology glossary, safety tiers, and bracket-tag syntax.
 2. `resources/router.md` — Intent-to-reference routing table.
-3. `resources/skills/colima_ui/SKILL.md` — Authoritative 100-event catalog and payload schemas.
+3. `resources/skills/colima_ui/SKILL.md` — Authoritative 130-event symmetric catalog (`62 SAFE` + `68 NORMAL/DANGEROUS`) and payload schemas.
 
 If `~/.colima-ui/plugins.yaml` exists, custom user shortcuts are appended and mapped to `[EVENT_APPROVE: cli-exec | ...]`.
 
@@ -119,7 +119,7 @@ All directives use bracket-balanced colon syntax (`[TAG: ...]`) parsed by `src/l
 | `[EVENT_APPROVE: eventName \| jsonPayload]` | Approval (`NORMAL`/`DANGEROUS`) | Pauses on an inline `ToolStepCard` until the user clicks **Allow** or **Deny** (auto-runs if event is `SAFE`) |
 | `[ASK_CHOICE: {...}]` / `[ASK_CHOICE: Q \| A \| B]` | Guided UX (Tier 2) | Renders `InteractiveChoiceCard` (JSON or pipe shorthand; `[multi]` prefix enables multi-select). Does not loop `hasTools` |
 | `[SUGGEST: label \| prompt]` | Guided UX (Tier 3) | Renders up to 3 clickable `AiFollowUpBar` chips at the end of a turn |
-| `[NAVIGATE: pageName]` | Auto-run (`SAFE`) | Switches the active ColimaUI view across all 17 pages (`dashboard`, `instances`, `environment`, `containers`, `images`, `volumes`, `networks`, `compose`, `topology`, `activity`, `security`, `kubernetes`, `linux-vms`, `models`, `terminal`, `settings`, `help`) |
+| `[NAVIGATE: pageName]` | Auto-run (`SAFE`) | Switches the active ColimaUI view across all 17 pages (`dashboard`, `instances`, `environment`, `containers`, `images`, `volumes`, `networks`, `compose`, `topology`, `activity`, `security`, `kubernetes`, `linux-vms`, `models`, `terminal`, `settings`, `help`) plus `ai-chat` (opens the AI Command Center drawer); `[QUERY: navigate \| {"page", "section?", "toast?"}]` supports deep section targeting and toast banners |
 | `[READ_REFERENCE: path]` | Auto-run (`SAFE`) | Loads bundled reference markdown inside `resources/` |
 | `[DIAGNOSE]` | Auto-run (`SAFE`) | Collects Lima/Colima VM diagnostic logs (`ha.stderr.log`, `serial.log`, socket/lock checks) |
 | `[RUN: command]` | Sandbox-gated | Runs through `shell_sandbox`; auto-executes if `Safe`, upgrades to inline approval if `NeedsApproval`, rejects if `Banned` |

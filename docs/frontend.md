@@ -146,12 +146,12 @@ listen('instances-update', (event) => {
   dashboardState.colimaInstances = event.payload;
 });
 
-// v0.3.0 Live UI Bridge: remote page/section navigation (`cui ui navigate`, MCP `ui_navigate`, POST /api/ui/navigate)
+// v0.3.3 Live UI Bridge: remote page/section navigation (`cui ui navigate`, MCP `ui_navigate`, POST /api/ui/navigate)
 listen('ui-navigate', (event) => {
   uiState.currentPage = event.payload.page;
 });
 
-// v0.3.0 Live UI Bridge: opt-in `--mirror-ui` external CLI / MCP / A2A chat turn mirroring
+// v0.3.3 Live UI Bridge: opt-in `--mirror-ui` external CLI / MCP / A2A chat turn mirroring
 listen('agent-external-chat-turn', (event) => {
   // Appends mirrored external turn into AiChatPanel when mirror_ui is true
 });
@@ -186,7 +186,7 @@ es.addEventListener('ui-navigate', (e) => {
 | Module | Purpose |
 |--------|---------|
 | `agentCore.ts` | 5-round Command Center AI orchestrator, conversation window hygiene, 80%/20% tool output pruner, repeat-tool guard |
-| `aiEventBus.ts` | AI agent event bus with 100 domain-specific tool registrations (`SAFE` / `NORMAL` / `DANGEROUS`) |
+| `aiEventBus.ts` | AI agent event bus with 130 symmetric domain-specific tool registrations (`62 SAFE` + `68` mutating `NORMAL` / `DANGEROUS`, shared 1-for-1 with `src-tauri/src/commands/agent_loop.rs`) |
 | `aiToolParser.ts` | Bracket-balanced colon tags (`[TAG: ...]`) & streaming partial-tag parser (`stripStreamingPartialTags`, `cleanToolSyntaxRemnants`) |
 | `chatMarkdown.ts` (`aiMessageParser`) | XSS-sanitized Markdown & streaming `<think>` reasoning block / GFM table / shell code AST parser |
 | `aiToolStep.ts` | Structured state machine & serializer for inline `ToolStepCard` entries |
@@ -278,19 +278,21 @@ the findings table, and the alternative base images.
 
 ### AI Event Bus (`aiEvents/`)
 
-Domain-specific AI tool handlers:
+Domain-specific AI tool handlers (**130 symmetric operations**: `62 SAFE` + `68` mutating, mirrored 1-for-1 in `src-tauri/src/commands/agent_loop.rs`):
 
 | Module | Tools |
 |--------|-------|
-| `docker.ts` | Container/image/volume/network operations |
-| `colima.ts` | Instance lifecycle, diagnostics |
-| `k8s.ts` | Kubernetes resource management |
+| `docker.ts` | Container/image/network operations |
+| `colima.ts` | Instance lifecycle, `colima.yaml` config get/apply, VM diagnostic logs |
+| `k8s.ts` | Kubernetes & Kind resource management (including `k8s-pods`) |
 | `lima.ts` | Lima VM operations |
-| `compose.ts` | Docker Compose operations |
+| `compose.ts` | Docker Compose lifecycle (`list`, `ps`, `up`, `down`, `start`, `stop`, `restart`, `build`, `pull`, `logs`), Diagnose & AI Autofix |
 | `volumes.ts` | Volume-specific operations |
-| `system.ts` | System checks, environment resolutions, tool installation, local Ollama model actions |
-| `config.ts` | App configuration & custom VM hardware presets |
-| `shell.ts` | Sandboxed `cli-exec` execution & UI `navigate` across all 17 pages |
+| `observability.ts` | Docker topology graph (`topology-get`), unified activity feed (`activity-feed`), alert rules/events, and self-healing rules/logs |
+| `security.ts` | Local Trivy CVE/audit scanning (`security-scan`, `security-audit`, `security-sbom`, `security-triage`, `security-history`), rule packs, base-image alternatives, Falco runtime events, and container Detonation (`detonation-*`) |
+| `system.ts` | System checks, host specs, tool checks, environment resolutions, and full system prune |
+| `config.ts` | App configuration, local Ollama models, custom VM presets, UI `navigate` (17 pages + `ai-chat`), & sandboxed `cli-exec` |
+| `shell.ts` | Sandboxed `runSandboxed` execution helper backing `cli-exec` |
 
 ## CSS Design System (`styles/`)
 

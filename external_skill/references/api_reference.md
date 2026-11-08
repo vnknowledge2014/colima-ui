@@ -21,10 +21,10 @@ TOKEN="$(cat ~/.colima-ui/api_token)"
 
 ## 1. Health, Capabilities, UI Remote Control Bridge, Native A2A & Realtime SSE
 - `GET /api/health`: Kiểm tra trạng thái sống của API server (public, không cần token).
-- `GET /api/capabilities`: Lấy schema năng lực và Event Bus (100 sự kiện) dành cho AI Agent / Orchestrator.
+- `GET /api/capabilities`: Lấy schema năng lực và Event Bus đối xứng (**130 sự kiện**: `62 SAFE` + `68 NORMAL/DANGEROUS`) dành cho AI Agent / Orchestrator.
 - `GET /api/ui/state`: Đọc trạng thái giao diện trực tiếp (trang hiện hành `page`, `section`, theme, trạng thái kết nối Desktop bridge và tóm tắt tài nguyên).
-- `POST /api/ui/navigate`: Điều khiển chuyển trang từ xa trên Desktop/Browser UI (`{"page": "kubernetes", "section"?: "pods", "toast"?: "..."}`), phát sự kiện `ui-navigate` qua Tauri Events & SSE.
-- `GET /.well-known/agent.json`: Lấy hồ sơ năng lực A2A Agent Card của ColimaUI `v0.3.0` (yêu cầu `Authorization: Bearer <TOKEN>`).
+- `POST /api/ui/navigate`: Điều khiển chuyển trang từ xa trên Desktop/Browser UI (`{"page": "kubernetes", "section"?: "pods", "toast"?: "..."}`, hỗ trợ 17 trang chính + `ai-chat`), phát sự kiện `ui-navigate` qua Tauri Events & SSE.
+- `GET /.well-known/agent.json`: Lấy hồ sơ năng lực A2A Agent Card của ColimaUI `v0.3.3` (yêu cầu `Authorization: Bearer <TOKEN>`).
 - `POST /a2a`: Giao thức Native A2A JSON-RPC 2.0 (yêu cầu `Authorization: Bearer <TOKEN>`), hỗ trợ các phương thức chuẩn `message/send`, `tasks/send`, `tasks/get`, `tasks/cancel` (mặc định cô lập vào phiên `colima-a2a-default-session`, hỗ trợ `mirror_ui` và `allow_actions`).
 - `GET /api/announcements`: Lấy thông báo hệ thống mới nhất.
 - `GET /api/telemetry/consent`, `POST /api/telemetry/consent`, `GET /api/telemetry/should-prompt`, `GET /api/telemetry/preview`: Quản lý trạng thái đồng ý (opt-in) và xem trước dữ liệu telemetry ẩn danh.

@@ -8,12 +8,14 @@ use serde_json::{json, Value};
 use crate::commands::ai_chat::{AiChatHistoryMessage, AiChatRequest, A2A_DEFAULT_CONVERSATION_ID};
 pub use crate::commands::ai_chat::ChatMessage;
 use crate::commands::{
-    activity_feed, alerts, colima, colima_config, compose, compose_autofix, compose_autofix_apply,
-    compose_diagnose, containers, detonation, embedded_resources, falco_bridge, k8s_cluster,
-    k8s_resources, kind, knowledge_bank, kubernetes, lima, models, networks, resolution,
-    security_catalog, security_history, security_rules, security_scan, security_triage, self_heal,
-    shell_sandbox, system, topology, volumes,
+    activity, activity_feed, alerts, colima, colima_config, compose, compose_autofix,
+    compose_autofix_apply, compose_diagnose, containers, detonation, embedded_resources,
+    falco_bridge, k8s_cluster, k8s_resources, kind, knowledge_bank, kubernetes, lima, models,
+    networks, resolution, runtime, security_catalog, security_history, security_rules,
+    security_scan, security_triage, self_heal, shell_sandbox, system, topology, volumes,
 };
+
+const BUILD_OP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(300);
 
 const MAX_AGENT_ROUNDS: usize = 5;
 const MAX_HISTORY_MESSAGES: usize = 20; // Up to 10 clean user/assistant turn pairs
@@ -666,6 +668,7 @@ pub fn classify_event(event: &str) -> EventSafety {
         | "rename-container"
         | "container-exec"
         | "remove-image"
+        | "build-image"
         | "prune-images"
         | "tag-image"
         | "volume-create"
@@ -677,6 +680,8 @@ pub fn classify_event(event: &str) -> EventSafety {
         | "system-prune"
         | "compose-stop"
         | "compose-start"
+        | "compose-build"
+        | "compose-pull"
         | "compose-autofix-propose"
         | "compose-autofix-apply"
         | "compose-autofix-undo"
@@ -690,6 +695,7 @@ pub fn classify_event(event: &str) -> EventSafety {
         | "k8s-port-forward-start"
         | "k8s-port-forward-stop"
         | "k8s-exec"
+        | "k8s-benchmark"
         | "kind-create"
         | "kind-delete"
         | "lima-create"
@@ -802,6 +808,214 @@ fn format_exec_result(res: &shell_sandbox::ExecResult) -> String {
     } else {
         format!("{out}\n(exit code {})", res.exit_code)
     }
+}
+
+fn validate_required_non_flag_field(
+    payload: &Value,
+    keys: &[&str],
+    field_label: &str,
+    event_name: &str,
+) -> Result<String, String> {
+    let Some(val) = keys
+        .iter()
+        .find_map(|k| payload.get(*k).filter(|v| !v.is_null()))
+    else {
+        return Err(format!("Missing '{field_label}' for {event_name}"));
+    };
+    let raw = val
+        .as_str()
+        .ok_or_else(|| format!("Invalid '{field_label}' for {event_name}: expected string"))?;
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return Err(format!("Empty '{field_label}' for {event_name}"));
+    }
+    if trimmed.starts_with('-') {
+        return Err(format!(
+            "Invalid '{field_label}' for {event_name}: must not start with '-'"
+        ));
+    }
+    if trimmed.chars().any(char::is_control) {
+        return Err(format!(
+            "Invalid '{field_label}' for {event_name}: contains control characters"
+        ));
+    }
+    Ok(trimmed.to_string())
+}
+
+fn validate_optional_non_flag_field(
+    payload: &Value,
+    keys: &[&str],
+    field_label: &str,
+    event_name: &str,
+    forbid_whitespace: bool,
+) -> Result<Option<String>, String> {
+    let Some(val) = keys
+        .iter()
+        .find_map(|k| payload.get(*k).filter(|v| !v.is_null()))
+    else {
+        return Ok(None);
+    };
+    let raw = val
+        .as_str()
+        .ok_or_else(|| format!("Invalid '{field_label}' for {event_name}: expected string"))?;
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return Err(format!("Empty '{field_label}' for {event_name}"));
+    }
+    if trimmed.starts_with('-') {
+        return Err(format!(
+            "Invalid '{field_label}' for {event_name}: must not start with '-'"
+        ));
+    }
+    if trimmed.chars().any(char::is_control)
+        || (forbid_whitespace && trimmed.chars().any(char::is_whitespace))
+    {
+        return Err(format!(
+            "Invalid '{field_label}' for {event_name}: contains forbidden whitespace or control characters"
+        ));
+    }
+    Ok(Some(trimmed.to_string()))
+}
+
+fn build_docker_build_args(payload: &Value) -> Result<(Vec<String>, String), String> {
+    let context_path = validate_required_non_flag_field(
+        payload,
+        &["contextPath", "context_path", "path", "dir"],
+        "contextPath",
+        "build-image",
+    )?;
+    let tag = validate_optional_non_flag_field(payload, &["tag"], "tag", "build-image", true)?;
+    let dockerfile = validate_optional_non_flag_field(
+        payload,
+        &["dockerfile", "file"],
+        "dockerfile",
+        "build-image",
+        false,
+    )?;
+
+    if !std::path::Path::new(&context_path).is_dir() {
+        return Err(format!(
+            "Invalid 'contextPath' for build-image: '{context_path}' is not an existing directory"
+        ));
+    }
+
+    let mut args = vec!["build".to_string()];
+    if let Some(ref t) = tag {
+        args.push("-t".to_string());
+        args.push(t.clone());
+    }
+    if let Some(ref f) = dockerfile {
+        args.push("-f".to_string());
+        args.push(f.clone());
+    }
+    args.push(context_path.clone());
+
+    let logged_target = tag.unwrap_or(context_path);
+    Ok((args, logged_target))
+}
+
+fn validate_compose_dir_op(
+    subcmd: &str,
+    payload: &Value,
+) -> Result<(std::path::PathBuf, Vec<String>), String> {
+    let event_name = format!("compose-{subcmd}");
+    let project_dir = validate_required_non_flag_field(
+        payload,
+        &["projectDir", "project_dir", "dir"],
+        "projectDir",
+        &event_name,
+    )?;
+    let compose_file =
+        validate_optional_non_flag_field(payload, &["file"], "file", &event_name, false)?;
+    let service =
+        validate_optional_non_flag_field(payload, &["service"], "service", &event_name, true)?;
+
+    let dir_path = std::path::PathBuf::from(&project_dir);
+    if !dir_path.is_dir() {
+        return Err(format!(
+            "Invalid 'projectDir' for {event_name}: '{project_dir}' is not an existing directory"
+        ));
+    }
+
+    let mut args = vec!["compose".to_string()];
+    if let Some(f) = compose_file {
+        args.push("-f".to_string());
+        args.push(f);
+    }
+    args.push(subcmd.to_string());
+    if let Some(svc) = service {
+        args.push(svc);
+    }
+
+    Ok((dir_path, args))
+}
+
+fn format_command_output(
+    output: &std::process::Output,
+    fallback_ok: &str,
+    op_label: &str,
+) -> Result<String, String> {
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stdout_trimmed = stdout.trim();
+    let stderr_trimmed = stderr.trim();
+
+    if !output.status.success() {
+        let detail = match (stdout_trimmed.is_empty(), stderr_trimmed.is_empty()) {
+            (true, true) => format!("exit status {}", output.status),
+            (false, true) => stdout_trimmed.to_string(),
+            (true, false) => stderr_trimmed.to_string(),
+            (false, false) => format!("{stderr_trimmed}\n{stdout_trimmed}"),
+        };
+        return Err(format!("{op_label} failed: {detail}"));
+    }
+
+    let combined = match (stdout_trimmed.is_empty(), stderr_trimmed.is_empty()) {
+        (true, true) => fallback_ok.to_string(),
+        (false, true) => stdout_trimmed.to_string(),
+        (true, false) => stderr_trimmed.to_string(),
+        (false, false) => format!("{stdout_trimmed}\n{stderr_trimmed}"),
+    };
+    Ok(combined)
+}
+
+async fn run_build_image(payload: &Value) -> Result<String, String> {
+    let (args, logged_target) = build_docker_build_args(payload)?;
+    let started = std::time::Instant::now();
+    let result = async {
+        let output = runtime::run(args, BUILD_OP_TIMEOUT).await?;
+        format_command_output(
+            &output,
+            &format!("Image built for '{logged_target}'"),
+            "docker build",
+        )
+    }
+    .await;
+
+    activity::record(
+        activity::ActivityEntry::new(activity::ActivityKind::Task, "build", "image", &logged_target)
+            .took(started.elapsed().as_millis() as i64)
+            .outcome_of(&result),
+    );
+
+    result
+}
+
+async fn run_compose_dir_subcommand(subcmd: &str, payload: &Value) -> Result<String, String> {
+    let (dir_path, args) = validate_compose_dir_op(subcmd, payload)?;
+    let mut std_cmd = std::process::Command::new(crate::path_util::resolve_binary("docker"));
+    if let Some((host, _)) = crate::path_util::detect_docker_host() {
+        std_cmd.env("DOCKER_HOST", host);
+    }
+    crate::path_util::apply_path_to_cmd(&mut std_cmd);
+    std_cmd.current_dir(&dir_path);
+
+    let output = runtime::run_with_cmd(std_cmd, args, BUILD_OP_TIMEOUT).await?;
+    format_command_output(
+        &output,
+        &format!("Compose {subcmd} completed in '{}'", dir_path.display()),
+        &format!("docker compose {subcmd}"),
+    )
 }
 
 /// Build `StartConfig` preserving existing `colima.yaml` (`cpus: 0, memory: 0, disk: 0, runtime: ""` unless specified).
@@ -1575,6 +1789,7 @@ async fn execute_mutating_event(event: &str, payload: &Value) -> Result<String, 
                 .await
                 .map_err(|e| e.to_string())
         }
+        "build-image" => run_build_image(payload).await,
         "remove-image" => {
             let id = str_field(payload, &["id", "image", "image_id", "imageId"])
                 .ok_or_else(|| "Missing 'id' for remove-image".to_string())?;
@@ -1678,6 +1893,8 @@ async fn execute_mutating_event(event: &str, payload: &Value) -> Result<String, 
                 .await
                 .map_err(|e| e.to_string())
         }
+        "compose-build" => run_compose_dir_subcommand("build", payload).await,
+        "compose-pull" => run_compose_dir_subcommand("pull", payload).await,
         "compose-autofix-propose" => {
             let file_path = str_field(payload, &["filePath", "file_path", "path", "file"])
                 .ok_or_else(|| "Missing 'filePath' for compose-autofix-propose".to_string())?;
@@ -1852,6 +2069,27 @@ async fn execute_mutating_event(event: &str, payload: &Value) -> Result<String, 
                     .await
                     .map_err(|e| e.to_string())
             }
+        }
+        "k8s-benchmark" => {
+            let url = validate_required_non_flag_field(
+                payload,
+                &["url", "endpoint", "target"],
+                "url",
+                "k8s-benchmark",
+            )?;
+            let concurrency = u32_field(payload, &["concurrency"], 5);
+            let requests = u32_field(payload, &["requests", "total", "count"], 50);
+            let method = validate_optional_non_flag_field(
+                payload,
+                &["method"],
+                "method",
+                "k8s-benchmark",
+                true,
+            )?
+            .unwrap_or_else(|| "GET".to_string());
+            k8s_cluster::k8s_benchmark(url, concurrency, requests, method)
+                .await
+                .map_err(|e| e.to_string())
         }
         "kind-create" => {
             let name = str_field(payload, &["name"]).unwrap_or("kind");
@@ -2772,5 +3010,307 @@ mod tests {
         let resolved_gemini = resolve_ai_config(&override_req, &HashMap::new());
         assert_eq!(resolved_gemini.provider, "gemini");
         assert_eq!(resolved_gemini.model, "gemini-2.5-flash");
+    }
+
+    #[test]
+    fn classifies_all_130_catalog_events_with_62_safe_and_68_mutating_parity() {
+        let safe_events = [
+            "list-instances",
+            "colima-status",
+            "list-containers",
+            "container-logs",
+            "inspect-container",
+            "container-stats",
+            "all-container-stats",
+            "list-images",
+            "inspect-image",
+            "volume-list",
+            "network-list",
+            "compose-list",
+            "compose-logs",
+            "system-df",
+            "system-check",
+            "system-host-specs",
+            "environment-resolutions",
+            "diagnostic-logs",
+            "k8s-cluster-health",
+            "k8s-nodes",
+            "k8s-pods",
+            "lima-list",
+            "model-list",
+            "container-top",
+            "volume-inspect",
+            "network-inspect",
+            "compose-ps",
+            "compose-diagnose",
+            "compose-autofix-history",
+            "k8s-list-contexts",
+            "k8s-current-context",
+            "k8s-list-namespaces",
+            "k8s-list-resources",
+            "k8s-describe",
+            "k8s-yaml",
+            "k8s-logs",
+            "k8s-container-logs",
+            "k8s-pod-containers",
+            "k8s-events",
+            "k8s-crds",
+            "k8s-crd-resources",
+            "k8s-port-forward-list",
+            "kind-list",
+            "lima-info",
+            "lima-templates",
+            "system-check-tool",
+            "ai-config-status",
+            "list-presets",
+            "colima-config-get",
+            "topology-get",
+            "security-history",
+            "security-rules",
+            "security-alternatives",
+            "falco-state",
+            "falco-events",
+            "detonation-list",
+            "alerts-rules",
+            "alerts-events",
+            "self-heal-rules",
+            "self-heal-log",
+            "activity-feed",
+            "navigate",
+        ];
+
+        let mutating_events = [
+            "start-instance",
+            "stop-instance",
+            "colima-restart",
+            "start-container",
+            "stop-container",
+            "restart-container",
+            "pause-container",
+            "unpause-container",
+            "remove-container",
+            "pull-image",
+            "compose-up",
+            "compose-down",
+            "compose-restart",
+            "lima-start",
+            "lima-stop",
+            "create-instance",
+            "delete-instance",
+            "colima-config-apply",
+            "run-container",
+            "rename-container",
+            "container-exec",
+            "remove-image",
+            "build-image",
+            "prune-images",
+            "tag-image",
+            "volume-create",
+            "volume-remove",
+            "volume-prune",
+            "network-create",
+            "network-remove",
+            "network-prune",
+            "system-prune",
+            "compose-stop",
+            "compose-start",
+            "compose-build",
+            "compose-pull",
+            "compose-autofix-propose",
+            "compose-autofix-apply",
+            "compose-autofix-undo",
+            "k8s-set-context",
+            "k8s-apply",
+            "k8s-delete",
+            "k8s-restart-resource",
+            "k8s-scale",
+            "k8s-generic-scale",
+            "k8s-node-action",
+            "k8s-port-forward-start",
+            "k8s-port-forward-stop",
+            "k8s-exec",
+            "k8s-benchmark",
+            "kind-create",
+            "kind-delete",
+            "lima-create",
+            "lima-delete",
+            "lima-shell",
+            "model-pull",
+            "model-serve",
+            "model-delete",
+            "security-scan",
+            "security-sbom",
+            "security-audit",
+            "security-triage",
+            "detonation-start",
+            "detonation-cancel",
+            "ai-update-config",
+            "save-preset",
+            "delete-preset",
+            "cli-exec",
+        ];
+
+        assert_eq!(safe_events.len(), 62);
+        assert_eq!(mutating_events.len(), 68);
+
+        let mut all_unique = std::collections::BTreeSet::new();
+        for ev in safe_events {
+            assert!(all_unique.insert(ev), "duplicate event in catalog: {ev}");
+            assert_ne!(classify_event(ev), EventSafety::Unknown);
+            assert_eq!(classify_event(ev), EventSafety::Safe, "{ev} must be Safe");
+        }
+        for ev in mutating_events {
+            assert!(all_unique.insert(ev), "duplicate event in catalog: {ev}");
+            assert_ne!(classify_event(ev), EventSafety::Unknown);
+            assert_eq!(
+                classify_event(ev),
+                EventSafety::Mutating,
+                "{ev} must be Mutating"
+            );
+        }
+        assert_eq!(all_unique.len(), 130);
+
+        for new_ev in ["build-image", "compose-build", "compose-pull", "k8s-benchmark"] {
+            assert_eq!(classify_event(new_ev), EventSafety::Mutating);
+        }
+    }
+
+    #[tokio::test]
+    async fn validates_build_image_args_and_rejects_flag_injection() {
+        let tmp_dir = std::env::temp_dir().join(format!(
+            "cui-agent-loop-build-test-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&tmp_dir).expect("create temp context dir");
+        let tmp_str = tmp_dir.to_string_lossy().to_string();
+
+        let (args, target) = build_docker_build_args(&json!({
+            "contextPath": tmp_str,
+            "dockerfile": "Dockerfile.prod",
+            "tag": "colima-ui/demo:1.0"
+        }))
+        .expect("valid build-image args");
+        assert_eq!(
+            args,
+            vec![
+                "build",
+                "-t",
+                "colima-ui/demo:1.0",
+                "-f",
+                "Dockerfile.prod",
+                &tmp_str,
+            ]
+        );
+        assert_eq!(target, "colima-ui/demo:1.0");
+
+        let (alias_args, alias_target) =
+            build_docker_build_args(&json!({ "context_path": tmp_str }))
+                .expect("context_path alias works");
+        assert_eq!(alias_args, vec!["build", &tmp_str]);
+        assert_eq!(alias_target, tmp_str);
+
+        for bad_payload in [
+            json!({}),
+            json!({"contextPath": "   "}),
+            json!({"contextPath": "-f"}),
+            json!({"contextPath": "/nonexistent/cui-missing-build-dir-xyz"}),
+            json!({"contextPath": tmp_str, "tag": ""}),
+            json!({"contextPath": tmp_str, "tag": "--output=/tmp/pwn"}),
+            json!({"contextPath": tmp_str, "tag": "bad tag"}),
+            json!({"contextPath": tmp_str, "dockerfile": ""}),
+            json!({"contextPath": tmp_str, "dockerfile": "--iidfile=/etc/passwd"}),
+        ] {
+            let tag = ToolTag {
+                kind: TagKind::EventApprove,
+                event: "build-image".to_string(),
+                payload: bad_payload.clone(),
+            };
+            let err = dispatch_tool_tag(&tag, true)
+                .await
+                .expect_err(&format!("expected rejection for {bad_payload}"));
+            assert!(!err.is_empty());
+        }
+
+        let _ = std::fs::remove_dir_all(&tmp_dir);
+    }
+
+    #[tokio::test]
+    async fn validates_compose_build_pull_and_k8s_benchmark_inputs_and_gates_mutations() {
+        let tmp_dir = std::env::temp_dir().join(format!(
+            "cui-agent-loop-compose-test-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&tmp_dir).expect("create temp compose dir");
+        let tmp_str = tmp_dir.to_string_lossy().to_string();
+
+        let (dir_out, build_args) = validate_compose_dir_op(
+            "build",
+            &json!({ "projectDir": tmp_str, "service": "api" }),
+        )
+        .expect("valid compose-build op");
+        assert_eq!(dir_out, tmp_dir);
+        assert_eq!(build_args, vec!["compose", "build", "api"]);
+
+        let (_, pull_args) =
+            validate_compose_dir_op("pull", &json!({ "project_dir": tmp_str }))
+                .expect("valid compose-pull op");
+        assert_eq!(pull_args, vec!["compose", "pull"]);
+
+        for ev in ["build-image", "compose-build", "compose-pull", "k8s-benchmark"] {
+            let blocked = dispatch_tool_tag(
+                &ToolTag {
+                    kind: TagKind::EventApprove,
+                    event: ev.to_string(),
+                    payload: json!({}),
+                },
+                false,
+            )
+            .await
+            .expect("blocked mutation note");
+            assert!(blocked.contains("ACTION_BLOCKED"), "expected block for {ev}");
+        }
+
+        for (ev, bad_payload) in [
+            ("compose-build", json!({})),
+            ("compose-build", json!({"projectDir": "-d"})),
+            (
+                "compose-build",
+                json!({"projectDir": "/nonexistent/cui-missing-compose-dir-xyz"}),
+            ),
+            (
+                "compose-build",
+                json!({"projectDir": tmp_str, "service": "--privileged"}),
+            ),
+            (
+                "compose-pull",
+                json!({"dir": "/nonexistent/cui-missing-compose-dir-xyz"}),
+            ),
+            ("compose-pull", json!({"dir": tmp_str, "service": "-q"})),
+            ("k8s-benchmark", json!({})),
+            ("k8s-benchmark", json!({"url": "-o"})),
+            ("k8s-benchmark", json!({"url": "file:///etc/passwd"})),
+            (
+                "k8s-benchmark",
+                json!({"url": "http://127.0.0.1:9", "method": "-X"}),
+            ),
+            (
+                "k8s-benchmark",
+                json!({"url": "http://127.0.0.1:9", "method": "POST"}),
+            ),
+        ] {
+            let err = dispatch_tool_tag(
+                &ToolTag {
+                    kind: TagKind::EventApprove,
+                    event: ev.to_string(),
+                    payload: bad_payload.clone(),
+                },
+                true,
+            )
+            .await
+            .expect_err(&format!("expected error for {ev} with {bad_payload}"));
+            assert!(!err.is_empty());
+        }
+
+        let _ = std::fs::remove_dir_all(&tmp_dir);
     }
 }

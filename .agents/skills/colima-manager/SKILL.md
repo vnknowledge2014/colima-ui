@@ -1,17 +1,17 @@
 ---
 name: colima-manager
-version: 0.3.0
-description: "Control and orchestrate ColimaUI v0.3.0 via CLI-First deterministic subcommands (cui <subcommand> --json, < 5ms), the 22-tool Native MCP Server (cui mcp), Native A2A JSON-RPC (/a2a), or the localhost HTTP/SSE API."
+version: 0.3.3
+description: "Control and orchestrate ColimaUI v0.3.3 via CLI-First deterministic subcommands (cui <subcommand> --json, < 5ms), the 22-tool Native MCP Server (cui mcp), Native A2A JSON-RPC (/a2a), 130 symmetric Event Bus operations, or the localhost HTTP/SSE API. Use when managing Colima VMs, Docker, Compose, Kubernetes, Lima VMs, or container security."
 ---
 
-# Colima Manager Skill (`v0.3.0`)
+# Colima Manager Skill (`v0.3.3`)
 
-This skill enables external orchestrators and IDE agents to drive **ColimaUI `v0.3.0`** across its **Dual-Surface Architecture**:
-- **Inside App**: Desktop/Webview `AiChatPanel` + `agentCore.ts` + **100** App Events + Internal Skills (`system_prompt.md`, `router.md`, `src-tauri/resources/skills/*`) + SQLite Knowledge Bank RAG + FTS5 Memories + Live UI Bridge (`ui-navigate` & `agent-external-chat-turn`).
-- **Outside App (`cui` `v0.3.0`, with `colimaui` preserved as a backward-compatible alias)**:
+This skill enables external orchestrators and IDE agents to drive **ColimaUI `v0.3.3`** across its **Dual-Surface Architecture**:
+- **Inside App**: Desktop/Webview `AiChatPanel` + `agentCore.ts` + **130** symmetric App Event Bus operations (`62 SAFE` + `68 NORMAL/DANGEROUS`, shared 1-for-1 with Headless/A2A `cui`) + Internal Skills (`system_prompt.md`, `router.md`, `src-tauri/resources/skills/*`) + SQLite Knowledge Bank RAG + FTS5 Memories + Live UI Bridge (`ui-navigate` across 17 pages + `ai-chat` drawer, and `agent-external-chat-turn`).
+- **Outside App (`cui` `v0.3.3`, with `colimaui` preserved as a backward-compatible alias)**:
   1. **CLI-First Deterministic Subcommands (`< 5ms` over `:11420..11429` when Desktop is open, automatic standalone Rust fallback when Desktop is closed)** with global `--json` returning `{"ok": true, "data": ...}` or `{"ok": false, "error": "..."}`.
   2. **22-Tool Native MCP Server (`cui mcp` / `colimaui mcp`)** over `stdio`.
-  3. **Agent Chat & Native HTTP A2A (`cui chat` / `POST /a2a`)** isolated to `colima-a2a-default-session` by default, with opt-in `--mirror-ui` live Desktop mirroring.
+  3. **Agent Chat & Native HTTP A2A (`cui chat` / `POST /a2a`)** executing the same **130 symmetric App Event Bus operations** (`62 SAFE` + `68 NORMAL/DANGEROUS`), isolated to `colima-a2a-default-session` by default, with opt-in `--mirror-ui` live Desktop mirroring.
 
 ## 1. CLI-First Deterministic Subcommands (`cui <subcommand> --json`)
 

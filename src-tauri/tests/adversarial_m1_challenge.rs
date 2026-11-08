@@ -54,15 +54,17 @@ fn spawn_mock_200_server(sock_path: &Path, stop_signal: Arc<AtomicBool>) -> thre
         while !stop_signal.load(Ordering::Relaxed) {
             match listener.accept() {
                 Ok((mut stream, _)) => {
-                    let _ = stream.set_read_timeout(Some(Duration::from_millis(200)));
-                    let mut buf = [0u8; 128];
-                    let _ = stream.read(&mut buf);
-                    let resp =
-                        b"HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: 2\r\n\r\nOK";
-                    let _ = stream.write_all(resp);
+                    thread::spawn(move || {
+                        let _ = stream.set_nonblocking(false);
+                        let _ = stream.set_read_timeout(Some(Duration::from_millis(200)));
+                        let mut buf = [0u8; 128];
+                        let _ = stream.read(&mut buf);
+                        let resp = b"HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: 2\r\n\r\nOK";
+                        let _ = stream.write_all(resp);
+                    });
                 }
                 Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                    thread::sleep(Duration::from_millis(5));
+                    thread::sleep(Duration::from_millis(2));
                 }
                 Err(_) => break,
             }
@@ -81,14 +83,17 @@ fn spawn_mock_eof_server(sock_path: &Path, stop_signal: Arc<AtomicBool>) -> thre
         while !stop_signal.load(Ordering::Relaxed) {
             match listener.accept() {
                 Ok((mut stream, _)) => {
-                    let _ = stream.set_read_timeout(Some(Duration::from_millis(100)));
-                    let mut buf = [0u8; 64];
-                    let _ = stream.read(&mut buf);
-                    // Close immediately on read
-                    drop(stream);
+                    thread::spawn(move || {
+                        let _ = stream.set_nonblocking(false);
+                        let _ = stream.set_read_timeout(Some(Duration::from_millis(100)));
+                        let mut buf = [0u8; 64];
+                        let _ = stream.read(&mut buf);
+                        // Close immediately on read
+                        drop(stream);
+                    });
                 }
                 Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                    thread::sleep(Duration::from_millis(5));
+                    thread::sleep(Duration::from_millis(2));
                 }
                 Err(_) => break,
             }

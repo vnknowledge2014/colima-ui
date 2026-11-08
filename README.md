@@ -53,8 +53,8 @@ Grab the latest release from [**GitHub Releases**](https://github.com/vnknowledg
 
 | Pillar | Capabilities |
 |--------|--------------|
-| **Command Center AI (Inside App)** | Multi-provider agent (**6 built-in provider modes**: `anthropic`, `openai`, `gemini`, `ollama-local`, `ollama-cloud`, and `openai-compatible` covering OpenRouter, Groq, DeepSeek, Mistral, Together AI, LiteLLM, 9router, vLLM, or LM Studio) with **100** bracket-tag Event Bus tools across **17** navigable UI pages, Internal Skills (`system_prompt.md`, `router.md`, `src-tauri/resources/skills/*`), Knowledge Bank RAG + FTS5 Memories, Live UI Bridge (`ui-navigate` & `agent-external-chat-turn`), `<think>` reasoning blocks, **3-tier guided UX**, safe Terminal handoff, and multi-conversation SQLite history |
-| **CLI-First `cui` (`v0.3.0`), A2A & 22-Tool MCP (Outside App)** | Unified `cui` control plane (with `colimaui` preserved as a backward-compatible alias): **22 subcommands** (`< 5ms` over `:11420..11429` when Desktop is open, automatic standalone Rust fallback when Desktop is closed, global `--json` returning `{"ok": true, "data": ...}`), isolated A2A sessions (`colima-a2a-default-session` + opt-in `--mirror-ui`), Native HTTP A2A (`/.well-known/agent.json`, `/a2a`), and a **22-tool JSON-RPC 2.0 MCP stdio server** (`cui mcp` / `colimaui mcp`) |
+| **Command Center AI (Inside App)** | Multi-provider agent (**6 built-in provider modes**: `anthropic`, `openai`, `gemini`, `ollama-local`, `ollama-cloud`, and `openai-compatible` covering OpenRouter, Groq, DeepSeek, Mistral, Together AI, LiteLLM, 9router, vLLM, or LM Studio) with **130** symmetric bracket-tag App Event Bus actions (`62 SAFE` + `68` mutating, shared 1-for-1 between `src/lib/aiEventBus.ts` and `src-tauri/src/commands/agent_loop.rs`) across **17** navigable UI pages + `ai-chat` drawer, Internal Skills (`system_prompt.md`, `router.md`, `src-tauri/resources/skills/*`), Knowledge Bank RAG + FTS5 Memories, Live UI Bridge (`ui-navigate` & `agent-external-chat-turn`), `<think>` reasoning blocks, **3-tier guided UX**, safe Terminal handoff, and multi-conversation SQLite history |
+| **CLI-First `cui` (`v0.3.3`), A2A & 22-Tool MCP (Outside App)** | Unified `cui` control plane (with `colimaui` preserved as a backward-compatible alias): **22 subcommands** (`< 5ms` over `:11420..11429` when Desktop is open, automatic standalone Rust fallback when Desktop is closed, global `--json` returning `{"ok": true, "data": ...}`), **130-event** symmetric A2A/chat execution (`colima-a2a-default-session` + opt-in `--mirror-ui`), Native HTTP A2A (`/.well-known/agent.json`, `/a2a`), and a **22-tool JSON-RPC 2.0 MCP stdio server** (`cui mcp` / `colimaui mcp`) |
 | **Security & Runtime Auditing** | Local Trivy vulnerability scanning with provenance-backed scores, CycloneDX/SPDX SBOM export, configuration rule pack (`L1`–`L3`), local base-image alternatives catalog, Falco runtime event stream, and isolated container Detonation sandbox |
 | **Topology, Live Activity & Self-Healing** | Interactive Docker & Kubernetes topology graphs, low-overhead Bollard live metrics, alert rules with historical backtesting, self-healing rules with kill switch, Compose Diagnose & AI Autofix (preview/apply/undo), and background TAR/file transfers |
 | **100% Free & Open Source (MIT)** | All features unlocked out of the box with zero account or sign-in required and strict BYOK local-first privacy |
@@ -74,9 +74,9 @@ Grab the latest release from [**GitHub Releases**](https://github.com/vnknowledg
 - **Environment Provenance & Duality** — Read-only diagnostic view comparing `launchd` vs user shell environment variables alongside resolved Colima, Lima, Docker socket, and Kubeconfig paths
 - Offline full-text searchable Help Center (`articles_fts`) and full UI localization across **4 languages** (`en`, `ja`, `vi`, `zh`)
 
-### 🤖 Dual-Surface CLI-First (`cui` `v0.3.0`), Native A2A & 22-Tool MCP Server
+### 🤖 Dual-Surface CLI-First (`cui` `v0.3.3`), Native A2A & 22-Tool MCP Server
 
-ColimaUI `v0.3.0` pairs its in-app **Command Center AI** (`AiChatPanel` + `agentCore.ts` + Internal Skills) with an external **CLI-First control plane (`cui`, with `colimaui` preserved as a backward-compatible alias)**. Every direct `cui` subcommand executes in `< 5ms` over localhost HTTP (`127.0.0.1:11420..11429`) when ColimaUI Desktop is open, and **automatically falls back to standalone native Rust execution** when Desktop is closed. Passing `--json` in any position emits `{"ok": true, "data": ...}` or `{"ok": false, "error": "..."}`:
+ColimaUI `v0.3.3` pairs its in-app **Command Center AI** (`AiChatPanel` + `agentCore.ts` + Internal Skills) with an external **CLI-First control plane (`cui`, with `colimaui` preserved as a backward-compatible alias)**, sharing **130 symmetric App Event Bus actions** (`62 SAFE` + `68` mutating) 1-for-1 between `src/lib/aiEventBus.ts` and `src-tauri/src/commands/agent_loop.rs`. Every direct `cui` subcommand executes in `< 5ms` over localhost HTTP (`127.0.0.1:11420..11429`) when ColimaUI Desktop is open, and **automatically falls back to standalone native Rust execution** when Desktop is closed. Passing `--json` in any position emits `{"ok": true, "data": ...}` or `{"ok": false, "error": "..."}`:
 
 ```bash
 # 20 deterministic < 5ms subcommand domains (+ `chat` and `mcp` = 22 subcommands):
@@ -216,7 +216,7 @@ colima-ui/
 │   │   ├── telemetry/            # Opt-in closed-vocabulary telemetry & redaction
 │   │   ├── pro/                  # MIT-side Pro sidecar boundary (free by default)
 │   │   ├── subscription/         # Local offline entitlement state cache
-│   │   ├── bin/                  # Standalone CLI-First, A2A & MCP binaries (cui v0.3.0 + colimaui alias)
+│   │   ├── bin/                  # Standalone CLI-First, A2A & MCP binaries (cui v0.3.3 + colimaui alias)
 │   │   ├── sse.rs                # SSE broadcast & topic subscriber tracking
 │   │   ├── error.rs              # Structured ColimaError classification & remediation hints
 │   │   ├── redact.rs             # Credential & secret redaction
@@ -243,11 +243,11 @@ colima-ui/
 
 ```bash
 # Optional: prepare a minor/major bump on a feature branch before opening a PR
-./scripts/release.sh minor          # 0.2.x → 0.3.0
+./scripts/release.sh minor          # 0.3.x → 0.4.0
 ./scripts/release.sh major          # 0.x.y → 1.0.0
 
 # Optional: cut an explicit pre-release tag on main
-./scripts/release.sh 0.3.0-rc.1 --tag
+./scripts/release.sh 0.3.3-rc.1 --tag
 ```
 
 ---

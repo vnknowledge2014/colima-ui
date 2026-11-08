@@ -6,6 +6,8 @@ import { systemRegistry } from "./aiEvents/system";
 import { composeRegistry } from "./aiEvents/compose";
 import { k8sRegistry } from "./aiEvents/k8s";
 import { limaRegistry } from "./aiEvents/lima";
+import { observabilityRegistry } from "./aiEvents/observability";
+import { securityRegistry } from "./aiEvents/security";
 import { configRegistry } from "./aiEvents/config";
 
 export type { ActionCategory, EventHandler };
@@ -18,6 +20,8 @@ export const registry: Record<string, EventHandler> = {
   ...composeRegistry,
   ...k8sRegistry,
   ...limaRegistry,
+  ...observabilityRegistry,
+  ...securityRegistry,
   ...configRegistry,
 };
 

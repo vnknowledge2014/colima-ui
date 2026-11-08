@@ -1,4 +1,3 @@
-import { isRunningInTauri } from "../env";
 import { runSandboxed } from "./shell";
 import { EventHandler } from "./types";
 import { dockerApi } from "../api";
@@ -66,14 +65,15 @@ export const dockerRegistry: Record<string, EventHandler> = {
     category: "NORMAL",
     description: "Build a docker image from a Dockerfile",
     handler: async (p) => {
-      if (isRunningInTauri()) {
+      try {
         const args = ["build"];
-        if (p.tag) { args.push("-t", p.tag); }
-        if (p.file) { args.push("-f", p.file); }
-        args.push(p.dir || ".");
+        if (p?.tag) { args.push("-t", String(p.tag)); }
+        if (p?.file) { args.push("-f", String(p.file)); }
+        args.push(String(p?.dir || "."));
         return await runSandboxed("docker", args);
+      } catch (e) {
+        return `Error building image: ${e instanceof Error ? e.message : String(e)}`;
       }
-      return `[SIMULATED] Built image ${p.tag || "untagged"}`;
     }
   },
   "prune-images": {
