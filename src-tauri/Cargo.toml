@@ -37,7 +37,7 @@ async-stream = "0.3"
 reqwest = { version = "0.13", features = ["json", "cookies"] }
 scraper = "0.29"
 html2md = "0.2"
-rusqlite = { version = "0.40", features = ["bundled"] }
+rusqlite = { version = "0.41", features = ["bundled"] }
 regex-lite = "0.1"
 chrono = { version = "0.4", features = ["serde"] }
 tauri-plugin-http = "2.8.2"
