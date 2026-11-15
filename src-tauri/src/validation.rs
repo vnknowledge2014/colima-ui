@@ -225,6 +225,45 @@ pub fn assert_path_within(base: &std::path::Path, candidate: &std::path::Path) -
     }
 }
 
+/// Like [`assert_path_within`], but confines the candidate's *directory* and
+/// leaves the file itself unresolved: the file may be a symlink pointing
+/// anywhere.
+///
+/// For files the user manages from elsewhere — a dotfiles-symlinked
+/// `colima.yaml` is the common case. Canonicalizing the leaf would follow that
+/// link out of the colima home and refuse a config the user deliberately
+/// placed there. What needs confining is the path the *app* builds
+/// (`<home>/<profile>/colima.yaml`, with the profile name validated first);
+/// the user's own link target is not something to second-guess.
+///
+/// Callers that WRITE must not rely on this alone: replacing a symlink by an
+/// atomic rename turns it into a regular file. See
+/// `colima_config::write_atomic`.
+pub fn assert_parent_within(
+    base: &std::path::Path,
+    candidate: &std::path::Path,
+) -> Result<(), String> {
+    let base = base
+        .canonicalize()
+        .map_err(|e| format!("Cannot resolve base directory {}: {}", base.display(), e))?;
+    let parent = candidate
+        .parent()
+        .ok_or_else(|| format!("Path has no parent: {}", candidate.display()))?;
+    let parent = parent
+        .canonicalize()
+        .map_err(|e| format!("Cannot resolve directory {}: {}", parent.display(), e))?;
+
+    if parent.starts_with(&base) {
+        Ok(())
+    } else {
+        Err(format!(
+            "Directory {} escapes {}",
+            parent.display(),
+            base.display()
+        ))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -319,5 +358,72 @@ mod tests {
         assert!(is_valid_k8s_name("kube-system"));
         assert!(is_valid_k8s_name("my-pod-123"));
         assert!(is_valid_k8s_name("custom.crd.example.io"));
+    }
+
+    /// A scratch dir under the system temp dir, removed on drop.
+    struct Scratch(std::path::PathBuf);
+    impl Scratch {
+        fn new(name: &str) -> Self {
+            static N: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+            let dir = std::env::temp_dir().join(format!(
+                "cui-validation-{}-{}-{}",
+                name,
+                std::process::id(),
+                N.fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+            ));
+            std::fs::create_dir_all(&dir).unwrap();
+            Scratch(dir)
+        }
+    }
+    impl Drop for Scratch {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn parent_within_allows_a_symlinked_leaf_pointing_outside() {
+        // A dotfiles-managed colima.yaml: the profile dir is inside the home,
+        // the file is a link to somewhere else entirely.
+        let s = Scratch::new("leaf-link");
+        let home = s.0.join("home");
+        let profile = home.join("default");
+        let elsewhere = s.0.join("dotfiles");
+        std::fs::create_dir_all(&profile).unwrap();
+        std::fs::create_dir_all(&elsewhere).unwrap();
+        std::fs::write(elsewhere.join("colima.yaml"), "cpu: 4\n").unwrap();
+        let link = profile.join("colima.yaml");
+        std::os::unix::fs::symlink(elsewhere.join("colima.yaml"), &link).unwrap();
+
+        assert!(assert_parent_within(&home, &link).is_ok());
+        // ...which the full check refuses, by design.
+        assert!(assert_path_within(&home, &link).is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn parent_within_refuses_a_symlinked_directory_pointing_outside() {
+        // The profile DIRECTORY itself leading out of the home is still refused.
+        let s = Scratch::new("dir-link");
+        let home = s.0.join("home");
+        let outside = s.0.join("outside");
+        std::fs::create_dir_all(&home).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        std::os::unix::fs::symlink(&outside, home.join("evil")).unwrap();
+
+        let err = assert_parent_within(&home, &home.join("evil").join("colima.yaml"))
+            .expect_err("a directory link out of the home must be refused");
+        assert!(err.contains("escapes"), "{err}");
+    }
+
+    #[test]
+    fn parent_within_allows_a_plain_file_and_a_missing_one() {
+        let s = Scratch::new("plain");
+        let profile = s.0.join("default");
+        std::fs::create_dir_all(&profile).unwrap();
+        std::fs::write(profile.join("colima.yaml"), "cpu: 2\n").unwrap();
+        assert!(assert_parent_within(&s.0, &profile.join("colima.yaml")).is_ok());
+        assert!(assert_parent_within(&s.0, &profile.join("not-yet.tmp")).is_ok());
     }
 }

@@ -244,9 +244,11 @@ fn read_instance(colima_home: &Path, profile: &str) -> Option<ColimaInstance> {
     }
     let config_path = colima_home.join(profile).join("colima.yaml");
 
-    // Defence in depth behind the name check: prove the resolved path really is
-    // inside ~/.colima before reading it.
-    if let Err(e) = crate::validation::assert_path_within(colima_home, &config_path) {
+    // Defence in depth behind the name check: prove the profile directory really
+    // is inside the colima home before reading from it. The config file itself
+    // may be a symlink (a dotfiles-managed colima.yaml): resolving it would
+    // "escape" the home and drop a perfectly valid profile from every listing.
+    if let Err(e) = crate::validation::assert_parent_within(colima_home, &config_path) {
         eprintln!("[instance_reader] refusing to read {:?}: {}", profile, e);
         return None;
     }
@@ -511,6 +513,36 @@ mod tests {
         fn drop(&mut self) {
             let _ = std::fs::remove_dir_all(&self.0);
         }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_read_instance_follows_a_symlinked_colima_yaml() {
+        // The dotfiles layout: <home>/default/colima.yaml is a link to a file
+        // outside the colima home. The profile must still be read (it used to
+        // be refused as "escaping" the home and vanished from every listing).
+        let dir = temp_test_dir("symlinked-config");
+        let _cleanup = DirCleanup(dir.clone());
+        let home = dir.join("colima-home");
+        let dotfiles = dir.join("dotfiles");
+        std::fs::create_dir_all(home.join("default")).unwrap();
+        std::fs::create_dir_all(&dotfiles).unwrap();
+        std::fs::write(
+            dotfiles.join("colima.yaml"),
+            "cpu: 4\nmemory: 8\ndisk: 60\nruntime: docker\n",
+        )
+        .unwrap();
+        std::os::unix::fs::symlink(
+            dotfiles.join("colima.yaml"),
+            home.join("default").join("colima.yaml"),
+        )
+        .unwrap();
+
+        let inst = read_instance(&home, "default").expect("symlinked profile is listed");
+        assert_eq!(inst.name, "default");
+        assert_eq!(inst.cpus, 4);
+        assert_eq!(inst.memory, 8 * 1024 * 1024 * 1024);
+        assert_eq!(inst.runtime, "docker");
     }
 
     #[test]
