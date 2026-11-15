@@ -619,7 +619,7 @@ mod tests {
     fn a_computed_detail_never_erases_the_reason_a_command_failed() {
         let failed: Result<String, String> = Err("docker image prune failed: daemon gone".into());
         // What the call sites do: a summary derived from the success value.
-        let summary = failed.as_deref().map(prune_summary).unwrap_or_default();
+        let summary = failed.as_deref().map_or_default(prune_summary);
         assert!(summary.is_empty(), "a failure has no summary to show");
 
         let entry = ActivityEntry::new(ActivityKind::Destructive, "prune", "image", "")
@@ -639,7 +639,7 @@ mod tests {
     fn a_successful_prune_reports_what_it_removed() {
         let ok: Result<String, String> =
             Ok("deleted: sha256:aaa\ndeleted: sha256:bbb\nTotal reclaimed space: 1.2GB".into());
-        let summary = ok.as_deref().map(prune_summary).unwrap_or_default();
+        let summary = ok.as_deref().map_or_default(prune_summary);
 
         let entry = ActivityEntry::new(ActivityKind::Destructive, "prune", "image", "")
             .detail(summary)

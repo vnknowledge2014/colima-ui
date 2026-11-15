@@ -501,8 +501,7 @@ async fn handle_send(req_id: Value, params: &Value) -> Value {
             );
 
             let mut transitions = get_task(&task_id)
-                .map(|t| t.state_transition_history)
-                .unwrap_or_default();
+                .map_or_default(|t| t.state_transition_history);
             transitions.push(A2aStateTransition {
                 state: final_state.to_string(),
                 timestamp: done_ts.clone(),
@@ -540,8 +539,7 @@ async fn handle_send(req_id: Value, params: &Value) -> Value {
                 parts: vec![A2aPart::text(err_msg)],
             };
             let mut transitions = get_task(&task_id)
-                .map(|t| t.state_transition_history)
-                .unwrap_or_default();
+                .map_or_default(|t| t.state_transition_history);
             transitions.push(A2aStateTransition {
                 state: "failed".to_string(),
                 timestamp: fail_ts.clone(),

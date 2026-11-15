@@ -310,7 +310,7 @@ pub async fn k8s_services(namespace: String) -> Result<Vec<K8sService>, crate::e
                 // Parse ports
                 let ports_arr = item["spec"]["ports"].as_array();
                 let ports = ports_arr
-                    .map(|ps| {
+                    .map_or_default(|ps| {
                         ps.iter()
                             .map(|p| {
                                 let port = p["port"].as_i64().unwrap_or(0);
@@ -323,8 +323,7 @@ pub async fn k8s_services(namespace: String) -> Result<Vec<K8sService>, crate::e
                             })
                             .collect::<Vec<_>>()
                             .join(", ")
-                    })
-                    .unwrap_or_default();
+                    });
 
                 K8sService {
                     name,

@@ -52,8 +52,7 @@ pub async fn lima_list() -> Result<Vec<LimaInstance>, crate::error::ColimaError>
                     arch: v["arch"].as_str().unwrap_or("").to_string(),
                     cpus: v["cpus"]
                         .as_i64()
-                        .map(|n| n.to_string())
-                        .unwrap_or_default(),
+                        .map_or_default(|n| n.to_string()),
                     memory: format_bytes_lima(v["memory"].as_i64().unwrap_or(0)),
                     disk: format_bytes_lima(v["disk"].as_i64().unwrap_or(0)),
                     dir: v["dir"].as_str().unwrap_or("").to_string(),
