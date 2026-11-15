@@ -152,7 +152,9 @@ fn config_path(home: &Path, profile: &str) -> Result<PathBuf, ColimaError> {
 }
 
 /// As [`config_path`], but the file must exist — so the containment check can
-/// resolve symlinks for real.
+/// resolve the profile directory for real. The file itself may be a symlink
+/// (a dotfiles-managed colima.yaml) and is not resolved: see
+/// `validation::assert_parent_within`.
 fn existing_config_path(home: &Path, profile: &str) -> Result<PathBuf, ColimaError> {
     let path = config_path(home, profile)?;
     if !path.exists() {
@@ -164,7 +166,7 @@ fn existing_config_path(home: &Path, profile: &str) -> Result<PathBuf, ColimaErr
             ),
         ));
     }
-    crate::validation::assert_path_within(home, &path).map_err(ColimaError::validation)?;
+    crate::validation::assert_parent_within(home, &path).map_err(ColimaError::validation)?;
     Ok(path)
 }
 
@@ -508,6 +510,20 @@ pub fn diff(old: &Value, new: &Value) -> Vec<FieldChange> {
 /// original or the original plus a usable `.bak`.
 pub fn write_atomic(home: &Path, profile: &str, doc: &Value) -> Result<String, ColimaError> {
     let path = existing_config_path(home, profile)?;
+    // A symlinked config (dotfiles) must not be replaced: the rename below
+    // would turn the link into a regular file and silently detach the config
+    // from wherever the user manages it. Writing through to the target would
+    // drop .bak/.tmp files into that location instead. Refuse, and say where
+    // to edit.
+    if std::fs::symlink_metadata(&path).is_ok_and(|m| m.file_type().is_symlink()) {
+        let target = std::fs::read_link(&path)
+            .map_or_else(|_| "its target".to_string(), |t| t.display().to_string());
+        return Err(ColimaError::validation(format!(
+            "The config for profile {:?} is a symlink to {} — ColimaUI won't replace it \
+             (that would turn the link into a regular file). Edit the target directly.",
+            profile, target
+        )));
+    }
     let dir = path
         .parent()
         .ok_or_else(|| ColimaError::internal("config path has no parent"))?;
@@ -1058,6 +1074,47 @@ customFutureKey: preserved
         assert_eq!(changes[0].field, "mountType");
         assert_eq!(changes[0].from, None);
         assert_eq!(changes[0].to.as_deref(), Some("virtiofs"));
+    }
+
+    /// A home whose default/colima.yaml is a symlink to a file outside it (the
+    /// dotfiles layout). Returns the home and the link target.
+    #[cfg(unix)]
+    fn symlinked_home(config: &str) -> (tempdir::Home, std::path::PathBuf) {
+        let home = temp_home(config);
+        let target = home.path().join("dotfiles-colima.yaml");
+        let link = home.path().join("default").join("colima.yaml");
+        std::fs::rename(&link, &target).unwrap();
+        std::os::unix::fs::symlink(&target, &link).unwrap();
+        (home, target)
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn read_raw_reads_a_symlinked_config() {
+        let (home, _target) = symlinked_home(FULL_CONFIG);
+        let (doc, _mtime) = read_raw(home.path(), "default").expect("symlinked config readable");
+        assert_eq!(get_path(&doc, "cpu").and_then(|v| v.as_u64()), Some(2));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn write_atomic_refuses_a_symlinked_config_and_keeps_the_link() {
+        let (home, target) = symlinked_home(FULL_CONFIG);
+        let (doc, _) = read_raw(home.path(), "default").unwrap();
+
+        let err = write_atomic(home.path(), "default", &doc).expect_err("must refuse");
+        assert!(format!("{err:?}").contains("symlink"), "{err:?}");
+
+        let link = home.path().join("default").join("colima.yaml");
+        assert!(
+            std::fs::symlink_metadata(&link)
+                .unwrap()
+                .file_type()
+                .is_symlink(),
+            "the link must survive"
+        );
+        assert_eq!(std::fs::read_to_string(&target).unwrap(), FULL_CONFIG);
+        assert!(home.backups("default").is_empty(), "no .bak left behind");
     }
 
     #[test]
