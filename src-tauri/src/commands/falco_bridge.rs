@@ -296,14 +296,13 @@ echo '<<<CONFIG>>>'; cat /etc/falco/falco.yaml /etc/falco/config.d/*.yaml 2>/dev
     let section = |name: &str| -> String {
         out.split(&format!("<<<{name}>>>"))
             .nth(1)
-            .map(|rest| {
+            .map_or_default(|rest| {
                 rest.split("<<<")
                     .next()
                     .unwrap_or_default()
                     .trim()
                     .to_string()
             })
-            .unwrap_or_default()
     };
 
     let version_out = section("VERSION");
@@ -548,12 +547,11 @@ pub fn parse_event(line: &str) -> Option<FalcoEvent> {
         tags: raw
             .get("tags")
             .and_then(|v| v.as_array())
-            .map(|a| {
+            .map_or_default(|a| {
                 a.iter()
                     .filter_map(|t| t.as_str().map(str::to_string))
                     .collect()
-            })
-            .unwrap_or_default(),
+            }),
         container_id,
         container_name,
         image,

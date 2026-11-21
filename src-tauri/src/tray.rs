@@ -426,7 +426,7 @@ pub fn refresh(app: &AppHandle, instances: &[ColimaInstance]) {
         return;
     };
 
-    let pending = PENDING.lock().map(|g| g.clone()).unwrap_or_default();
+    let pending = PENDING.lock().map_or_default(|g| g.clone());
     let snapshot = snapshot_of(instances);
 
     let changed = {
@@ -528,8 +528,7 @@ pub fn init(app: &AppHandle) {
 pub fn pending_profiles() -> HashMap<String, ()> {
     PENDING
         .lock()
-        .map(|g| g.iter().map(|p| (p.clone(), ())).collect())
-        .unwrap_or_default()
+        .map_or_default(|g| g.iter().map(|p| (p.clone(), ())).collect())
 }
 
 #[cfg(test)]

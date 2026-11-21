@@ -44,7 +44,7 @@ pub async fn record(event: TelemetryEvent) {
 
 /// The events currently buffered, for the "show what would be sent" preview.
 fn buffered() -> Vec<TelemetryEvent> {
-    BUFFER.lock().map(|b| b.iter().cloned().collect()).unwrap_or_default()
+    BUFFER.lock().map_or_default(|b| b.iter().cloned().collect())
 }
 
 // ===== Tauri commands =====

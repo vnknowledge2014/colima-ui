@@ -748,8 +748,7 @@ fn run_session_blocking(id: &str, config: DetonationConfig) {
     let override_parts: Vec<String> = config
         .cmd_override
         .as_deref()
-        .map(|c| c.split_whitespace().map(str::to_string).collect())
-        .unwrap_or_default();
+        .map_or_default(|c| c.split_whitespace().map(str::to_string).collect());
     let args = build_run_args(&ctx, &config.image, &override_parts);
 
     if let Err(e) = run_cmd("docker", &args) {

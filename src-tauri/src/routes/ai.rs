@@ -15,7 +15,7 @@ pub async fn api_ai_chat(
     let endpoint = body["endpoint"].as_str().unwrap_or("").to_string();
     let messages: Vec<crate::commands::ai_chat::ChatMessage> = body["messages"]
         .as_array()
-        .map(|arr| {
+        .map_or_default(|arr| {
             arr.iter()
                 .filter_map(|m| {
                     Some(crate::commands::ai_chat::ChatMessage {
@@ -24,8 +24,7 @@ pub async fn api_ai_chat(
                     })
                 })
                 .collect()
-        })
-        .unwrap_or_default();
+        });
 
     let request = crate::commands::ai_chat::AiChatRequest {
         provider,

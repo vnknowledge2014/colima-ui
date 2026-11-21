@@ -89,7 +89,7 @@ pub async fn searxng_search(     query: String,     instances: Option<Vec<String
                     Ok(json) => {
                         let results: Vec<SearchResult> = json["results"]
                             .as_array()
-                            .map(|arr| {
+                            .map_or_default(|arr| {
                                 arr.iter()
                                     .take(max_results)
                                     .filter_map(|r| {
@@ -101,8 +101,7 @@ pub async fn searxng_search(     query: String,     instances: Option<Vec<String
                                         })
                                     })
                                     .collect()
-                            })
-                            .unwrap_or_default();
+                            });
                         // Python: if results: return results[:CONFIG['max_results']]
                         if !results.is_empty() {
                             return Ok(results);

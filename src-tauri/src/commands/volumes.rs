@@ -149,7 +149,7 @@ pub async fn prune_volumes() -> Result<String, crate::error::ColimaError> {
 
     crate::commands::activity::record(
         activity::ActivityEntry::new(activity::ActivityKind::Destructive, "prune", "volume", "")
-            .detail(result.as_deref().map(activity::prune_summary).unwrap_or_default())
+            .detail(result.as_deref().map_or_default(activity::prune_summary))
             .outcome_of(&result),
     );
 

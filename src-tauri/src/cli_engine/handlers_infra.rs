@@ -1995,12 +1995,11 @@ pub async fn handle_compose(
                 .get("declaredRemovals")
                 .or_else(|| patch.get("declared_removals"))
                 .and_then(Value::as_array)
-                .map(|arr| {
+                .map_or_default(|arr| {
                     arr.iter()
                         .filter_map(|v| v.as_str().map(str::to_string))
                         .collect()
-                })
-                .unwrap_or_default();
+                });
 
             let val = if let Some(c) = client {
                 let body = json!({

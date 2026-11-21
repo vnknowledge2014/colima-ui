@@ -372,7 +372,7 @@ pub fn to_csv(items: &[FeedItem]) -> String {
             field(&format!("{:?}", i.actor).to_lowercase()),
             field(&format!("{:?}", i.outcome).to_lowercase()),
             field(&i.detail),
-            i.duration_ms.map(|d| d.to_string()).unwrap_or_default(),
+            i.duration_ms.map_or_default(|d| d.to_string()),
         ));
     }
     out

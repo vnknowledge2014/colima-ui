@@ -481,12 +481,11 @@ async fn list_ollama_models(base_url: &str, api_key: &str) -> Result<String, Str
 
     let models: Vec<String> = resp["models"]
         .as_array()
-        .map(|arr| {
+        .map_or_default(|arr| {
             arr.iter()
                 .filter_map(|m| m["name"].as_str().map(|s| s.to_string()))
                 .collect()
-        })
-        .unwrap_or_default();
+        });
 
     serde_json::to_string(&models).map_err(|e| crate::redact::redact_err("Serialize error", e))
 }
@@ -525,7 +524,7 @@ async fn list_gemini_models(api_key: &str, endpoint: &str) -> Result<String, Str
 
     let models: Vec<String> = resp["models"]
         .as_array()
-        .map(|arr| {
+        .map_or_default(|arr| {
             arr.iter()
                 .filter_map(|m| {
                     let name = m["name"].as_str()?;
@@ -541,8 +540,7 @@ async fn list_gemini_models(api_key: &str, endpoint: &str) -> Result<String, Str
                     }
                 })
                 .collect()
-        })
-        .unwrap_or_default();
+        });
 
     serde_json::to_string(&models).map_err(|e| crate::redact::redact_err("Serialize error", e))
 }
@@ -580,12 +578,11 @@ async fn list_anthropic_models(api_key: &str, endpoint: &str) -> Result<String, 
 
     let models: Vec<String> = resp["data"]
         .as_array()
-        .map(|arr| {
+        .map_or_default(|arr| {
             arr.iter()
                 .filter_map(|m| m["id"].as_str().map(|s| s.to_string()))
                 .collect()
-        })
-        .unwrap_or_default();
+        });
 
     serde_json::to_string(&models).map_err(|e| crate::redact::redact_err("Serialize error", e))
 }
@@ -635,7 +632,7 @@ async fn list_openai_models(
 
     let mut models: Vec<String> = resp["data"]
         .as_array()
-        .map(|arr| {
+        .map_or_default(|arr| {
             arr.iter()
                 .filter_map(|m| {
                     let id = m["id"].as_str()?;
@@ -652,8 +649,7 @@ async fn list_openai_models(
                     }
                 })
                 .collect()
-        })
-        .unwrap_or_default();
+        });
 
     models.sort();
     models.reverse(); // newest first (gpt-5 before gpt-4)

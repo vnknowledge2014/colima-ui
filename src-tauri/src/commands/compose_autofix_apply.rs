@@ -45,8 +45,7 @@ const BACKUP_RETENTION_DAYS: i64 = 30;
 pub fn is_dockerfile(path: &str) -> bool {
     let name = std::path::Path::new(path)
         .file_name()
-        .map(|n| n.to_string_lossy().to_lowercase())
-        .unwrap_or_default();
+        .map_or_default(|n| n.to_string_lossy().to_lowercase());
     name == "dockerfile"
         || name == "containerfile"
         || name.starts_with("dockerfile.")

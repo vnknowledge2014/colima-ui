@@ -350,8 +350,7 @@ pub async fn build_bundle(
     // solution describe the same failure the same way.
     let signature = error
         .as_deref()
-        .map(|e| crate::commands::compose_diagnose::error_signature(&redact(e)))
-        .unwrap_or_default();
+        .map_or_default(|e| crate::commands::compose_diagnose::error_signature(&redact(e)));
 
     DiagnosticBundle {
         sections,

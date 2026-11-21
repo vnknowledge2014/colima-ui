@@ -540,7 +540,7 @@ pub fn collect_facts_blocking(image_ref: &str) -> Result<ImageFacts, String> {
     history_cmd.args(["image", "history", "--no-trunc", "--format", "{{json .}}", "--", image_ref]);
     // History is best-effort: without it two rules lose their input, which is a
     // better outcome than refusing to evaluate the other ten.
-    let history = history_cmd.output().map(|o| String::from_utf8_lossy(&o.stdout).to_string()).unwrap_or_default();
+    let history = history_cmd.output().map_or_default(|o| String::from_utf8_lossy(&o.stdout).to_string());
 
     facts_from_inspect(image_ref, &String::from_utf8_lossy(&inspect.stdout), &history)
 }

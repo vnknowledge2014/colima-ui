@@ -552,7 +552,7 @@ pub async fn prune_images() -> Result<String, crate::error::ColimaError> {
 
     crate::commands::activity::record(
         activity::ActivityEntry::new(activity::ActivityKind::Destructive, "prune", "image", "")
-            .detail(result.as_deref().map(activity::prune_summary).unwrap_or_default())
+            .detail(result.as_deref().map_or_default(activity::prune_summary))
             .outcome_of(&result),
     );
 
@@ -619,7 +619,7 @@ pub async fn system_prune(all: bool) -> Result<String, crate::error::ColimaError
 
     crate::commands::activity::record(
         activity::ActivityEntry::new(activity::ActivityKind::Destructive, "prune", "system", "")
-            .detail(result.as_deref().map(activity::prune_summary).unwrap_or_default())
+            .detail(result.as_deref().map_or_default(activity::prune_summary))
             .outcome_of(&result),
     );
 
