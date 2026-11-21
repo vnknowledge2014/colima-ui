@@ -309,12 +309,28 @@ pub fn db_path() -> PathBuf {
         if std::env::var_os("RUST_TEST_THREADS").is_some()
             || std::env::var("CARGO_TARGET_TMPDIR").is_ok()
             || std::env::var("TEST_DB_PATH").is_ok()
-            || std::env::current_exe()
-                .is_ok_and(|p| p.to_string_lossy().contains("deps/"))
+            || std::env::current_exe().is_ok_and(|p| is_cargo_test_binary(&p))
         {
             return std::env::temp_dir().join(format!("cui_test_activity_{}.db", std::process::id()));
         }
         crate::path_util::app_data_dir().join("activity.db")
+    }
+}
+
+/// Whether `exe` sits where Cargo puts test binaries, so integration tests
+/// (which link the lib without `cfg(test)`) never touch the live database.
+///
+/// Two layouts: `target/<profile>/deps/<bin>` (Cargo ≤ 1.99) and the build-dir
+/// layout of Cargo 1.100+, `target/<profile>/build/<pkg>/<hash>/out/<bin>`.
+/// Final binaries (`target/<profile>/colima-ui`, installed apps) match neither.
+fn is_cargo_test_binary(exe: &std::path::Path) -> bool {
+    let dirs: Vec<_> = exe
+        .parent()
+        .map_or_default(|p| p.components().map(|c| c.as_os_str()).collect());
+    match dirs.as_slice() {
+        [.., last] if *last == "deps" => true,
+        [.., build, _pkg, _hash, out] => *build == "build" && *out == "out",
+        _ => false,
     }
 }
 
@@ -859,5 +875,26 @@ mod tests {
         let path = db_path();
         assert!(path.starts_with(std::env::temp_dir()));
         assert!(!path.starts_with(crate::path_util::app_data_dir()));
+    }
+
+    #[test]
+    fn test_binaries_are_recognised_in_both_cargo_layouts() {
+        use std::path::Path;
+        // Cargo <= 1.99
+        assert!(is_cargo_test_binary(Path::new(
+            "/r/src-tauri/target/debug/deps/adversarial_m3_challenge-1e34ca7f"
+        )));
+        // Cargo 1.100+ build-dir layout, host and cross target
+        assert!(is_cargo_test_binary(Path::new(
+            "/r/src-tauri/target/debug/build/colima-ui/1811c430/out/adversarial_m3_challenge-1811c430"
+        )));
+        assert!(is_cargo_test_binary(Path::new(
+            "/r/target/aarch64-apple-darwin/debug/build/colima-ui/add5db65/out/x-add5db65"
+        )));
+        // Real app binaries
+        assert!(!is_cargo_test_binary(Path::new("/r/src-tauri/target/debug/colima-ui")));
+        assert!(!is_cargo_test_binary(Path::new(
+            "/Applications/ColimaUI.app/Contents/MacOS/colima-ui"
+        )));
     }
 }
