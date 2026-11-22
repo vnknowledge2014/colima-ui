@@ -152,7 +152,9 @@ fn config_path(home: &Path, profile: &str) -> Result<PathBuf, ColimaError> {
 }
 
 /// As [`config_path`], but the file must exist — so the containment check can
-/// resolve symlinks for real.
+/// resolve the profile directory for real. The file itself may be a symlink
+/// (a dotfiles-managed colima.yaml) and is not resolved: see
+/// `validation::assert_parent_within`.
 fn existing_config_path(home: &Path, profile: &str) -> Result<PathBuf, ColimaError> {
     let path = config_path(home, profile)?;
     if !path.exists() {
@@ -164,7 +166,7 @@ fn existing_config_path(home: &Path, profile: &str) -> Result<PathBuf, ColimaErr
             ),
         ));
     }
-    crate::validation::assert_path_within(home, &path).map_err(ColimaError::validation)?;
+    crate::validation::assert_parent_within(home, &path).map_err(ColimaError::validation)?;
     Ok(path)
 }
 
@@ -506,11 +508,41 @@ pub fn diff(old: &Value, new: &Value) -> Vec<FieldChange> {
 /// Ordering matters: the backup is written and fsynced before the temp file is
 /// renamed over the original, so an interruption at any point leaves either the
 /// original or the original plus a usable `.bak`.
+///
+/// A symlinked config (a dotfiles-managed `colima.yaml`) is written *through*:
+/// renaming over the link would turn it into a regular file and silently detach
+/// the config from wherever the user manages it. The backup still goes beside
+/// the link, inside the colima home, so nothing lasting lands in the user's
+/// dotfiles. Only the temp file sits beside the target, because a rename is
+/// atomic only within one filesystem, and it is gone once the rename lands.
 pub fn write_atomic(home: &Path, profile: &str, doc: &Value) -> Result<String, ColimaError> {
     let path = existing_config_path(home, profile)?;
     let dir = path
         .parent()
         .ok_or_else(|| ColimaError::internal("config path has no parent"))?;
+
+    // Where the bytes actually live: the link's (fully resolved) target, or the
+    // config itself. The user placed the link, so its target is theirs to
+    // point at; the profile directory was already confined to the home above.
+    let is_link = std::fs::symlink_metadata(&path)
+        .map_err(|e| ColimaError::internal(format!("Cannot stat config: {}", e)))?
+        .file_type()
+        .is_symlink();
+    let dest = if is_link {
+        std::fs::canonicalize(&path).map_err(|e| {
+            ColimaError::internal(format!("Cannot resolve symlinked config: {}", e))
+        })?
+    } else {
+        path.clone()
+    };
+    let dest_dir = dest
+        .parent()
+        .ok_or_else(|| ColimaError::internal("config target has no parent"))?;
+    let dest_name = dest
+        .file_name()
+        .ok_or_else(|| ColimaError::internal("config target has no file name"))?
+        .to_string_lossy()
+        .to_string();
 
     let serialized = serde_yml::to_string(doc)
         .map_err(|e| ColimaError::internal(format!("Cannot serialize config: {}", e)))?;
@@ -520,21 +552,39 @@ pub fn write_atomic(home: &Path, profile: &str, doc: &Value) -> Result<String, C
         .map_or(0, |d| d.as_secs());
     let backup = dir.join(format!("colima.yaml.{}.bak", stamp));
     crate::validation::assert_path_within(home, &backup).map_err(ColimaError::validation)?;
-    std::fs::copy(&path, &backup)
+    // Copies the target's content; the backup itself is a regular file.
+    std::fs::copy(&dest, &backup)
         .map_err(|e| ColimaError::internal(format!("Cannot write backup: {}", e)))?;
 
-    let tmp = dir.join(format!("colima.yaml.{}.tmp", stamp));
-    crate::validation::assert_path_within(home, &tmp).map_err(ColimaError::validation)?;
+    let tmp = if is_link {
+        // Hidden, so a dotfiles repo's status never shows it mid-write.
+        dest_dir.join(format!(".{}.{}.tmp", dest_name, stamp))
+    } else {
+        let tmp = dir.join(format!("colima.yaml.{}.tmp", stamp));
+        crate::validation::assert_path_within(home, &tmp).map_err(ColimaError::validation)?;
+        tmp
+    };
     {
         let mut file = std::fs::File::create(&tmp)
             .map_err(|e| ColimaError::internal(format!("Cannot create temp file: {}", e)))?;
-        file.write_all(serialized.as_bytes())
-            .map_err(|e| ColimaError::internal(format!("Cannot write temp file: {}", e)))?;
-        file.sync_all()
-            .map_err(|e| ColimaError::internal(format!("Cannot fsync temp file: {}", e)))?;
+        let written = file
+            .write_all(serialized.as_bytes())
+            .and_then(|()| {
+                // Keep the target's mode: a rename swaps in the temp file's.
+                let perms = std::fs::metadata(&dest)?.permissions();
+                file.set_permissions(perms)
+            })
+            .and_then(|()| file.sync_all());
+        if let Err(e) = written {
+            let _ = std::fs::remove_file(&tmp);
+            return Err(ColimaError::internal(format!(
+                "Cannot write temp file: {}",
+                e
+            )));
+        }
     }
 
-    std::fs::rename(&tmp, &path).map_err(|e| {
+    std::fs::rename(&tmp, &dest).map_err(|e| {
         // Leave nothing half-written behind if the rename itself failed.
         let _ = std::fs::remove_file(&tmp);
         ColimaError::internal(format!("Cannot replace config: {}", e))
@@ -1058,6 +1108,76 @@ customFutureKey: preserved
         assert_eq!(changes[0].field, "mountType");
         assert_eq!(changes[0].from, None);
         assert_eq!(changes[0].to.as_deref(), Some("virtiofs"));
+    }
+
+    /// A home whose default/colima.yaml is a symlink to a file outside it (the
+    /// dotfiles layout). Returns the home and the link target.
+    #[cfg(unix)]
+    fn symlinked_home(config: &str) -> (tempdir::Home, std::path::PathBuf) {
+        let home = temp_home(config);
+        let target = home.path().join("dotfiles-colima.yaml");
+        let link = home.path().join("default").join("colima.yaml");
+        std::fs::rename(&link, &target).unwrap();
+        std::os::unix::fs::symlink(&target, &link).unwrap();
+        (home, target)
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn read_raw_reads_a_symlinked_config() {
+        let (home, _target) = symlinked_home(FULL_CONFIG);
+        let (doc, _mtime) = read_raw(home.path(), "default").expect("symlinked config readable");
+        assert_eq!(get_path(&doc, "cpu").and_then(|v| v.as_u64()), Some(2));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn write_atomic_writes_through_a_symlinked_config_and_keeps_the_link() {
+        use std::os::unix::fs::PermissionsExt;
+        let (home, target) = symlinked_home(FULL_CONFIG);
+        std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o640)).unwrap();
+        let (mut doc, _) = read_raw(home.path(), "default").unwrap();
+        apply_changes(
+            &mut doc,
+            &ConfigChanges {
+                cpu: Some(6),
+                ..Default::default()
+            },
+        );
+
+        let backup = write_atomic(home.path(), "default", &doc).expect("write through");
+
+        let link = home.path().join("default").join("colima.yaml");
+        assert!(
+            std::fs::symlink_metadata(&link)
+                .unwrap()
+                .file_type()
+                .is_symlink(),
+            "the link must survive"
+        );
+        assert_eq!(std::fs::read_link(&link).unwrap(), target);
+
+        // The change landed in the target, and reads back through the link.
+        let (after, _) = read_raw(home.path(), "default").unwrap();
+        assert_eq!(get_path(&after, "cpu").and_then(|v| v.as_u64()), Some(6));
+        assert_eq!(
+            std::fs::metadata(&target).unwrap().permissions().mode() & 0o777,
+            0o640,
+            "the target's mode must be kept"
+        );
+
+        // The backup holds the old content, beside the link, not the target.
+        assert_eq!(std::fs::read_to_string(&backup).unwrap(), FULL_CONFIG);
+        assert!(std::path::Path::new(&backup).starts_with(home.path().join("default")));
+        assert_eq!(home.backups("default").len(), 1);
+
+        // Nothing left beside the target.
+        let beside_target: Vec<_> = std::fs::read_dir(target.parent().unwrap())
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().to_string())
+            .filter(|n| n.contains(".tmp") || n.contains(".bak"))
+            .collect();
+        assert!(beside_target.is_empty(), "{beside_target:?}");
     }
 
     #[test]
